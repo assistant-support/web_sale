@@ -76,6 +76,6 @@ export async function middleware(request) {
 export const config = {
   matcher: [
     // Loại luôn /form ra khỏi middleware để tối ưu
-    "/((?!api/action|api/resetgetuid|api/auth|form|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/idata|api/action|api/resetgetuid|api/auth|form|_next/static|_next/image|favicon.ico).*)",
   ],
 };
