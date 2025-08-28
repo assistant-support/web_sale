@@ -6,7 +6,6 @@ import {
     createAreaAction,
     updateAreaAction,
     deleteAreaAction,
-    syncCustomersFromSheetAction,
 } from '@/app/actions/data.actions';
 
 import AlertPopup from '@/components/(features)/(noti)/alert';
@@ -258,17 +257,6 @@ export default function SettingData({ data }) {
     const handleSyncSubmit = useCallback(
         async (e) => {
             e.preventDefault();
-            await run(
-                async () => {
-                    const res = await syncCustomersFromSheetAction(undefined, undefined);
-                    return { ok: res?.status === true, message: res?.message };
-                },
-                {
-                    loadingText: 'Đang nhận dữ liệu từ Google Sheet…',
-                    silentOnSuccess: false,
-                    refreshOnSuccess: true,
-                }
-            );
         },
         [run]
     );
