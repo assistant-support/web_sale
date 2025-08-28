@@ -5,13 +5,13 @@ import styles from "./admin.module.css";
 import CampaignLabels from "./components/CampaignLabels";
 import CampaignTable from "./components/CampaignTable";
 import AccountManagement from "./components/Account/AccountManagement";
-import AssignFromSheet from "./components/AssignFromSheet";
 import VariantManagement from "./components/VariantManagement";
 import StatusManagement from "./components/StatusManagement";
 import UserManagement from "./components/UserManagement";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import SettingData from "./components/Data";
 
-export default function AdminPageClient() {
+export default function AdminPageClient({ data }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -52,7 +52,7 @@ export default function AdminPageClient() {
       case "users":
         return <UserManagement />;
       case "assign":
-        return <AssignFromSheet />;
+        return <SettingData data={data} />;
       default:
         return <CampaignTable mode="running" />;
     }
@@ -64,9 +64,8 @@ export default function AdminPageClient() {
         {menuItems.map((item) => (
           <button
             key={item.key}
-            className={`${styles.tabMenuItem} ${
-              activeTab === item.key ? styles.active : ""
-            }`}
+            className={`${styles.tabMenuItem} ${activeTab === item.key ? styles.active : ""
+              }`}
             onClick={() => handleTabChange(item.key)}
           >
             {item.label}

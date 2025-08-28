@@ -22,7 +22,6 @@ const NAV_ITEMS = [
     label: "Chăm sóc",
     roles: ["Admin", "Employee"],
   },
-  { href: "/dev", icon: Svg_Dev, label: "Dev", roles: ["Admin"] },
   { href: "/admin", icon: Svg_Admin, label: "Admin", roles: ["Admin"] },
 ];
 

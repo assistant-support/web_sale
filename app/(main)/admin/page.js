@@ -1,6 +1,8 @@
 // ** MODIFIED: Loại bỏ toàn bộ việc lấy dữ liệu ban đầu
+import { form_data } from "@/data/form_database/wraperdata.db";
 import AdminPageClient from "./AdminPageClient";
 
 export default async function AdminPage() {
-  return <AdminPageClient />;
+  const dataForm = await form_data()
+  return <AdminPageClient data={dataForm} />;
 }

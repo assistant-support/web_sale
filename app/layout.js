@@ -1,5 +1,6 @@
 // app/layout.js
 import "@/styles/all.css";
+import '@/styles/font.css'
 import { PanelProvider } from "@/contexts/PanelContext";
 import { CampaignProvider } from "@/contexts/CampaignContext";
 

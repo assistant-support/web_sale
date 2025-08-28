@@ -62,13 +62,12 @@ const CustomerSchema = new Schema(
       ref: "status",
     },
     stageLevel: { type: Number, default: 0 },
-
-    // Mảng lưu trữ các bình luận/ghi chú về quá trình chăm sóc.
     comments: [CommentSchema],
-
-    // Mảng chứa các nhân viên được gán để chăm sóc khách hàng này.
     users: [{ type: Schema.Types.ObjectId, ref: "user" }],
     action: [ActionRefSchema],
+    source: { type: Schema.Types.ObjectId, ref: "form" },
+    area: { type: String },
+    age: { type: String },
   },
   {
     timestamps: true,

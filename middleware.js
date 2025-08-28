@@ -73,17 +73,9 @@ export async function middleware(request) {
   }
 }
 
-// Cấu hình để middleware chạy trên TẤT CẢ các đường dẫn, trừ các file tĩnh
 export const config = {
   matcher: [
-    /*
-     * Khớp với tất cả các đường dẫn YÊU CẦU XÁC THỰC, NGOẠI TRỪ những đường dẫn:
-     * - /api/action (CRON job của chúng ta)
-     * - /api/auth/... (các API đăng nhập, đăng ký)
-     * - _next/static (các file static)
-     * - _next/image (tối ưu hóa hình ảnh)
-     * - favicon.ico (icon của trang)
-     */
-    "/((?!api/action|api/resetgetuid|api/auth|_next/static|_next/image|favicon.ico).*)",
+    // Loại luôn /form ra khỏi middleware để tối ưu
+    "/((?!api/action|api/resetgetuid|api/auth|form|_next/static|_next/image|favicon.ico).*)",
   ],
 };
