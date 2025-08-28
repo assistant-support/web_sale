@@ -37,7 +37,7 @@ ENV GOOGLE_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQE
 ENV GOOGLE_PROJECT_ID="systemair-441909"
 ENV token='sys1'
 ENV GOOGLE_CLIENT_EMAIL='air-900@systemair-441909.iam.gserviceaccount.com'
-ENV URL="http://localhost:4001/"
+ENV URL="http://localhost:4002/"
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -51,8 +51,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 4001
+EXPOSE 4002
 
-ENV PORT=4001
+ENV PORT=4002
 ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
