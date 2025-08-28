@@ -25,7 +25,6 @@ export async function getCombinedData(params) {
 
             // Luôn sử dụng Customer model
             const filterConditions = [];
-            filterConditions.push({ 'status': { $ne: 1 } }); // Giữ lại logic này nếu 'status: 1' là trạng thái đã chuyển đổi
             if (query) {
                 filterConditions.push({ $or: [{ name: { $regex: query, $options: 'i' } }, { phone: { $regex: query, $options: 'i' } }, { nameparent: { $regex: query, $options: 'i' } }] });
             }

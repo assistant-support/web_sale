@@ -1,7 +1,7 @@
 'use server'
 
 import { getAreaOne, getAreaAll } from '@/data/database/area'
-import { getUserAll, getUserOne, getUserReport } from '@/data/database/user'
+import { getUserAll, getUserOne } from '@/data/database/user'
 import { getLabelAll } from '../database/label'
 import { getFormAll } from '../database/form'
 import { getZaloAll, getZaloOne } from '../database/zalo'
@@ -21,7 +21,7 @@ export async function zalo_data(_id) {
 
 export async function user_data({ _id = null }) {
     console.log(_id);
-    
+
     if (_id) {
         return await getUserOne(_id)
     } else {

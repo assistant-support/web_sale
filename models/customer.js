@@ -32,8 +32,7 @@ const FormSchema = new Schema(
             type: [{ type: Schema.Types.ObjectId, ref: 'user', required: true }],
             default: []
         },
-        status: { type: Number, default: 0 }, // 0: chưa có kết quả, 1: nhập học, 2: Không quan tâm, 3: Tạm thời không quan tâm
-
+        status: { type: Number, default: 0 }, // 0: mới, 1: tiềm năng, 2: Đã liên hệ, 3: Chốt đơn, 4: Từ chối
     },
     { timestamps: false, versionKey: false }
 )

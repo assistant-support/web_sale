@@ -462,6 +462,9 @@
 
 .mainform {
     padding: 16px;
+    flex: 1;
+    overflow: hidden;
+    overflow-y: auto;
 }
 
 .updateForm {
@@ -492,4 +495,148 @@
     .actionsGrid {
         grid-template-columns: 1fr;
     }
+}
+
+.appointmentForm {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    /* Khoảng cách giữa các nhóm input */
+    width: 100%;
+}
+
+/* Nhóm cho từng input để dễ quản lý */
+.formInputGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Khoảng cách nhỏ nếu bạn muốn thêm <label> sau này */
+    width: 100%;
+}
+
+/* Container cho nút bấm, đẩy nút sang bên phải */
+.formActionContainer {
+    display: flex;
+    justify-content: flex-end;
+    /* Đẩy nút về phía cuối (bên phải) */
+    margin-top: 8px;
+    /* Thêm một chút khoảng cách phía trên nút */
+}
+
+/* =========================================== */
+/* CSS CHO COMPONENT QUẢN LÝ LỊCH HẸN (MỚI)    */
+/* =========================================== */
+
+/* Container chính bao bọc toàn bộ khu vực quản lý */
+.appointmentManager {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    /* Khoảng cách giữa khu vực "Tạo mới" và "Danh sách" */
+}
+
+/* Kiểu chung cho mỗi khu vực (section) */
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ------------------------------------------- */
+/* 1. CSS CHO FORM TẠO LỊCH HẸN                */
+/* ------------------------------------------- */
+
+/* Container chính của form, sắp xếp các phần tử theo chiều dọc */
+.appointmentForm {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    /* Khoảng cách giữa các nhóm input */
+    width: 100%;
+}
+
+/* Nhóm cho từng input để dễ quản lý */
+.formInputGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Khoảng cách nhỏ nếu bạn muốn thêm <label> sau này */
+    width: 100%;
+}
+
+/* Container cho nút bấm, đẩy nút sang bên phải */
+.formActionContainer {
+    display: flex;
+    justify-content: flex-end;
+    /* Đẩy nút về phía cuối (bên phải) */
+    margin-top: 8px;
+    /* Thêm một chút khoảng cách phía trên nút */
+}
+
+
+/* ------------------------------------------- */
+/* 2. CSS CHO DANH SÁCH LỊCH HẸN               */
+/* ------------------------------------------- */
+
+/* Container cho danh sách lịch hẹn, có thanh cuộn nếu quá dài */
+.appointmentList {
+    max-height: 400px;
+    /* Giới hạn chiều cao */
+    overflow-y: auto;
+    /* Thêm thanh cuộn dọc khi cần */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-right: 8px;
+    /* Thêm khoảng trống để thanh cuộn không che nội dung */
+}
+
+/* Kiểu cho từng mục (item) trong danh sách */
+.appointmentItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-radius: 6px;
+    background-color: var(--bg-primary);
+    /* Màu nền nhẹ */
+    border: 1px solid var(--border-color);
+}
+
+/* Phần chứa thông tin chính của lịch hẹn */
+.appointmentInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Phần chứa các nút hành động (Hoàn thành, Vắng mặt, Hủy) */
+.appointmentActions {
+    display: flex;
+    gap: 8px;
+}
+
+/* CSS cho các nút nhỏ trong danh sách lịch hẹn */
+/* Giả định bạn đã có các class này hoặc có thể tạo mới */
+.appointmentActions .btn-small-success,
+.appointmentActions .btn-small-warning,
+.appointmentActions .btn-small-danger {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: var(--font-size-xxs);
+    color: white;
+}
+
+.appointmentActions .btn-small-success {
+    background-color: var(--green);
+}
+
+.appointmentActions .btn-small-warning {
+    background-color: var(--yellow);
+}
+
+.appointmentActions .btn-small-danger {
+    background-color: var(--red);
 }

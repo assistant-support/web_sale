@@ -42,7 +42,7 @@ export default function FilterControls({
     const staticOptions = useMemo(() => ({
         uidStatus: [{ value: 'true', name: 'Đã có' }, { value: 'not_searched', name: 'Chưa tìm' }, { value: 'not_found', name: 'Không có' }],
         campaignStatus: [{ value: 'true', name: 'Đang chạy' }, { value: 'false', name: 'Không chạy' }],
-        careStatus: [{ value: '4', name: 'Đang chăm sóc' }, { value: '0', name: 'Chưa có kết quả' }, { value: '2', name: 'Không quan tâm' }, { value: '3', name: 'Tạm thời không quan tâm' }]
+        careStatus: [{ value: '4', name: 'Từ chối' }, { value: '0', name: 'Mới' }, { value: '2', name: 'Đã liên hệ' }, { value: '3', name: 'Chốt đơn' }, { value: '1', name: 'Tiềm năng' }]
     }), []);
     const getSelectedName = useCallback((param, data, defaultText, keyField = '_id', nameField = 'name') => {
         const value = searchParams.get(param);

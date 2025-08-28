@@ -8,6 +8,7 @@ import Variant from "@/models/variant";
 import Logs from "@/models/log";
 import { actionZalo, sendGP } from "@/function/drive/appscript";
 import { formatMessage } from "@/app/api/(zalo)/action/route";
+import { revalidateData } from "@/app/actions/customer.actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,7 @@ export async function POST(req) {
       name: data?.name, bd: data?.bd, email: data?.email, phone, nameparent: data?.nameparent, area: data?.area, source: data?.source, roles: selectedZalo.roles || [],
     });
     console.log(`[Create Customer] Đã tạo khách hàng mới: ${String(doc._id)} với SĐT: ${phone}`);
+    revalidateData();
     const response = NextResponse.json({
       status: true, message: "created_and_processing_in_background", data: { id: doc._id, phone },
     });
@@ -157,7 +159,7 @@ export async function POST(req) {
                   error_message: renameResponse.content?.error_message,
                 },
               },
-              type: "addFriend", // Dùng một type hợp lệ từ enum, ví dụ addFriend
+              type: "tag", // Dùng một type hợp lệ từ enum, ví dụ addFriend
               createBy: '68b0af5cf58b8340827174e0',
               customer: customerId,
               zalo: selectedZalo._id,
@@ -183,10 +185,9 @@ export async function POST(req) {
                 });
                 // --- Log cho hành động sendMessage ---
                 await Logs.create({
-                  message: finalMessageToSend,
                   status: {
                     status: sendMessageResponse.status,
-                    message: sendMessageResponse.content?.error_message || sendMessageResponse.message,
+                    message: finalMessageToSend || 'Không có tin nhắn gửi đi',
                     data: {
                       error_code: sendMessageResponse.content?.error_code,
                       error_message: sendMessageResponse.content?.error_message,
