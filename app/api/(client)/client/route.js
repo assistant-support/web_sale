@@ -77,7 +77,7 @@ export async function POST(request) {
     }
 
     // Gán cứng ID và Range của Google Sheet
-    const spreadsheetId = "1H5Z1OJxzvk39vjtrdDYzESU61NV7DGPw6K_iD97nh7U";
+    const spreadsheetId = "1QOHqG1wvV-oDoPAxSDw37hfP0AHctPYpHxyJlHenZJY";
     const range = "Data!A:K";
 
     // Thiết lập các hằng số động

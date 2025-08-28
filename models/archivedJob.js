@@ -45,6 +45,10 @@ const ArchivedJobSchema = new Schema(
       ref: "user",
       required: true,
     },
+    lastExecutionResult: {
+      type: String,
+      default: null,
+    },
   },
   {
     // Tắt việc tự động tạo _id

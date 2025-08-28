@@ -52,7 +52,7 @@ export default function AssignZaloPanel({ user, onSuccess }) {
     });
   };
 
-  const handleZaloDoubleClick = (account) => {
+  const handleZaloClick = (account) => {
     const panelId = `zalo-details-${account._id}`;
     openPanel({
       id: panelId,
@@ -78,7 +78,7 @@ export default function AssignZaloPanel({ user, onSuccess }) {
               <div
                 key={acc._id}
                 className={`${styles.listItem} ${styles.listItemAction}`}
-                onDoubleClick={() => handleZaloDoubleClick(acc)}
+                onClick={() => handleZaloClick(acc)}
               >
                 <ZaloDisplay
                   name={acc.name}

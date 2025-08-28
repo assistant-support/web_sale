@@ -87,6 +87,11 @@ export default function ScheduleDetailPanel({
   const st = job.statistics || { total: 0, completed: 0, failed: 0 };
   const tasks = job.tasks || [];
 
+  // ++ ADDED: Tính toán số lượng task đang ở trạng thái 'pending'
+  const pendingTaskCount = tasks.filter(
+    (task) => task.status === "pending",
+  ).length;
+
   return (
     <div className={styles.panelContainer}>
       <div className={styles.progressSection}>
@@ -117,6 +122,12 @@ export default function ScheduleDetailPanel({
           label="Tốc độ"
           value={`${job.config?.actionsPerHour || 50} hđ/giờ`}
         />
+        {/* ++ ADDED: Hiển thị kết quả thực thi cuối cùng */}
+        <InfoRow
+          icon="📋"
+          label="Kết quả cuối"
+          value={job.lastExecutionResult}
+        />
         <InfoRow
           icon="⏰"
           label="Tạo lúc"
@@ -141,7 +152,8 @@ export default function ScheduleDetailPanel({
 
       <div className={styles.actionsContainer}>
         <ActionButton
-          label={`Hàng đợi (${tasks.length})`}
+          // ** MODIFIED: Sử dụng biến đếm mới `pendingTaskCount`
+          label={`Hàng đợi (${pendingTaskCount})`}
           icon="👥"
           onClick={handleOpenQueuePanel}
           disabled={isArchived}

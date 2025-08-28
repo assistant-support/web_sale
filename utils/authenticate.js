@@ -1,12 +1,13 @@
 // utils/authenticate.js
 
-export default async function authenticate(request) {
+export default async function authenticate(request, d) {
   // Lấy thông tin user từ header 'x-user-payload'
-  const userPayloadHeader = request.headers.get("x-user-payload");
-
-  if (!userPayloadHeader) {
-    // Lỗi này có nghĩa là middleware đã không chạy hoặc không tìm thấy token
-    throw new Error("Token không được cung cấp trong cookie");
+  if (!d) {
+    const userPayloadHeader = request.headers.get("x-user-payload");
+    if (!userPayloadHeader) {
+      // Lỗi này có nghĩa là middleware đã không chạy hoặc không tìm thấy token
+      throw new Error("Token không được cung cấp trong cookie");
+    }
   }
 
   try {

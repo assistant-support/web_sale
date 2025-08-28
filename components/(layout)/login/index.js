@@ -60,6 +60,7 @@ const LoginPage = () => {
             className={styles.inputField}
             required
             disabled={isPending}
+            
           />
         </div>
         <div className={styles.inputGroup}>
@@ -73,6 +74,7 @@ const LoginPage = () => {
             className={styles.inputField}
             required
             disabled={isPending}
+            
           />
         </div>
 

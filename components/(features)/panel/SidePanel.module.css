@@ -11,9 +11,7 @@
   /* Thêm các thuộc tính này để định vị panel */
   position: fixed;
   top: 0;
-
-  /* Hiệu ứng chuyển động */
-  transition: transform 0.3s ease-in-out;
+  transition: right 0.3s ease-in-out;
 }
 
 /* Header của panel */

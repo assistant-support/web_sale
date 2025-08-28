@@ -5,14 +5,20 @@ const TaskSchema = new Schema({
     type: {
       name: String,
       phone: String,
-      uid: String,
+      // ** MODIFIED: Thay đổi kiểu dữ liệu để chấp nhận mảng uid
+      uid: Schema.Types.Mixed,
     },
     required: true,
   },
+  status: {
+    type: String,
+    enum: ["pending", "processing", "completed", "failed"],
+    default: "pending",
+  },
   processingId: {
-    type: String, 
+    type: String,
     default: null,
-    index: true, 
+    index: true,
   },
   processedAt: {
     type: Date,
@@ -29,6 +35,11 @@ const ScheduledJobSchema = new Schema(
       type: String,
       required: [true, "Vui lòng nhập tên lịch trình."],
       trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["scheduled", "processing", "completed", "failed", "paused"],
+      default: "scheduled",
     },
     actionType: {
       type: String,
@@ -64,6 +75,10 @@ const ScheduledJobSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "user",
       required: true,
+    },
+    lastExecutionResult: {
+      type: String,
+      default: null,
     },
   },
   {

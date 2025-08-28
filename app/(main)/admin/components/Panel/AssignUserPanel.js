@@ -19,7 +19,7 @@ export default function AssignUserPanel({ account, onSuccess }) {
   const [isPending, startTransition] = useTransition();
   const { openPanel, closePanel: closeGrandChildPanel } = usePanels();
 
-  const handleUserDoubleClick = (user) => {
+  const handleUserClick = (user) => {
     const panelId = `user-details-${user._id}`;
     openPanel({
       id: panelId,
@@ -80,7 +80,7 @@ export default function AssignUserPanel({ account, onSuccess }) {
               <div
                 key={user._id}
                 className={`${styles.listItem} ${styles.listItemAction}`}
-                onDoubleClick={() => handleUserDoubleClick(user)}
+                onClick={() => handleUserClick(user)}
               >
                 <UserTag user={user} />
                 <button

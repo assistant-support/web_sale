@@ -1,15 +1,22 @@
 // app/(main)/admin/components/CampaignTable/index.js
 "use client";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+// ** MODIFIED: Thêm useRef vào import
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { usePanels } from "@/contexts/PanelContext";
 import ScheduleDetailPanel from "../Panel/ScheduleDetailPanel";
 import StackedProgressBar from "../shared/StackedProgressBar";
 import { getRunningJobs, getArchivedJobs } from "@/app/actions/campaignActions";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import PaginationControls from "../shared/PaginationControls";
-import DataTable from "../datatable/DataTable"; // ++ ADDED: Import DataTable
+import DataTable from "../datatable/DataTable";
 import ZaloDisplay from "../shared/ZaloDisplay";
-import UserTag from "../shared/UserTag"; // ++ ADDED: Import ZaloDisplay
+import UserTag from "../shared/UserTag";
 
 // Component TimeCell vẫn được giữ lại để xử lý logic thời gian phức tạp
 const TimeCell = ({ job, mode }) => {
@@ -68,6 +75,16 @@ export default function CampaignTable({ mode }) {
   const [pagination, setPagination] = useState({});
   const [isLoading, setIsLoading] = useState(true);
 
+  // ++ ADDED: State và Ref cho việc tự động làm mới và highlight
+  const [highlightedId, setHighlightedId] = useState(null);
+  const prevJobsRef = useRef([]);
+  const paginationRef = useRef(pagination);
+
+  // ++ ADDED: Cập nhật ref mỗi khi pagination thay đổi
+  useEffect(() => {
+    paginationRef.current = pagination;
+  }, [pagination]);
+
   const activeJobIds = useMemo(() => {
     return (allActivePanels || [])
       .filter((panel) => panel.id.startsWith("schedule-detail-"))
@@ -76,27 +93,57 @@ export default function CampaignTable({ mode }) {
 
   // ++ ADDED: Hàm lấy dữ liệu dựa trên 'mode'
   const fetchData = useCallback(
-    async (page = 1, limit = 10) => {
-      setIsLoading(true);
+    async (page = 1, limit = 10, isInitialLoad = false) => {
+      // Chỉ hiển thị loading toàn trang ở lần tải đầu tiên
+      if (isInitialLoad) setIsLoading(true);
+
       const fetcher = mode === "running" ? getRunningJobs : getArchivedJobs;
       const result = await fetcher({ page, limit });
 
       if (result.success) {
+        // ++ ADDED: Logic so sánh để highlight
+        if (
+          !isInitialLoad &&
+          mode === "archived" &&
+          result.data.length > 0 &&
+          prevJobsRef.current.length > 0
+        ) {
+          const newTopJob = result.data[0];
+          const oldTopJob = prevJobsRef.current[0];
+          if (newTopJob._id !== oldTopJob._id) {
+            setHighlightedId(newTopJob._id);
+            setTimeout(() => setHighlightedId(null), 2500); // Tắt highlight sau 2.5s
+          }
+        }
+
         setJobs(result.data);
         setPagination(result.pagination);
+        prevJobsRef.current = result.data; // Cập nhật danh sách cũ
       } else {
         alert(`Lỗi tải dữ liệu: ${result.error}`);
       }
-      setIsLoading(false);
+
+      if (isInitialLoad) setIsLoading(false);
     },
     [mode],
   );
 
   useEffect(() => {
-    fetchData();
+    fetchData(1, 10, true);
   }, [fetchData]);
+
+  // ++ ADDED: useEffect này chỉ chạy 1 lần để thiết lập interval
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const { page, limit } = paginationRef.current;
+      fetchData(page || 1, limit || 10, false);
+    }, 10000); // 10 giây
+
+    return () => clearInterval(intervalId);
+  }, [fetchData]);
+
   const handleDataRefresh = useCallback(() => {
-    fetchData(pagination.page, pagination.limit);
+    fetchData(pagination.page, pagination.limit, false);
   }, [fetchData, pagination]);
 
   const handleOpenDetail = useCallback(
@@ -150,6 +197,25 @@ export default function CampaignTable({ mode }) {
       cell: (item) => <UserTag user={item.createdBy} />,
     },
     { header: "Hành động", accessor: "actionType", width: "0.7fr" },
+    // ++ ADDED: Cột mới để hiển thị kết quả self-healing
+    {
+      header: "Kết quả cuối",
+      accessor: "lastExecutionResult",
+      width: "1.2fr",
+      cell: (item) => (
+        <span
+          style={{
+            fontSize: "11px",
+            color: "#475569",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+          title={item.lastExecutionResult}
+        >
+          {item.lastExecutionResult || "Chưa có"}
+        </span>
+      ),
+    },
     {
       header: "Thời gian",
       accessor: "createdAt",
@@ -168,13 +234,16 @@ export default function CampaignTable({ mode }) {
         <DataTable
           columns={columns}
           data={jobs}
-          onRowDoubleClick={handleOpenDetail}
-          activeRowId={activeJobIds}
-          // Không có Add/Delete nên không truyền prop
+          onRowClick={handleOpenDetail}
+          activeRowId={[...activeJobIds, highlightedId].filter(Boolean)}
         />
       </div>
       <div style={{ flexShrink: 0 }}>
-        <PaginationControls pagination={pagination} onPageChange={fetchData} />
+        {/* ** MODIFIED: Cập nhật onPageChange để không trigger full loading */}
+        <PaginationControls
+          pagination={pagination}
+          onPageChange={(page, limit) => fetchData(page, limit, false)}
+        />
       </div>
     </div>
   );

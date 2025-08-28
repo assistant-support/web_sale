@@ -117,11 +117,11 @@ export default function StatusManagement() {
         <DataTable
           columns={columns}
           data={statuses}
-          onRowDoubleClick={handleOpenEditor}
+          onRowClick={handleOpenEditor}
           onAddItem={() => handleOpenEditor(null)}
           onDeleteItem={handleDelete}
           showActions={true}
-          activeRowId={activeStatusIds} // ** MODIFIED: Truyền danh sách ID vào prop
+          activeRowId={activeStatusIds}
         />
       </div>
       <div style={{ flexShrink: 0 }}>

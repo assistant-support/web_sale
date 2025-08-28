@@ -12,7 +12,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import styles from "./index.module.css";
 import Setting from "./ui/setting";
 import { usePanels } from "@/contexts/PanelContext";
-import CustomerDetails from "./ui/details/CustomerDetails"; // Import nội dung chi tiết khách hàng
+import CustomerDetails from "./ui/details/CustomerDetails";
 import StageIndicator from "@/components/(ui)/progress/StageIndicator";
 import Loading from "@/components/(ui)/(loading)/loading";
 import dynamic from "next/dynamic";
@@ -84,6 +84,7 @@ const Row = React.memo(function Row({
   onRowClick,
   isUpdated,
   isActive,
+  activeZaloId,
 }) {
   const getLookupStatusType = (tinhTrang) => {
     if (tinhTrang === "Không có thông tin" || tinhTrang === "Lỗi tra cứu")
@@ -93,27 +94,69 @@ const Row = React.memo(function Row({
     if (tinhTrang) return "found";
     return "not-found";
   };
-  const renderUidBadge = (uid) => {
-    // Trường hợp 1: Có UID hợp lệ
-    if (uid && /^\d+$/.test(uid)) {
+  const renderUidBadge = (uidArray) => {
+    // ++ ADDED: Dòng code cốt lõi để sửa lỗi
+    // Nếu uidArray không phải là một mảng, hãy coi nó là một mảng rỗng.
+    const safeUidArray = Array.isArray(uidArray) ? uidArray : [];
+
+    // Trường hợp 1: Có tài khoản Zalo đang active
+    if (activeZaloId) {
+      // ** MODIFIED: Sử dụng mảng đã được làm sạch
+      const entry = safeUidArray.find((u) => u.zaloId === activeZaloId);
+      if (!entry) {
+        return (
+          <p className={styles.uidBadge} data-found="false">
+            - Chưa tìm
+          </p>
+        );
+      }
+      if (entry.uid && /^\d+$/.test(entry.uid)) {
+        return (
+          <p className={styles.uidBadge} data-found="true" title={entry.uid}>
+            ✅ Đã có
+          </p>
+        );
+      }
       return (
-        <p className={styles.uidBadge} data-found="true" title={uid}>
-          ✅ Đã có
+        <p className={styles.uidBadge} data-found="error" title={entry.uid}>
+          ❌ Lỗi
         </p>
       );
     }
-    // Trường hợp 2: Chưa tìm hoặc bị rate limit
-    if (uid === null || uid === "") {
+
+    // Trường hợp 2: Không có tài khoản Zalo active (tổng hợp)
+    // ** MODIFIED: Sử dụng mảng đã được làm sạch
+    if (safeUidArray.length === 0) {
       return (
         <p className={styles.uidBadge} data-found="false">
           - Chưa tìm
         </p>
       );
     }
-    // Trường hợp 3: Có lỗi tìm kiếm
+
+    // ** MODIFIED: Sử dụng mảng đã được làm sạch
+    const foundCount = safeUidArray.filter((u) => /^\d+$/.test(u.uid)).length;
+    const errorExists = safeUidArray.some((u) => !/^\d+$/.test(u.uid));
+
+    if (errorExists) {
+      return (
+        <p className={styles.uidBadge} data-found="error">
+          ❌ Lỗi ({safeUidArray.length})
+        </p>
+      );
+    }
+
+    if (foundCount > 0) {
+      return (
+        <p className={styles.uidBadge} data-found="true">
+          ✅ Đã có ({foundCount})
+        </p>
+      );
+    }
+
     return (
-      <p className={styles.uidBadge} data-found="error" title={uid}>
-        ❌ Lỗi
+      <p className={styles.uidBadge} data-found="false">
+        - Chưa tìm
       </p>
     );
   };
@@ -123,7 +166,7 @@ const Row = React.memo(function Row({
       className={`${styles.gridRow} ${isUpdated ? styles.rowUpdated : ""} ${
         isActive ? styles.activeRow : ""
       }`}
-      onDoubleClick={() => onRowClick(row)}
+      onClick={() => onRowClick(row)}
     >
       <div className={styles.cell} onClick={(e) => e.stopPropagation()}>
         <input
@@ -255,6 +298,7 @@ export default function ClientPage({
       if (name !== "page") {
         params.set("page", "1");
       }
+
       startTransition(() => {
         router.push(`${pathname}?${params.toString()}`);
       });
@@ -273,7 +317,7 @@ export default function ClientPage({
         alert(
           `Trang không hợp lệ. Vui lòng nhập số từ 1 đến ${serverTotalPages}.`,
         );
-        setPageInput(serverPage); // Reset về trang hiện tại
+        setPageInput(serverPage);
       }
     }
   };
@@ -405,8 +449,7 @@ export default function ClientPage({
         title: `Chi tiết: ${customer.name}`,
         props: {
           customerData: customer,
-          onUpdateCustomer: handleUpdateAndReEnrich, // Truyền hàm xử lý duy nhất này
-          //... các props khác không đổi
+          onUpdateCustomer: handleUpdateAndReEnrich,
           statuses: initialStatuses,
           user: user,
           initialLabels: initialLabels,
@@ -562,7 +605,7 @@ export default function ClientPage({
           <label className="text_6">Lọc theo TK tìm UID:</label>
           <select
             className="input"
-            style={{ width: 250, padding: "6px 10px" }} // Tăng chiều rộng một chút
+            style={{ width: 250, padding: "6px 10px" }}
             value={searchParams.get("uidFinder") || ""}
             onChange={(e) => handleNavigation("uidFinder", e.target.value)}
           >
@@ -632,8 +675,8 @@ export default function ClientPage({
             <select
               id="statusFilter"
               className={styles.filterSelect}
-              value={searchParams.get("status") || ""}
-              onChange={(e) => handleNavigation("status", e.target.value)}
+              value={searchParams.get("filterStatus") || ""}
+              onChange={(e) => handleNavigation("filterStatus", e.target.value)}
             >
               <option value="">-- Tất cả --</option>
               <option value="none">Chưa có</option>
@@ -705,6 +748,7 @@ export default function ClientPage({
                   onRowClick={handleRowClick}
                   isUpdated={updatedIds.has(r._id)}
                   isActive={isActive}
+                  activeZaloId={user?.zaloActive?._id}
                 />
               );
             },

@@ -11,7 +11,7 @@ export async function middleware(request) {
 
   if (!token) {
     // THÊM LỐI ĐI RIÊNG: Nếu là API đăng nhập, cho phép đi tiếp
-    if (pathname === "/api/auth/login") {
+    if (pathname === "/api/auth/login" || pathname === "/api/idata") {
       return NextResponse.next();
     }
 
@@ -76,6 +76,6 @@ export async function middleware(request) {
 export const config = {
   matcher: [
     // Loại luôn /form ra khỏi middleware để tối ưu
-    "/((?!api/idata|api/action|api/resetgetuid|api/auth|form|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api|form|_next/static|_next/image|favicon.ico).*)",
   ],
 };

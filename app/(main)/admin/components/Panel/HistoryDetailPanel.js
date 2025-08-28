@@ -66,7 +66,12 @@ export default function HistoryDetailPanel({ panelData: log }) {
         />
         <DetailRow
           label="Thông điệp trả về"
-          value={executionResult.actionMessage || "Không có"}
+          // ** MODIFIED: Hiển thị reasonMessage nếu có cho các trường hợp hủy
+          value={
+            actionDetail.reasonMessage ||
+            executionResult.actionMessage ||
+            "Không có"
+          }
         />
 
         {/*<-----------------Thay đổi: Hiển thị chi tiết cho từng loại hành động----------------->*/}
@@ -83,6 +88,28 @@ export default function HistoryDetailPanel({ panelData: log }) {
         )}
 
         {action === "DO_SCHEDULE_FIND_UID" && renderUidDetails()}
+
+        {/* ++ ADDED: Hiển thị chi tiết cho các hành động hủy */}
+        {action === "AUTO_CANCEL_RATE_LIMIT" && (
+          <DetailRow
+            label="Lý do hủy"
+            value={status.detail?.reason || "Không rõ"}
+          />
+        )}
+
+        {action === "AUTO_CANCEL_ZALO_FAILURE" && (
+          <>
+            <DetailRow
+              label="Lý do hủy"
+              value={status.detail?.reason || "Không rõ"}
+            />
+            <DetailRow
+              label="Lỗi Script gốc"
+              value={status.detail?.scriptError || "Không có"}
+              isObject={true}
+            />
+          </>
+        )}
       </div>
 
       <h4 className={styles.contentTitle}>Dữ liệu gốc từ Script</h4>

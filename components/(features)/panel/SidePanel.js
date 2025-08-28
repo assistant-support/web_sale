@@ -23,9 +23,8 @@ const SidePanel = ({
 
   // Style để định vị panel và tạo hiệu ứng trượt
   const panelStyle = {
-    right: `${rightOffset}px`,
-    transform: isVisible ? "translateX(0)" : "translateX(100%)",
-    zIndex: 1000, // Luôn nằm trên lớp phủ mờ
+    right: isVisible ? `${rightOffset}px` : `-450px`, // 450px là max-width của panel
+    zIndex: 1000,
   };
 
   return createPortal(

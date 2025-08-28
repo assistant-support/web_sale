@@ -20,9 +20,7 @@ export async function POST(request) {
         { status: 400 },
       );
     }
-    let g = await User.find()
-    console.log(g);
-    
+
     const user = await User.findOne({ email }).lean();
     if (!user) {
       return NextResponse.json(
@@ -30,6 +28,9 @@ export async function POST(request) {
         { status: 404 },
       );
     }
+    // console.log("--- Bắt đầu kiểm tra mật khẩu ---");
+    // console.log("Mật khẩu từ form:", password);
+    // console.log("Mật khẩu đã hash trong DB:", user.password);
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
     if (!isPasswordCorrect) {
       return NextResponse.json(

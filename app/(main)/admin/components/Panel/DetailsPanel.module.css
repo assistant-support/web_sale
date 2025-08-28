@@ -181,8 +181,9 @@
 }
 .editGroup {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* ** MODIFIED: Căn các item lên trên */
   gap: 8px;
+  width: 100%; /* ** MODIFIED: Đảm bảo chiếm toàn bộ chiều rộng còn lại */
 }
 .input {
   padding: 6px 10px;
@@ -192,10 +193,42 @@
   width: 100%;
 }
 .textareaScript {
-  width: 250px;
+  width: 100%; /* ** MODIFIED: Cho phép textarea co giãn */
   min-height: 80px;
+  max-height: 150px; /* ** ADDED: Giới hạn chiều cao tối đa và cho phép cuộn */
   resize: vertical;
+  flex-grow: 1; /* ** ADDED: Để nó chiếm không gian thừa */
 }
+
+/* ++ ADDED: Nút xem token */
+.viewTokenBtn {
+  font-size: 12px;
+  padding: 4px 8px;
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0; /* Không cho nút bị co lại */
+}
+
+/* ++ ADDED: Popup xem token */
+.tokenViewer {
+  padding: 24px;
+  width: 90vw;
+  max-width: 800px;
+}
+
+.tokenPre {
+  background-color: #f3f4f6;
+  padding: 16px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
 .collapsibleSection {
   border: 1px solid #e5e7eb;
   border-radius: 8px;

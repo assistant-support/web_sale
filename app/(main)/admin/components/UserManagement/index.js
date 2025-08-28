@@ -186,8 +186,8 @@ export default function UserManagement() {
         <DataTable
           columns={columns}
           data={users}
-          onRowDoubleClick={handleOpenUserDetails}
-          activeRowId={[...activeUserIds, highlightedId].filter(Boolean)} // Kết hợp highlight
+          onRowClick={handleOpenUserDetails}
+          activeRowId={[...activeUserIds, highlightedId].filter(Boolean)}
           showActions={true}
           onAddItem={() => handleOpenUserDetails(null)}
           onDeleteItem={handleDelete}

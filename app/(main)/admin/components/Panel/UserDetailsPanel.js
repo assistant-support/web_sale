@@ -19,7 +19,7 @@ import CustomerDetails from "@/app/(main)/client/ui/details/CustomerDetails"; //
 import CustomerDisplay from "../shared/CustomerDisplay";
 
 // Tái sử dụng các component con từ ZaloDetailsPanel
-const CollapsibleList = ({ title, items, onDoubleClick }) => {
+const CollapsibleList = ({ title, items, onClick }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className={styles.collapsibleSection}>
@@ -43,7 +43,7 @@ const CollapsibleList = ({ title, items, onDoubleClick }) => {
               <div
                 key={acc._id}
                 className={`${styles.listItem} ${styles.listItemAction}`}
-                onDoubleClick={() => onDoubleClick(acc)}
+                onClick={() => onClick(acc)}
               >
                 <ZaloDisplay
                   name={acc.name}
@@ -199,7 +199,7 @@ export default function UserDetailsPanel({ userId, onUpdate, closePanel }) {
       },
     });
   };
-  const handleCustomerDoubleClick = async (customer) => {
+  const handleCustomerClick = async (customer) => {
     if (!customer?._id) return;
     const panelId = `details-${customer._id}`;
 
@@ -221,7 +221,7 @@ export default function UserDetailsPanel({ userId, onUpdate, closePanel }) {
     }
   };
 
-  const handleZaloDoubleClick = (account) => {
+  const handleZaloClick = (account) => {
     const panelId = `zalo-details-${account._id}`;
     openPanel({
       id: panelId,
@@ -333,8 +333,8 @@ export default function UserDetailsPanel({ userId, onUpdate, closePanel }) {
                   </h4>
                   <div
                     className={`${styles.listItem} ${styles.listItemAction}`}
-                    onDoubleClick={() =>
-                      handleCustomerDoubleClick(user.latestAction.customer)
+                    onClick={() =>
+                      handleCustomerClick(user.latestAction.customer)
                     }
                   >
                     <CustomerDisplay
@@ -347,7 +347,7 @@ export default function UserDetailsPanel({ userId, onUpdate, closePanel }) {
               <CollapsibleList
                 title="Tài khoản Zalo được gán"
                 items={user.zaloAccounts || []}
-                onDoubleClick={handleZaloDoubleClick}
+                onClick={handleZaloClick}
               />
             </>
           )

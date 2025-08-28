@@ -43,7 +43,8 @@
 
 .inputField:focus {
   outline: none;
-  border-color: #3b82f6; /* Viền xanh khi focus */
+  border-color: #3b82f6;
+  /* Viền xanh khi focus */
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
@@ -52,7 +53,8 @@
   padding: 14px;
   border: none;
   border-radius: 8px;
-  background-color: #3b82f6; /* Màu nút chính */
+  background-color: #3b82f6;
+  /* Màu nút chính */
   color: white;
   font-size: 16px;
   font-weight: 600;
@@ -62,7 +64,8 @@
 }
 
 .submitButton:hover:not(:disabled) {
-  background-color: #2563eb; /* Màu đậm hơn khi hover */
+  background-color: #2563eb;
+  /* Màu đậm hơn khi hover */
 }
 
 .submitButton:disabled {

@@ -6,7 +6,7 @@ import { Svg_Plus, Svg_Trash } from "@/components/(icon)/svg";
 const DataTable = ({
   columns,
   data,
-  onRowDoubleClick,
+  onRowClick,
   onDeleteItem,
   onAddItem,
   showActions = false,
@@ -67,7 +67,7 @@ const DataTable = ({
                   isActive ? styles.activeRow : ""
                 }`}
                 style={{ gridTemplateColumns: finalGridTemplate }}
-                onDoubleClick={() => onRowDoubleClick(item)}
+                onClick={() => onRowClick(item)}
               >
                 {columns.map(
                   (

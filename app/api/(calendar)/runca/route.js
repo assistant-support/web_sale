@@ -9,6 +9,7 @@ import { revalidateTag } from "next/cache";
 import { logCreateScheduleTask } from "@/app/actions/historyActions";
 import { revalidateAndBroadcast } from "@/lib/revalidation";
 import mongoose from "mongoose";
+import { getCurrentUser } from "@/lib/session";
 
 /**
  * Tính toán lịch trình và trả về cả các task đã xếp lịch và trạng thái "đặt cọc" của tài khoản.
@@ -104,17 +105,19 @@ function schedulePersonsSmart(persons, account, actionsPerHour, actionType) {
 }
 export async function POST(request) {
   const session = await mongoose.startSession();
+
   session.startTransaction();
   try {
     await connectToDatabase();
-    const { user, body } = await authenticate(request);
+    let user = await getCurrentUser();
+    let body = await request.json();
     const { jobName, actionType, config = {}, tasks } = body;
 
     if (!tasks || tasks.length === 0) {
       throw new Error("Không có khách hàng nào được chọn để lên lịch.");
     }
 
-    const dbUser = await User.findById(user.id).populate("zaloActive").lean();
+    const dbUser = await User.findById(user._id).populate("zaloActive").lean();
     if (!dbUser?.zaloActive?._id) {
       throw new Error("Chưa chọn tài khoản Zalo hoạt động.");
     }
@@ -157,7 +160,7 @@ export async function POST(request) {
           config,
           statistics: { total: tasks.length, completed: 0, failed: 0 },
           estimatedCompletionTime: estimatedCompletion,
-          createdBy: user.id,
+          createdBy: user._id,
         },
       ],
       { session },

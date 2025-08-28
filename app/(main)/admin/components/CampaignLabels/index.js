@@ -112,7 +112,7 @@ export default function CampaignLabels() {
         <DataTable
           columns={columns}
           data={labels}
-          onRowDoubleClick={handleOpenEditor}
+          onRowClick={handleOpenEditor}
           onAddItem={() => handleOpenEditor(null)}
           onDeleteItem={handleDelete}
           showActions={true}

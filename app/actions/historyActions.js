@@ -162,7 +162,8 @@ export async function logCreateScheduleTask(user, job, task) {
     zalo: job.zaloAccount,
     status: { status: "SUCCESS" },
     actionDetail: {
-      scheduleId: job._id,
+      // ** MODIFIED: Đảm bảo là ObjectId
+      scheduleId: new mongoose.Types.ObjectId(job._id),
       scheduleName: job.jobName,
       // Chi tiết của riêng task này
       scheduledFor: task.scheduledFor,
@@ -195,7 +196,8 @@ export async function logDeleteScheduleTask(user, job, task) {
     zalo: job.zaloAccount,
     status: { status: "SUCCESS" },
     actionDetail: {
-      scheduleId: job._id.toString(),
+      // ** MODIFIED: Đảm bảo là ObjectId
+      scheduleId: new mongoose.Types.ObjectId(job._id),
       scheduleName: job.jobName,
       removedPerson: {
         name: task.person.name,
@@ -221,7 +223,7 @@ export async function logExecuteScheduleTask({
   customerId,
   statusName,
   executionResult,
-  finalMessage, // Tham số mới
+  finalMessage,
 }) {
   try {
     const actionTypeMap = {
@@ -244,13 +246,14 @@ export async function logExecuteScheduleTask({
       },
       // actionDetail: Lưu các thông tin "đã biết trước" hoặc "đã xử lý"
       actionDetail: {
-        scheduleId: jobInfo.jobId,
+        // ** MODIFIED: Đảm bảo là ObjectId
+        scheduleId: new mongoose.Types.ObjectId(jobInfo.jobId),
         scheduleName: jobInfo.jobName,
         executedAt: new Date(),
         // Nếu là gửi tin, lưu lại cả tin nhắn gốc và tin nhắn cuối cùng
         ...(jobInfo.actionType === "sendMessage" && {
           messageTemplate: jobInfo.config.messageTemplate,
-          finalMessage: finalMessage, // Lưu tin nhắn đã sinh biến thể
+          finalMessage: finalMessage,
         }),
       },
     };
@@ -284,7 +287,8 @@ export async function logAutoCancelTask(job, task, reason) {
         detail: { reason: reasonMessage }, // Lưu lý do chi tiết vào detail
       },
       actionDetail: {
-        scheduleId: job._id.toString(),
+        // ** MODIFIED: Đảm bảo là ObjectId
+        scheduleId: new mongoose.Types.ObjectId(job._id),
         scheduleName: job.jobName,
         cancelledAt: new Date(),
         reasonMessage: reasonMessage, // Lưu thông báo ngắn gọn vào actionDetail
@@ -292,6 +296,36 @@ export async function logAutoCancelTask(job, task, reason) {
     });
   } catch (error) {
     console.error("❌ LỖI KHI GHI LOG HỦY TỰ ĐỘNG:", error);
+  }
+}
+/**
+ * Ghi log cho một task bị hủy tự động do tài khoản Zalo không hợp lệ.
+ * @param {object} job - Toàn bộ object lịch trình (ScheduledJob).
+ * @param {object} task - Task (khách hàng) cụ thể bị hủy.
+ * @param {string} reason - Lý do lỗi chi tiết từ script.
+ */
+// ++ ADDED: Toàn bộ hàm mới này
+export async function logAutoCancelTaskForZaloFailure(job, task, reason) {
+  try {
+    await ActionHistory.create({
+      action: "AUTO_CANCEL_ZALO_FAILURE",
+      user: job.createdBy,
+      customer: task.person._id,
+      zalo: job.zaloAccount,
+      status: {
+        status: "FAILED",
+        detail: { reason: "Tài khoản Zalo không hợp lệ", scriptError: reason },
+      },
+      actionDetail: {
+        // ** MODIFIED: Đảm bảo là ObjectId
+        scheduleId: new mongoose.Types.ObjectId(job._id),
+        scheduleName: job.jobName,
+        cancelledAt: new Date(),
+        reasonMessage: "Tự động hủy do tài khoản Zalo không hợp lệ",
+      },
+    });
+  } catch (error) {
+    console.error("❌ LỖI KHI GHI LOG HỦY DO ZALO FAILURE:", error);
   }
 }
 

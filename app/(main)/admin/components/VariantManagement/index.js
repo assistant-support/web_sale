@@ -125,11 +125,11 @@ export default function VariantManagement() {
         <DataTable
           columns={columns}
           data={variants}
-          onRowDoubleClick={handleOpenPanel}
+          onRowClick={handleOpenPanel}
           onAddItem={() => handleOpenPanel(null)}
           onDeleteItem={handleDelete}
           showActions={true}
-          activeRowId={activeVariantIds} // ** MODIFIED: Truyền danh sách ID vào prop
+          activeRowId={activeVariantIds}
         />
       </div>
       <div style={{ flexShrink: 0 }}>

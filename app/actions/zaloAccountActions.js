@@ -6,6 +6,14 @@ import ZaloAccount from "@/models/zalo";
 import User from "@/models/users";
 import { revalidatePath } from "next/cache";
 import { revalidateAndBroadcast } from "@/lib/revalidation";
+import { getTokenFromSheetByUid } from "@/app/api/(account)/acc/route";
+
+// ++ ADDED: Hàm getBaseUrl để đảm bảo URL luôn chính xác
+function getBaseUrl() {
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.URL) return process.env.URL;
+  return `http://localhost:3000`;
+}
 
 /**
  * Lấy tất cả tài khoản Zalo. Hỗ trợ cả phân trang và lấy tất cả.
@@ -28,15 +36,19 @@ export async function getZaloAccounts({ page = 1, limit = 0 } = {}) {
       query.skip(skip).limit(limit);
     }
 
-    const [accounts, total] = await Promise.all([
+    const [accountsFromDB, total] = await Promise.all([
       query.lean(),
       ZaloAccount.countDocuments({}),
     ]);
 
+    // ** ADDED: Thêm bước làm sạch dữ liệu để loại bỏ các bản ghi null/undefined
+    // Đây là lớp bảo vệ quan trọng nhất để sửa lỗi.
+    const cleanAccounts = accountsFromDB.filter(Boolean);
+
     return {
       success: true,
-      data: JSON.parse(JSON.stringify(accounts)),
-      // Pagination chỉ có ý nghĩa khi có limit
+      // ** MODIFIED: Trả về dữ liệu đã được làm sạch
+      data: JSON.parse(JSON.stringify(cleanAccounts)),
       pagination:
         limit > 0
           ? { page, limit, total, totalPages: Math.ceil(total / limit) }
@@ -168,7 +180,7 @@ export async function createOrUpdateAccountByToken(token) {
 
     // 1. Gọi API /api/acc để xử lý token và cập nhật Google Sheet
     const apiResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/acc`,
+      `${process.env.URL}/api/acc`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -177,6 +189,7 @@ export async function createOrUpdateAccountByToken(token) {
     );
 
     const result = await apiResponse.json();
+    console.log("Kết quả từ API:", result);
     if (result.status !== 2) {
       throw new Error(result.mes || "Lỗi khi xử lý token.");
     }
@@ -212,19 +225,12 @@ export async function createOrUpdateAccountByToken(token) {
 export async function getZaloTokenByUid(uid) {
   if (!uid) return null;
   try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/acc?uid=${uid}`,
-      {
-        method: "GET",
-        cache: "no-store", // Luôn lấy dữ liệu mới nhất
-      },
-    );
-    if (!response.ok) return null;
+    // ** MODIFIED: Loại bỏ hoàn toàn fetch và gọi thẳng vào hàm logic
+    const result = await getTokenFromSheetByUid(uid);
 
-    const result = await response.json();
     return result.success ? result.token : null;
   } catch (error) {
-    console.error("Lỗi khi lấy Zalo token:", error);
+    console.error("Lỗi trong action getZaloTokenByUid:", error);
     return null;
   }
 }

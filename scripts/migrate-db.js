@@ -60,6 +60,88 @@ const ActionHistory =
   mongoose.model("actionhistory", ActionHistorySchema);
 // --- END: Khai báo Models ---
 
+async function migrateCustomerUids() {
+  console.log("\n--- BẮT ĐẦU DI TRÚ & LÀM SẠCH DỮ LIỆU UID KHÁCH HÀNG ---");
+
+  // --- Bước 1: Làm sạch các khách hàng có uid: null ---
+  const nullUidQuery = { uid: null };
+  const nullCount = await Customer.countDocuments(nullUidQuery);
+  if (nullCount > 0) {
+    console.log(
+      `🔍 Tìm thấy ${nullCount} khách hàng có uid: null. Đang sửa...`,
+    );
+    const result = await Customer.updateMany(nullUidQuery, {
+      $set: { uid: [] },
+    });
+    console.log(`✨ Đã sửa thành công ${result.modifiedCount} khách hàng.`);
+  } else {
+    console.log("✅ Không có khách hàng nào có uid: null.");
+  }
+
+  // --- Bước 2: Di trú các khách hàng có uid là string ---
+  const stringUidQuery = { uid: { $type: "string", $ne: "" } };
+  const customersToMigrate = await Customer.find(stringUidQuery).lean();
+
+  if (customersToMigrate.length === 0) {
+    console.log("✅ Không tìm thấy khách hàng nào có UID cũ cần di trú.");
+    return;
+  }
+
+  console.log(
+    `🔍 Tìm thấy ${customersToMigrate.length} khách hàng cần di trú UID...`,
+  );
+
+  const customerIds = customersToMigrate.map((c) => c._id);
+
+  // 2. Tìm tất cả lịch sử tìm UID liên quan đến các khách hàng này
+  const histories = await ActionHistory.find({
+    customer: { $in: customerIds },
+    action: "DO_SCHEDULE_FIND_UID",
+    "status.status": "SUCCESS",
+  })
+    .sort({ time: -1 })
+    .lean();
+
+  // 3. Tạo một map để tra cứu lịch sử nhanh: Map<customerId, history>
+  const historyMap = new Map();
+  for (const history of histories) {
+    const customerId = history.customer.toString();
+    // Chỉ lưu lịch sử gần nhất cho mỗi khách hàng
+    if (!historyMap.has(customerId)) {
+      historyMap.set(customerId, history);
+    }
+  }
+
+  // 4. Chuẩn bị các lệnh cập nhật hàng loạt (bulk write)
+  const bulkOperations = customersToMigrate.map((customer) => {
+    const latestHistory = historyMap.get(customer._id.toString());
+    if (latestHistory && latestHistory.zalo) {
+      const newUidArray = [{ zaloId: latestHistory.zalo, uid: customer.uid }];
+      return {
+        updateOne: {
+          filter: { _id: customer._id },
+          update: { $set: { uid: newUidArray } },
+        },
+      };
+    } else {
+      return {
+        updateOne: {
+          filter: { _id: customer._id },
+          update: { $set: { uid: [] } },
+        },
+      };
+    }
+  });
+
+  // 5. Thực thi các lệnh cập nhật
+  if (bulkOperations.length > 0) {
+    const result = await Customer.bulkWrite(bulkOperations);
+    console.log(
+      `✨ Di trú thành công ${result.modifiedCount} bản ghi khách hàng!`,
+    );
+  }
+}
+
 /**
  * Logic để di trú dữ liệu cho collection 'zaloaccounts'.
  * Thêm các trường còn thiếu và sửa các giá trị mặc định bị sai.
@@ -525,6 +607,28 @@ async function addIsTokenActiveField() {
   );
 }
 
+async function cleanupNullUids() {
+  console.log("\n--- BẮT ĐẦU LÀM SẠCH DỮ LIỆU UID BỊ NULL ---");
+
+  // 1. Tìm tất cả các customer có uid là null
+  const query = { uid: null };
+  const customersToFix = await Customer.find(query).lean();
+
+  if (customersToFix.length === 0) {
+    console.log("✅ Không tìm thấy khách hàng nào có uid: null. Dữ liệu sạch!");
+    return;
+  }
+
+  console.log(
+    `🔍 Tìm thấy ${customersToFix.length} khách hàng có uid: null cần sửa...`,
+  );
+
+  // 2. Cập nhật tất cả các document tìm thấy, đặt uid thành mảng rỗng
+  const result = await Customer.updateMany(query, { $set: { uid: [] } });
+
+  console.log(`✨ Đã cập nhật thành công ${result.modifiedCount} khách hàng!`);
+}
+
 /**
  * Hàm chính để chạy toàn bộ quá trình di trú.
  */
@@ -539,14 +643,17 @@ async function runMigration() {
     console.log("🔄 Đang kết nối đến MongoDB...");
     await mongoose.connect(mongoURI);
     console.log("✅ Kết nối thành công!");
-    await addIsTokenActiveField();
-    await migrateZaloAccounts();
-    await migrateZaloPhoneNumbers();
-    await standardizeZaloLimits();
-    await migrateScheduleIds();
+    // await addIsTokenActiveField();
+    // await migrateZaloAccounts();
+    // await migrateZaloPhoneNumbers();
+    // await standardizeZaloLimits();
+    // await migrateScheduleIds();
     await fixMismatchedHistoryIds();
-    await migrateAndCleanupHungJobs();
-    await migrateUserRoles();
+    // await migrateAndCleanupHungJobs(); !!!
+    await migrateCustomerUids();
+    // await migrateUserRoles();
+    // await migrateStatuses();
+    // await cleanupNullUids();
   } catch (error) {
     console.error("❌ Đã xảy ra lỗi trong quá trình di trú:", error);
   } finally {
@@ -556,4 +663,4 @@ async function runMigration() {
 }
 
 // Chạy hàm di trú chính
-runMigration();
+// runMigration();

@@ -7,7 +7,7 @@ import { Re_acc, Re_user } from "@/data/users";
 
 const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbwcaXcpdsonX5eGRd0T-X_yJejKqD0krSSSV3rYDnpot23nWvXkzO3QnnvIo7UqYss1/exec";
-const SPREADSHEET_ID = "1H5Z1OJxzvk39vjtrdDYzESU61NV7DGPw6K_iD97nh7U";
+const SPREADSHEET_ID = "1QOHqG1wvV-oDoPAxSDw37hfP0AHctPYpHxyJlHenZJY";
 const TARGET_SHEET = "Account";
 
 async function getGoogleSheetsClient(isWrite = false) {
@@ -25,6 +25,36 @@ async function getGoogleSheetsClient(isWrite = false) {
   return google.sheets({ version: "v4", auth });
 }
 
+export async function getTokenFromSheetByUid(uid) {
+  try {
+    const sheets = await getGoogleSheetsClient(false);
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${TARGET_SHEET}!B:E`,
+    });
+
+    const rows = response.data.values || [];
+    for (const row of rows) {
+      const uidInSheet = row[0];
+      const tokenInSheet = row[3];
+      if (uidInSheet === uid) {
+        console.log(
+          `[getTokenFromSheetByUid] Found token for UID ${uid}:`,
+          tokenInSheet ? "Token có tồn tại" : "Token rỗng",
+        );
+        return { success: true, token: tokenInSheet };
+      }
+    }
+    console.log(
+      `[getTokenFromSheetByUid] Token for UID ${uid} NOT found in sheet.`,
+    );
+    return { success: false, message: "Không tìm thấy token cho UID này." };
+  } catch (error) {
+    console.error("[getTokenFromSheetByUid] Error:", error);
+    return { success: false, message: error.message };
+  }
+}
+
 // --- GET Handler ---
 export async function GET(request) {
   try {
@@ -34,24 +64,8 @@ export async function GET(request) {
 
     // ++ ADDED: Logic mới để lấy token từ sheet
     if (uidToFind) {
-      const sheets = await getGoogleSheetsClient(false); // Chỉ cần quyền đọc
-      const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${TARGET_SHEET}!B:E`, // Đọc từ cột UID (B) đến cột Token (E)
-      });
-
-      const rows = response.data.values || [];
-      for (const row of rows) {
-        const uidInSheet = row[0]; // Cột B là UID
-        const tokenInSheet = row[3]; // Cột E là Token
-        if (uidInSheet === uidToFind) {
-          return NextResponse.json({ success: true, token: tokenInSheet });
-        }
-      }
-      return NextResponse.json({
-        success: false,
-        message: "Không tìm thấy token cho UID này.",
-      });
+      const result = await getTokenFromSheetByUid(uidToFind);
+      return NextResponse.json(result);
     }
 
     // Logic cũ để lấy danh sách tài khoản
