@@ -1,22 +1,18 @@
 'use server';
 
-import { google } from 'googleapis';
 import dbConnect from "@/config/connectDB";
 import Form from "@/models/formclient";
-import { getCurrentUser } from '@/lib/session';
+import checkAuthToken from '@/utils/checktoken';
 import { reloadForm } from '@/data/form_database/wraperdata.db.js'
-import getSheets from '@/function/drive/connect'
+import getSheets from '@/function/drive'
 import Customer from '@/models/customer';
 
 export async function createAreaAction(_previousState, formData) {
-    console.log('hi');
-
     await dbConnect();
     const name = formData.get('name');
-    const user = await getCurrentUser();
-    console.log(user);
-
-    if (!user || !user._id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
+    const user = await checkAuthToken();
+    
+    if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
     if (!user.role.includes('Admin')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
@@ -35,7 +31,7 @@ export async function createAreaAction(_previousState, formData) {
         const newArea = new Form({
             name: processedName,
             describe: describe?.toString().trim(),
-            createdBy: user._id,
+            createdBy: user.id,
             formInput: formInput,
         });
         await newArea.save();
@@ -53,8 +49,8 @@ export async function updateAreaAction(_previousState, formData) {
     const describe = formData.get('describe');
     const formInputValues = formData.getAll('formInput');
     const formInput = formInputValues.map(Number);
-    const user = await getCurrentUser();
-    if (!user || !user._id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
+    const user = await checkAuthToken();
+    if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
     if (!user.role.includes('Admin')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
@@ -100,7 +96,7 @@ export async function updateAreaAction(_previousState, formData) {
 
 export async function deleteAreaAction(_previousState, formData) {
     const id = formData.get('id');
-    const user = await getCurrentUser();
+    const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
     if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };

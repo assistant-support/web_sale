@@ -1,46 +1,46 @@
-// utils/fetchApi.js
-"use server";
-// Lấy URL gốc của API từ biến môi trường để dễ dàng thay đổi
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+export const dynamic = 'force-dynamic';
 
-async function fetchApi(endpoint, options = {}, token = null) {
-  // Xây dựng URL đầy đủ
-  const url = `${API_BASE_URL}${endpoint}`;
+export default async function fetchApi(endpoint, options = {}) {
+  const isServer = typeof window === 'undefined';
+  const url = isServer ? `${process.env.URL}/api${endpoint}` : `/api${endpoint}`;
 
-  // Chuẩn bị các header
+  let token = null;
+
+  if (isServer) {
+    try {
+      const { cookies } = await import('next/headers');
+      const cookieStore = await cookies();
+      token = cookieStore.get(process.env.token)?.value || null;
+    } catch (error) {
+      console.warn('Không thể lấy cookies trên server:', error);
+    }
+  }
+
   const headers = {
-    "Content-Type": "application/json",
-    ...options.headers, // Gộp các header được truyền vào (nếu có)
+    'Content-Type': 'application/json',
+    ...(isServer && token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
   };
 
-  // Nếu có token, đính kèm nó vào header Authorization
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  // Cấu hình fetch cuối cùng
-  const fetchOptions = {
-    ...options,
+  const defaultOptions = {
     headers,
+    ...options,
   };
 
-  // Thực hiện gọi API
-  const response = await fetch(url, fetchOptions);
+  if (defaultOptions.body && typeof defaultOptions.body === 'object') {
+    defaultOptions.body = JSON.stringify(defaultOptions.body);
+  }    try {
+      const response = await fetch(url, defaultOptions);
 
-  // Xử lý nếu response không thành công
-  if (!response.ok) {
-    const errorData = await response
-      .json()
-      .catch(() => ({ message: response.statusText }));
-    console.error(`API Error on ${endpoint}:`, errorData);
-    throw new Error(
-      errorData.message || `Request failed with status ${response.status}`,
-    );
-  }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Error fetching ${endpoint}: ${response.status} ${response.statusText} - ${errorText}`);
+      }
 
-  // Trả về kết quả dưới dạng JSON
-  return response.json();
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.log(`Fetch API error: ${error.message}`);
+      throw error;
+    }
 }
-
-export default fetchApi;

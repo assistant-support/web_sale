@@ -1,29 +1,24 @@
-// web_tslhu/models/variant.js
-import { Schema, model, models } from "mongoose";
+import { Schema, model, models } from 'mongoose'
 
 const VariantSchema = new Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      lowercase: true, // Đảm bảo tên luôn là chữ thường để dễ truy vấn
+    {
+        name: {
+            type: String,
+            required: [true, "Vui lòng nhập tên biến thể."],
+            trim: true,
+            unique: true
+        },
+        description: {
+            type: String,
+            trim: true
+        },
+        phrases: {
+            type: [String],
+            default: []
+        }
     },
-    description: {
-      type: String,
-      trim: true,
-    },
-    words: [
-      {
-        type: String,
-        trim: true,
-      },
-    ],
-  },
-  { timestamps: true },
-);
+    { timestamps: true }
+)
 
-const Variant = models.variant || model("variant", VariantSchema);
-
-export default Variant;
+const Variant = models.variant || model('variant', VariantSchema)
+export default Variant

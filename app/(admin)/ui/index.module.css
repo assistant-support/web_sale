@@ -1,0 +1,145 @@
+/* StudentDB.module.css */
+.container {
+    border-radius: 12px;
+}
+
+.mainTitle {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 20px 0;
+}
+
+.contentWrapper {
+    display: flex;
+    gap: 8px;
+}
+
+/* --- Bảng thống kê bên trái --- */
+.statsPanel {
+    width: calc(100% - 33px);
+    background-color: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-self: flex-start;
+}
+
+.statsTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #334155;
+    margin: 0;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.statItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: #475569;
+    padding: 8px;
+    border-radius: 5px;
+}
+
+.statValue.studying {
+    color: #3b82f6;
+}
+
+.statValue.waiting {
+    color: #f97316;
+}
+
+.statValue.left {
+    color: #a8a29e;
+}
+
+
+/* --- Khu vực biểu đồ bên phải --- */
+.chartPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    /* Quan trọng để flexbox co dãn đúng */
+}
+
+.controls {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    border: thin solid var(--border-color);
+    border-radius: 5px;
+}
+
+.select {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background-color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.select:hover {
+    border-color: #94a3b8;
+}
+
+.select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.chartContainer {
+    position: relative;
+    height: 100%;
+    background-color: #fff;
+    padding: 16px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color);
+}
+
+.menulist {
+    padding: 8px;
+    margin-top: 3px;
+    border-radius: 5px;
+    background: var(--bg-primary);
+    border: thin solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.menulist p {
+    padding: 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: var(--bg-primary);
+}
+
+.menulist p:hover {
+    background-color: var(--hover);
+}
+
+/* Responsive cho màn hình nhỏ hơn */
+@media (max-width: 900px) {
+    .contentWrapper {
+        flex-direction: column;
+    }
+
+    .chartContainer {
+        height: 250px;
+    }
+
+    .statsPanel {
+        width: 100%;
+        align-self: stretch;
+    }
+}

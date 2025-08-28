@@ -71,7 +71,7 @@ const AlertPopup = ({ open, onClose, title, content, type = 'info', actions, wid
                 <div className={styles.indicator} />
                 <div className={styles.header}>
                     <AlertIcon type={type} />
-                    <p className='text_3'>{title || 'Thông báo'}</p>
+                    <h4>{title || 'Thông báo'}</h4>
                 </div>
                 <div className={styles.content}>
                     {content}

@@ -1,3 +1,4 @@
+// pages/api/saveHistory.js
 import { NextResponse } from 'next/server';
 import dbConnect from '@/config/connectDB';
 import SendHistory from '@/models/historyClient';

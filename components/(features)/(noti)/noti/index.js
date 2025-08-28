@@ -2,7 +2,7 @@
 
 import air from './index.module.css'
 
-export default function Noti({ open, onClose, status, mes, button }) {
+export default function Noti({ open, onClose, status, mes, button, width }) {
   if (!open) return null;
 
   return (
@@ -10,9 +10,9 @@ export default function Noti({ open, onClose, status, mes, button }) {
       style={{
         position: 'fixed',
         top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
+        left: width ? 'calc(-100vw + ' + width + 'px)' : '0',
+        width: '100vw',
+        height: '100vh',
         backgroundColor: 'rgba(0,0,0,0.5)',
         display: 'flex',
         alignItems: 'center',
@@ -41,23 +41,22 @@ export default function Noti({ open, onClose, status, mes, button }) {
           zIndex: 10,
         }}
       >
-        <p
+        <h4
           style={{
             marginTop: 16,
-            marginBottom: -12,
+            marginBottom: -16,
             textAlign: 'center',
             color: status ? 'var(--green)' : 'var(--red)',
-            fontWeight: 'bold',
           }}
         >
           {status ? 'THÀNH CÔNG' : 'THẤT BẠI'}
-        </p>
+        </h4>
         <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}>
           {status ? <IconSuccess /> : <IconFailure />}
         </div>
-        <p style={{ padding: '0 16px 8px 16px', textAlign: 'center' , marginTop: -12 }}>
+        <h5 style={{ padding: '0 16px 8px 16px', textAlign: 'center', marginTop: -12 }}>
           {mes}
-        </p>
+        </h5>
         <div>
           {button}
         </div>

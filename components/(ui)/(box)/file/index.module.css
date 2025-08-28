@@ -5,7 +5,7 @@
     gap: 4px;
     padding: 16px;
     border-radius: 5px;
-    box-shadow: var(--boxshaw2);
+    border: thin solid var(--border-color);
     text-decoration: none;
     cursor: pointer;
 }
@@ -18,5 +18,5 @@
 .name {
     margin-top: 0.25rem;
     font-size: 1rem;
-    color: #333;
+    color: var(--text-primary);
 }

@@ -5,8 +5,10 @@ import jwt from 'jsonwebtoken';
 export default async function CheckToken(request) {
   let source;
   let token;
-  const body = await request.json()
+  let body;
+
   try {
+    body = await request.clone().json();
     source = body?.source;
   } catch (err) {
     source = 0;

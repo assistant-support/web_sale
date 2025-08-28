@@ -43,7 +43,7 @@ const FileUploadModal = ({ isOpen, onClose, onFileSelect, imageId }) => {
     );
 };
 
-const ImageComponent = ({ width, imageInfo, refreshData }) => {
+const ImageComponent = ({ width, imageInfo, refreshData, width2 }) => {
     const imageSrc = `https://lh3.googleusercontent.com/d/${imageInfo.id}`;
     const videoThumbSrc = `https://drive.google.com/thumbnail?id=${imageInfo.id}`;
     const videoEmbedSrc = `https://drive.google.com/file/d/${imageInfo.id}/preview`;
@@ -203,7 +203,7 @@ const ImageComponent = ({ width, imageInfo, refreshData }) => {
             </div>
 
             {isPopupOpen && (
-                <div className={styles.popupOverlay} onClick={handleClosePopup}>
+                <div className={styles.popupOverlay} style={{ left: width ? `-${width2}px` : 0 }} onClick={handleClosePopup}>
                     <div className={imageInfo.type === 'image' ? styles.popupContent : styles.popupImages} onClick={(e) => e.stopPropagation()}>
                         {imageInfo.type === 'image' ? (
                             <img src={imageSrc} alt={`Detail ${imageInfo.id}`} className={styles.popupImage} />

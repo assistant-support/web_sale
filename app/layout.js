@@ -1,20 +1,23 @@
-// app/layout.js
-import "@/styles/all.css";
-import { PanelProvider } from "@/contexts/PanelContext";
-import { CampaignProvider } from "@/contexts/CampaignContext";
+export const dynamic = 'force-dynamic';
+
+import { cookies } from 'next/headers';
+import Layout_Login from '@/app/(auth)/login';
+import Nav from '@/components/(layout)/nav';
+import '@/styles/all.css'
+import '@/styles/font.css';
+import air from './layout.module.css'
 
 export const metadata = {
-  title: "iTrail",
-  description: "Chăm sóc tuyển sinh tự động",
+  title: "AI Robotic",
+  description: "Khóa học công nghệ cho trẻ"
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+
   return (
-    <html lang="vi">
+    <html lang="en">
       <body>
-        <CampaignProvider>
-          <PanelProvider>{children}</PanelProvider>
-        </CampaignProvider>
+        {children}
       </body>
     </html>
   );

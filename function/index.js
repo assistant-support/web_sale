@@ -2,6 +2,7 @@ export function formatDate(date) {
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
+    if (day == 'NaN' || month == 'NaN' || year == 'NaN') return 'Thiếu thông tin'
     return `${day}/${month}/${year}`;
 }
 export function countStudentsWithLesson(lessonId, data) {
@@ -39,9 +40,17 @@ export function srcImage(id) {
 }
 
 export function formatCurrencyVN(number) {
-  if (typeof number !== 'number' || isNaN(number)) {
-    return '0 VNĐ'; 
-  }
-  const formattedNumber = number.toLocaleString('vi-VN');
-  return `${formattedNumber} VNĐ`;
+    if (typeof number !== 'number' || isNaN(number)) {
+        return '0 VNĐ';
+    }
+    const formattedNumber = number.toLocaleString('vi-VN');
+    return `${formattedNumber} VNĐ`;
 }
+
+export const truncateString = (str, start, end) => !str ? "" : str.length > start + end ? `${str.slice(0, start)}...${str.slice(-end)}` : str;
+export const driveImage = (id) => {
+    if (!id) return null;
+    if (id.startsWith('https://lh3.googleusercontent.com/d/')) return id;
+    return `https://lh3.googleusercontent.com/d/${id}`;
+}
+

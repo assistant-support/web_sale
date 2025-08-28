@@ -1,85 +1,52 @@
-/* components/(layout)/login/index.module.css */
-
-.formContainer {
-  background-color: white;
-  padding: 40px;
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-  width: 100%;
-  max-width: 420px;
+.submit {
+  background: var(--main_d);
   display: flex;
-  flex-direction: column;
-}
-
-.title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #111827;
-  text-align: center;
-  margin-bottom: 24px;
-}
-
-.inputGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.inputGroup label {
-  font-size: 14px;
-  font-weight: 500;
-  color: #374151;
-}
-
-.inputField {
-  width: calc(100% - 32px);
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  font-size: 16px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.inputField:focus {
-  outline: none;
-  border-color: #3b82f6;
-  /* Viền xanh khi focus */
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-}
-
-.submitButton {
-  width: 100%;
-  padding: 14px;
-  border: none;
-  border-radius: 8px;
-  background-color: #3b82f6;
-  /* Màu nút chính */
-  color: white;
-  font-size: 16px;
-  font-weight: 600;
+  align-items: center;
+  justify-content: center;
+  transition: all .2s linear;
   cursor: pointer;
-  transition: background-color 0.2s;
-  margin-top: 10px;
 }
 
-.submitButton:hover:not(:disabled) {
-  background-color: #2563eb;
-  /* Màu đậm hơn khi hover */
-}
-
-.submitButton:disabled {
-  background-color: #9ca3af;
+.unsubmit {
   cursor: not-allowed;
+  background: gray
 }
 
-.errorMessage {
-  background-color: #fee2e2;
-  color: #b91c1c;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: center;
-  margin-top: 16px;
+.submit:hover {
+  background: var(--main_b);
+}
+
+.custom-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid #666666;
+  cursor: pointer;
+  background-color: white;
+  appearance: none;
+  /* Ẩn checkbox mặc định */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+/* Khi checkbox được chọn */
+.custom-checkbox:checked {
+  background-color: var(--main_d);
+  border-color: var(--main_d);
+  position: relative;
+}
+
+/* Dấu tích */
+.custom-checkbox:checked::after {
+  content: "✔";
+  color: white;
+  /* Màu dấu tích */
+  font-size: 10px;
+  font-weight: bold;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }

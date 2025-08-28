@@ -5,10 +5,11 @@
 import React, { useState } from 'react';
 import styles from './index.module.css';
 
-const ResponsiveGrid = ({ items = [], columns, type = 'grid', style = {} }) => {
+const ResponsiveGrid = ({ items = [], columns, type = 'grid', style = {}, width }) => {
     const [isPopupOpen, setPopupOpen] = useState(false);
     const isListMode = type === 'list';
     const maxItemsOnList = columns.desktop;
+
     const shouldShowMoreButton = isListMode && items.length > maxItemsOnList;
     const itemsToRender = shouldShowMoreButton
         ? items.slice(0, maxItemsOnList - 1)
@@ -40,7 +41,7 @@ const ResponsiveGrid = ({ items = [], columns, type = 'grid', style = {} }) => {
                 )}
             </div >
             {isPopupOpen && (
-                <div className={styles.popupOverlay} onClick={handleClosePopup}>
+                <div className={styles.popupOverlay} style={{ left: width ? `-${width}px` : '0' }} onClick={handleClosePopup}>
                     <div className={styles.popupContent} onClick={(e) => e.stopPropagation()}>
                         <div style={{ width: '100%', height: '100%', overflow: 'hidden', overflowY: 'auto' }}>
                             <div className={styles.gridContainer} style={gridStyles}>

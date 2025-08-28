@@ -1,119 +1,206 @@
-/* components/(layout)/nav/index.module.css (Đã tinh chỉnh) */
-
-.navContainer {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  /* Bảng màu mới: Xanh navy đậm, hiện đại hơn */
-  background-color: #0d1b2a;
-  padding: 16px;
-  box-sizing: border-box;
+.container {
+    margin: 8px auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    width: 100px;
+    position: relative;
+    overflow: hidden;
+    overflow-y: auto;
 }
 
-.logoSection {
-  margin-bottom: 24px;
-  padding: 0 8px;
+.container::-webkit-scrollbar {
+    width: 0;
 }
 
-.logoText {
-  font-size: 28px;
-  font-weight: 700;
-  /* Màu logo trắng để nổi bật trên nền đậm */
-  color: #ffffff;
+.container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 0;
 }
 
-.menuSection {
-  flex-grow: 1;
-  position: relative;
+.loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.9);
 }
 
-/* Hiệu ứng highlight mới: Nền xám mờ tinh tế */
 .highlight {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  height: 56px;
-  /* Nền highlight mới: trong suốt nhẹ, tạo chiều sâu */
-  background-color: rgba(255, 255, 255, 0.1);
-  border-radius: 10px; /* Bo tròn nhiều hơn */
-  z-index: 1;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: absolute;
+    top: 0;
+    left: 12px;
+    width: 74px;
+    height: 74px;
+    background: var(--border-color);
+    border-radius: 12px;
+    transform: var(--highlight-transform);
+    transition: transform 0.3s ease;
+    z-index: 0;
 }
 
 .navItem {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  height: 56px;
-  border-radius: 10px;
-  cursor: pointer;
-  text-decoration: none;
-  /* Màu chữ mặc định: Xám nhạt, dễ đọc trên nền tối */
-  color: #a0aec0;
-  position: relative;
-  z-index: 2;
-  transition: color 0.3s ease;
+    width: 74px;
+    height: 74px;
+    border-radius: 12px;
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: center;
+    justify-content: center;
+    transition: all .2s linear;
+    min-height: 74px;
 }
 
 .navItem:hover {
-  /* Khi hover, chữ chuyển sang màu trắng sáng */
-  color: #ffffff;
+    background: var(--hover);
 }
 
-/* Trạng thái active mới: Chữ trắng sáng và đậm */
-.navItem.active {
-  color: #ffffff;
-  font-weight: 600;
+.navText {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
 }
 
-.navLabel {
-  font-size: 15px;
+.menu_li {
+    border-radius: 8px;
+    transition: all .3s linear;
+    cursor: pointer;
+    padding: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
-.userSection {
-  /* Viền ngăn cách màu xám mờ */
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.menu_li:hover {
+    background: var(--hover);
 }
 
-.userInfo {
-  display: flex;
-  flex-direction: column;
+.menu_li.logout {
+    background-color: rgb(230, 130, 130);
+    color: white;
 }
 
-.userName {
-  font-weight: 600;
-  /* Tên người dùng màu trắng */
-  color: #ffffff;
+.menu_li.logout:hover {
+    background-color: rgb(233, 146, 146);
 }
 
-.userRole {
-  font-size: 13px;
-  /* Vai trò màu vàng cam nổi bật */
-  color: #f59e0b;
+.popupDescription {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
 }
 
-.logoutButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: none;
-  /* Nền nút logout xám đậm hơn */
-  background-color: rgba(255, 255, 255, 0.1);
-  /* Icon màu xám nhạt */
-  color: #a0aec0;
-  cursor: pointer;
-  transition: all 0.2s ease;
+.reorderItem {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    margin: 4px 8px;
+    border-radius: 8px;
+    cursor: grab;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    gap: 12px;
+    transition: opacity 0.2s ease-in-out;
+    user-select: none;
 }
 
-.logoutButton:hover {
-  background-color: #fee2e2;
-  color: #ef4444; /* Chuyển màu đỏ đậm khi hover */
+.reorderItem:active {
+    cursor: grabbing;
+}
+
+.isDragging {
+    opacity: 0.4;
+}
+
+.placeholder {
+    height: 50px;
+    margin: 4px 8px;
+    border-radius: 8px;
+    background: rgba(100, 150, 255, 0.08);
+    border: 2px dashed var(--main_d);
+}
+
+.lastDropZone {
+    height: 40px;
+    width: 100%;
+}
+
+.searchContainer {
+    padding: 8px;
+    height: calc(100vh - 52.8px - 16px);
+    display: flex;
+    flex-direction: column;
+}
+
+.searchInput {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+}
+
+.searchInput:focus {
+    border-color: var(--main_d);
+}
+
+.resultsContainer {
+    margin-top: 8px;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.ItemWrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.ItemWrap:hover {
+    background: var(--hover);
+}
+
+.searchLoading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.searchResultItem {
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    transition: background-color 0.2s;
+}
+
+.resultName {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.resultSubtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
 }

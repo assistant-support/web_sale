@@ -5,14 +5,15 @@ export default function WrapIcon({
     content,
     placement = 'top',
     style = {},
-    click
+    click,
+    className = ''
 }) {
     const tooltipClass = `${styles.tooltip} ${styles[placement]}`;
 
     return (
 
         <div className={styles.wrapIcon} onClick={click}>
-            <div className={`wrapicon`} style={style}>
+            <div className={`wrapicon ${className}`} style={style}>
                 {icon}
             </div>
             <span className={tooltipClass}>{content}</span>

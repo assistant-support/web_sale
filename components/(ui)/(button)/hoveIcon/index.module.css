@@ -9,7 +9,7 @@
     font-size: 12px;
     line-height: 1.4;
     color: var(--text-primary);
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     border-radius: 4px;
     white-space: nowrap;
     opacity: 0;
@@ -17,7 +17,6 @@
     transition: opacity .18s ease;
     z-index: 2000;
     box-shadow: var(--boxshaw2);
-
 }
 
 /* Hiển thị khi hover hoặc focus */
@@ -45,7 +44,7 @@
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
-    border-top-color: var(--bg-secondary);
+    border-top-color: var(--bg-primary);
 }
 
 /* --- BOTTOM --- */
@@ -59,7 +58,7 @@
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%) rotate(180deg);
-    border-top-color: var(--bg-secondary);
+    border-top-color: var(--bg-primary);
 
 }
 
@@ -74,7 +73,7 @@
     right: -6px;
     top: 50%;
     transform: translateY(-50%) rotate(90deg);
-    border-top-color: var(--bg-secondary);
+    border-top-color: var(--bg-primary);
 }
 
 /* --- RIGHT --- */
@@ -88,5 +87,5 @@
     left: -6px;
     top: 50%;
     transform: translateY(-50%) rotate(-90deg);
-    border-top-color: var(--bg-secondary);
+    border-top-color: var(--bg-primary);
 }

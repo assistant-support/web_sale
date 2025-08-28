@@ -1,0 +1,154 @@
+.container {
+    display: flex;
+    gap: 8px;
+}
+
+.sidebar {
+    width: 350px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kpiGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.kpiCard {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    background-color: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    text-align: center;
+    gap: 4px;
+}
+
+.kpiCard span {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.kpiCard strong {
+    font-size: 22px;
+    font-weight: bold;
+    color: #1f2937;
+}
+
+.subheader {
+    font-size: 16px;
+    font-weight: bold;
+    color: #374151;
+    margin: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.leaderboard {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background-color: #ffffff;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.leaderboardItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+}
+
+.leaderboardItem span {
+    color: #4b5563;
+}
+
+.leaderboardItem strong {
+    font-weight: 600;
+    color: #111827;
+}
+
+.leaderboardItem .violations {
+    color: #ef4444;
+}
+
+.noData {
+    font-size: 14px;
+    color: #9ca3af;
+    text-align: center;
+    padding: 10px 0;
+}
+
+.mainContent {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-primary);
+    padding: 16px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color);
+}
+
+.filters {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.filterGroup {
+    flex: 1;
+    display: flex;
+}
+
+.filterGroup>div {
+    width: 100%;
+}
+
+.timePeriodGroup {
+    flex: 2;
+    display: flex;
+    gap: 8px;
+}
+
+.menulist {
+    padding: 8px;
+    margin-top: 3px;
+    border-radius: 5px;
+    background: var(--bg-primary);
+    border: thin solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.menulist p {
+    padding: 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: var(--bg-primary);
+    white-space: nowrap;
+}
+
+.menulist p:hover {
+    background-color: var(--hover);
+}
+
+.datePickerWrapper {
+    padding: 8px;
+}
+
+.datePickerInput {
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 14px;
+    width: 100%;
+}

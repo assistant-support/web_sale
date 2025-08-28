@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 const SHEET_ID = '1ZQsHUyVD3vmafcm6_egWup9ErXfxIg4U-TfVDgDztb8';
 const SHEET_NAME = 'Data';
 
+/* ───────── Google Sheets client ───────── */
 function getSheetsClient() {
     const auth = new google.auth.GoogleAuth({
         credentials: {
@@ -16,6 +17,7 @@ function getSheetsClient() {
     return google.sheets({ version: 'v4', auth });
 }
 
+/* ───────── helpers ───────── */
 const normalize = s => s.toString().trim().toLowerCase();
 const stdPhone = p => {
     p = p.toString().trim();

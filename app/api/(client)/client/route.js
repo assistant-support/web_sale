@@ -1,457 +1,241 @@
-// app/api/customer/route.js
 import { NextResponse } from "next/server";
-import { revalidateTag } from "next/cache";
-import { google } from "googleapis";
-import { Types } from "mongoose";
-import dbConnect from "@/config/connectDB";
+import connectDB from "@/config/connectDB";
 import Customer from "@/models/customer";
-import { getCurrentUser } from "@/lib/session";
-import Status from "@/models/status";
-import User from "@/models/users";
-import jwt from "jsonwebtoken";
-import { Data_Client } from "@/data/customer";
-import { revalidateAndBroadcast } from "@/lib/revalidation";
+import ZaloAccount from "@/models/zalo";
+import Setting from "@/models/setting";
+import Form from "@/models/formclient";
+import Variant from "@/models/variant"; // Thêm import model Variant
+import { actionZalo, sendGP } from "@/function/drive/appscript";
+import { formatMessage } from "@/app/api/(zalo)/action/route"; // Thêm import hàm formatMessage
 
-import {
-  logUpdateName,
-  logUpdateStatus,
-  logUpdateStage,
-  logAddComment,
-} from "@/app/actions/historyActions";
-/* ─────────────── CONSTANTS ─────────────── */
-const TAG = "customer_data";
-/* ────────────────────────────────────────── */
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-/* Google Sheets client (readonly) */
-async function getGoogleSheetsClient() {
-  const scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_CLIENT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    },
-    projectId: process.env.GOOGLE_PROJECT_ID,
-    scopes,
-  });
-  return google.sheets({ version: "v4", auth });
+// ===== Fixed API key =====
+const EXPECTED_KEY = "AIzaSyCQYlefMrueYu1JPWKeEdSOPpSmb9Rceg8";
+
+/* ================= Local helpers ================= */
+function normalizePhone(v) {
+  let t = String(v ?? "").trim();
+  if (!t) return "";
+  if (!t.startsWith("0")) t = "0" + t;
+  return t;
 }
 
-/**
- * API endpoint này phục vụ cho việc tải thêm dữ liệu từ client.
- * Nó nhận các tham số (limit, skip, filter) từ URL và trả về dữ liệu tương ứng.
- */
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
+function normalizeUid(u) {
+  const s = String(u ?? "").trim();
+  const digits = s.replace(/\D/g, "");
+  return digits;
+}
 
-    // Chuyển URLSearchParams thành một object filters đơn giản
-    const filters = Object.fromEntries(searchParams.entries());
+async function findNextAvailableZaloAccount() {
+  const ZALO_ROTATION_KEY = "lastUsedZaloIndex";
 
-    // Lấy limit và skip từ params, cung cấp giá trị mặc định
-    const limit = parseInt(searchParams.get("limit")) || 100;
-    const skip = parseInt(searchParams.get("skip")) || 0;
+  const allAccounts = await ZaloAccount.find({}).sort({ _id: 1 }).lean();
 
-    const clientResponse = await Data_Client({ limit, skip, filters });
-
-    return NextResponse.json(clientResponse);
-  } catch (error) {
-    console.error("API Error in /api/clients:", error);
-    return NextResponse.json({ message: "Lỗi phía máy chủ." }, { status: 500 });
+  if (allAccounts.length === 0) {
+    console.warn("[Zalo Finder] Không có bất kỳ tài khoản Zalo nào trong hệ thống.");
+    return null;
   }
+
+  const lastIndexSetting = await Setting.findOne({ key: ZALO_ROTATION_KEY });
+  let lastIndex = lastIndexSetting ? Number(lastIndexSetting.value) : -1;
+
+  for (let i = 0; i < 3 && i < allAccounts.length; i++) {
+    lastIndex++;
+    const currentIndex = lastIndex % allAccounts.length;
+    const selectedAccount = allAccounts[currentIndex];
+
+    if (selectedAccount.rateLimitPerHour > 0 && selectedAccount.rateLimitPerDay > 0) {
+      console.log(`[Zalo Finder] Đã tìm thấy tài khoản hợp lệ: ${selectedAccount.name} tại chỉ số ${currentIndex}`);
+      await Setting.updateOne(
+        { key: ZALO_ROTATION_KEY },
+        { $set: { value: currentIndex } },
+        { upsert: true }
+      );
+      return selectedAccount;
+    } else {
+      console.log(`[Zalo Finder] Tài khoản ${selectedAccount.name} bị chặn (rate limit = 0), thử tài khoản tiếp theo.`);
+    }
+  }
+
+  console.error("[Zalo Finder] Không tìm thấy tài khoản Zalo hợp lệ sau các lần thử.");
+  return null;
 }
 
-/*───────────  POST (Hardcoded Sheet Info) ───────────*/
-export async function POST(request) {
-  await dbConnect();
 
+/* ================= API ================= */
+
+export async function POST(req) {
   try {
-    // Chỉ lấy các tham số động từ request body
-    const { targetEmail, startRow } = await request.json();
+    await connectDB();
 
-    // Kiểm tra các tham số bắt buộc
-    if (!targetEmail) {
+    const selectedZalo = await findNextAvailableZaloAccount();
+
+    if (!selectedZalo) {
       return NextResponse.json(
-        { status: false, mes: "Vui lòng cung cấp targetEmail." },
-        { status: 400 },
+        { status: false, message: "Hệ thống Zalo đang quá tải hoặc tất cả tài khoản đều bị chặn. Vui lòng thử lại sau." },
+        { status: 503 }
       );
     }
 
-    // Gán cứng ID và Range của Google Sheet
-    const spreadsheetId = "1QOHqG1wvV-oDoPAxSDw37hfP0AHctPYpHxyJlHenZJY";
-    const range = "Data!A:K";
+    const body = await req.json().catch(() => ({}));
+    const { key, rowNumber, data } = body || {};
 
-    // Thiết lập các hằng số động
-    const DATA_START_ROW = Number(startRow) || 1; // Mặc định là 1 nếu không có hoặc không hợp lệ
-    const TARGET_EMAIL = targetEmail.trim().toLowerCase();
-    const COL_F_INDEX = 5; // Cột K (index 10)
-
-    // --- BƯỚC 1: LẤY ID CỦA NHÂN VIÊN CẦN GÁN QUYỀN ---
-    const authUser = await User.findOne({ email: TARGET_EMAIL })
-      .select("_id")
-      .lean();
-    if (!authUser) {
-      return NextResponse.json(
-        {
-          status: false,
-          mes: `Không tìm thấy nhân viên với email: ${TARGET_EMAIL}`,
-        },
-        { status: 404 },
-      );
-    }
-    const authIdToAssign = authUser._id;
-
-    // --- BƯỚC 2: ĐỌC VÀ CHUẨN HÓA DỮ LIỆU TỪ GOOGLE SHEET ---
-    const sheets = await getGoogleSheetsClient();
-    const { data } = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range,
-    });
-    const rows = data.values ?? [];
-
-    if (rows.length < DATA_START_ROW) {
-      return NextResponse.json({
-        status: true,
-        mes: `Sheet chưa có tới dòng ${DATA_START_ROW}.`,
-      });
+    if (key !== EXPECTED_KEY) {
+      return NextResponse.json({ status: false, message: "Invalid key" }, { status: 401 });
     }
 
-    const headers = rows[0].map((h) => h.trim());
-    const dataRows = rows.slice(DATA_START_ROW - 1);
-
-    const phoneIdx = headers.indexOf("phone");
-    const parentPhoneIdx = headers.indexOf("Parent's Phone Number");
-    const nameIdx = headers.indexOf("nameStudent");
-    const uidIdx = headers.indexOf("uid");
-
-    if (phoneIdx === -1 && parentPhoneIdx === -1) {
-      return NextResponse.json(
-        {
-          status: false,
-          mes: "Thiếu cột 'phone' hoặc 'Parent's Phone Number'.",
-        },
-        { status: 400 },
-      );
+    const phone = normalizePhone(data?.phone);
+    if (!phone) {
+      return NextResponse.json({ status: false, message: "Missing phone" }, { status: 400 });
     }
 
-    // --- BƯỚC 3: LỌC & GOM DỮ LIỆU HỢP LỆ ---
-    const processedPhones = new Set();
-    const sheetRows = [];
+    const existed = await Customer.exists({ phone });
+    if (existed) {
+      return NextResponse.json({ status: false, message: "duplicate_phone", data: { phone } }, { status: 409 });
+    }
 
-    dataRows.forEach((row) => {
-      let phone = (row[phoneIdx] || row[parentPhoneIdx] || "")
-        .toString()
-        .replace(/\s+/g, "");
-      if (!phone) return;
-
-      const len = phone.length;
-      if (len < 9 || len > 11) return;
-      if (len === 9 && phone[0] !== "0") phone = "0" + phone;
-      if (len === 10 && phone[0] !== "0") return;
-      if (len === 11 && phone.startsWith("84")) phone = "0" + phone.slice(2);
-      else if (len === 11) return;
-      if (phone.length !== 10) return;
-
-      if (processedPhones.has(phone)) return;
-      processedPhones.add(phone);
-
-      const assignedEmail = (row[COL_F_INDEX] || "").trim().toLowerCase();
-      sheetRows.push({
-        phone,
-        name: nameIdx !== -1 ? row[nameIdx] || "" : "",
-        uid: uidIdx !== -1 ? row[uidIdx] || "" : "",
-        needAuth: assignedEmail === TARGET_EMAIL,
-      });
+    const doc = await Customer.create({
+      name: data?.name,
+      bd: data?.bd,
+      email: data?.email,
+      phone,
+      nameparent: data?.nameparent,
+      area: data?.area,
+      source: data?.source,
+      roles: selectedZalo.roles || [],
     });
 
-    if (!sheetRows.length) {
-      return NextResponse.json({
-        status: true,
-        mes: "Không tìm thấy số điện thoại hợp lệ trong vùng dữ liệu đã chọn.",
-      });
-    }
+    console.log(`[Create Customer] Đã tạo khách hàng mới: ${String(doc._id)} với SĐT: ${phone}`);
 
-    // --- BƯỚC 4: TÁCH DỮ LIỆU MỚI VS. ĐÃ TỒN TẠI ---
-    const phoneArr = [...processedPhones];
-    const existingCustomers = await Customer.find({ phone: { $in: phoneArr } })
-      .select("phone auth")
-      .lean();
-    const existingCustomerMap = new Map(
-      existingCustomers.map((c) => [c.phone, c]),
-    );
-
-    // --- BƯỚC 5: PHÂN LOẠI INSERT / UPDATE ---
-    const docsToInsert = [];
-    const phonesToUpdateAuth = [];
-
-    sheetRows.forEach((r) => {
-      const existingCustomer = existingCustomerMap.get(r.phone);
-
-      if (existingCustomer) {
-        const isAuthAssigned = existingCustomer.auth?.some(
-          (id) => id.toString() === authIdToAssign.toString(),
-        );
-        if (r.needAuth && !isAuthAssigned) {
-          phonesToUpdateAuth.push(r.phone);
-        }
-      } else {
-        const doc = { phone: r.phone, uid: r.uid, name: r.name };
-        if (r.needAuth) {
-          doc.auth = [authIdToAssign];
-        }
-        docsToInsert.push(doc);
-      }
+    const response = NextResponse.json({
+      status: true,
+      message: "created_and_processing_in_background",
+      data: { id: doc._id, phone },
     });
 
-    // --- BƯỚC 6: THỰC THI LỆNH ---
-    let insertedCount = 0;
-    if (docsToInsert.length) {
+    // ====== Chạy nền (không await) ======
+    setImmediate(async () => {
+      const customerId = doc._id;
+      let findUidStatus = "thất bại";
+      let renameStatus = "không thực hiện";
+      let messageStatus = "không thực hiện"; // Đổi mặc định thành "không thực hiện"
+
       try {
-        const inserted = await Customer.insertMany(docsToInsert, {
-          ordered: false,
+        const findUidResponse = await actionZalo({
+          phone, uid: selectedZalo.uid, actionType: "findUid",
         });
-        insertedCount = inserted.length;
-      } catch (err) {
-        if (err.code === 11000) {
-          insertedCount = err.result.nInserted || 0;
+
+        const raw = findUidResponse?.content ?? null;
+        const rawUid = raw?.data?.uid ?? null;
+        const normalizedUid = normalizeUid(rawUid);
+
+        if (findUidResponse.status === true && normalizedUid) {
+          findUidStatus = "thành công";
+
+          await ZaloAccount.updateOne(
+            { _id: selectedZalo._id },
+            { $inc: { rateLimitPerHour: -1, rateLimitPerDay: -1 } }
+          );
+
+          await Customer.updateOne(
+            { _id: customerId },
+            {
+              $set: {
+                zaloavt: raw?.data?.avatar || null,
+                zaloname: raw?.data?.zalo_name || null,
+              },
+              $push: {
+                uid: { zalo: selectedZalo._id, uid: normalizedUid }
+              }
+            }
+          );
+
+          doc.zaloname = raw?.data?.zalo_name || ""; // Cập nhật `doc` trong bộ nhớ để formatMessage sử dụng
+          console.log(`[BG] Đã cập nhật UID (${normalizedUid}) cho KH: ${String(customerId)}`);
+
+          // --- Action Tag (Đổi tên gợi nhớ) ---
+          renameStatus = "thất bại";
+          try {
+            const form = await Form.findById(doc.source).select('name').lean();
+            const srcName = form ? form.name : String(doc.source || 'Unknown');
+            const newZaloName = `${doc.name}_${srcName}`;
+            const renameResponse = await actionZalo({
+              uid: selectedZalo.uid, uidPerson: normalizedUid, actionType: 'tag', message: newZaloName, phone: phone
+            });
+            if (renameResponse.status) renameStatus = "thành công";
+          } catch (renameError) {
+            console.error("[BG] Lỗi trong lúc đổi tên gợi nhớ:", renameError.message);
+          }
+
+          // ===== CẬP NHẬT: Action Gửi tin nhắn =====
+          messageStatus = "thất bại"; // Đặt mặc định là thất bại
+          try {
+            const messageSetting = await Setting.findOne({ _id: '68b0c30b3c4e62132237be77' }).lean();
+            if (messageSetting && messageSetting.content) {
+              let template = messageSetting.content;
+
+              // Xử lý placeholder {nameform} đặc biệt
+              if (template.includes("{nameform}")) {
+                const form = await Form.findById(doc.source).select('name').lean();
+                const formName = form ? form.name : "";
+                template = template.replace(/{nameform}/g, formName);
+              }
+
+              // Gọi hàm format message
+              const finalMessageToSend = await formatMessage(template, doc, selectedZalo);
+
+              if (finalMessageToSend) {
+                const sendMessageResponse = await actionZalo({
+                  uid: selectedZalo.uid,
+                  uidPerson: normalizedUid,
+                  actionType: "sendMessage", // Giả định actionType là 'send'
+                  message: finalMessageToSend,
+                  phone: phone
+                });
+                if (sendMessageResponse.status == true) {
+                  messageStatus = "thành công";
+                  console.log(`[BG] Gửi tin nhắn chào mừng thành công cho UID: ${normalizedUid}`);
+                } else {
+                  console.warn(`[BG] Gửi tin nhắn chào mừng thất bại:`, sendMessageResponse.message);
+                }
+              } else {
+                messageStatus = "bỏ qua (template rỗng)";
+              }
+            } else {
+              messageStatus = "bỏ qua (không có template)";
+              console.log("[BG] Không tìm thấy template tin nhắn chào mừng. Bỏ qua.");
+            }
+          } catch (messageError) {
+            console.error("[BG] Lỗi trong lúc gửi tin nhắn:", messageError.message);
+          }
+
         } else {
-          throw err;
+          console.warn(`[BG] Không tìm thấy UID hợp lệ cho KH: ${String(customerId)}`);
+        }
+      } catch (e) {
+        console.error(`[BG] Lỗi nghiêm trọng trong tiến trình nền cho KH ${customerId}:`, e.message);
+      } finally {
+        const finalMessage = `
+Hành động xác nhận khách hàng mới: ${phone}
+- Tìm uid người dùng: ${findUidStatus}
+- Đổi tên gợi nhớ: ${renameStatus}
+- Đã gửi tin nhắn: ${messageStatus}`.trim();
+
+        try {
+          console.log("[BG] Đang gửi thông báo tổng hợp.");
+          let h = await sendGP(finalMessage);
+          console.log("[BG] Gửi thông báo thành công:", h);
+        } catch (gpError) {
+          console.error("[BG] Gửi thông báo thất bại:", gpError.message);
         }
       }
-    }
+    });
 
-    let updatedCount = 0;
-    if (phonesToUpdateAuth.length) {
-      const res = await Customer.updateMany(
-        { phone: { $in: phonesToUpdateAuth } },
-        { $addToSet: { auth: authIdToAssign } },
-      );
-      updatedCount = res.modifiedCount || 0;
-    }
-
-    // --- BƯỚC 7: HOÀN TẤT ---
-    revalidateAndBroadcast("customer_data");
-    return NextResponse.json(
-      {
-        status: true,
-        mes: `Đã thêm ${insertedCount} KH mới và cập nhật quyền cho ${updatedCount} KH cũ.`,
-      },
-      { status: 200 },
-    );
-  } catch (error) {
-    console.error("POST Error:", error);
-    return NextResponse.json(
-      {
-        status: false,
-        mes: "Đã xảy ra lỗi phía server.",
-        error: error.message,
-      },
-      { status: 500 },
-    );
-  }
-}
-
-export async function PUT(request) {
-  await dbConnect();
-  try {
-    const body = await request.json();
-    const { _id, status, ...otherFields } = body;
-
-    if (!_id) {
-      return NextResponse.json(
-        { status: false, message: "_id is required for update." },
-        { status: 400 },
-      );
-    }
-
-    // --- BƯỚC 1: TÍNH TOÁN STAGE LEVEL (LOGIC CŨ CỦA BẠN) ---
-    let stageLevel = 0;
-    if (otherFields.study) {
-      stageLevel = 3;
-    } else if (otherFields.studyTry) {
-      stageLevel = 2;
-    } else if (otherFields.care) {
-      stageLevel = 1;
-    }
-
-    // Gán giá trị stageLevel và các trường khác vào lệnh $set
-    const updateOperation = {
-      $set: {
-        ...otherFields,
-        stageLevel: stageLevel,
-      },
-    };
-
-    // --- BƯỚC 2: XỬ LÝ TRẠNG THÁI ĐỘNG (LOGIC MỚI) ---
-    if (status && status.trim() !== "") {
-      // Nếu có status ID hợp lệ, thêm nó vào lệnh $set
-      updateOperation.$set.status = status;
-    } else {
-      // Nếu status là rỗng, thêm lệnh $unset để xóa trường này
-      updateOperation.$unset = { status: 1 };
-    }
-
-    // --- BƯỚC 3: THỰC THI LỆNH CẬP NHẬT ---
-    const updatedCustomer = await Customer.findByIdAndUpdate(
-      _id,
-      updateOperation,
-      { new: true },
-    ).lean();
-
-    if (!updatedCustomer) {
-      return NextResponse.json(
-        { status: false, message: "Customer not found." },
-        { status: 404 },
-      );
-    }
-
-    revalidateAndBroadcast("customer_data");
-    return NextResponse.json({ status: true, data: updatedCustomer });
-  } catch (error) {
-    if (error.name === "CastError") {
-      return NextResponse.json(
-        {
-          status: false,
-          message:
-            "Lỗi định dạng dữ liệu, có thể do ID trạng thái không hợp lệ.",
-          error: error.message,
-        },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json(
-      { status: false, message: "Server Error", error: error.message },
-      { status: 500 },
-    );
-  }
-}
-
-// Thêm import getCurrentUser để lấy thông tin người dùng an toàn
-
-export async function PATCH(request) {
-  await dbConnect();
-
-  try {
-    const currentUser = await getCurrentUser();
-    if (!currentUser) {
-      return NextResponse.json(
-        { status: false, message: "Yêu cầu đăng nhập." },
-        { status: 401 },
-      );
-    }
-
-    const body = await request.json();
-    const { customerId, updateData } = body;
-
-    // --- Kiểm tra đầu vào (không đổi) ---
-    if (!customerId || !Types.ObjectId.isValid(customerId)) {
-      return NextResponse.json(
-        { status: false, message: "ID khách hàng không hợp lệ." },
-        { status: 400 },
-      );
-    }
-    if (
-      !updateData ||
-      typeof updateData !== "object" ||
-      Object.keys(updateData).length === 0
-    ) {
-      return NextResponse.json(
-        { status: false, message: "Vui lòng cung cấp dữ liệu." },
-        { status: 400 },
-      );
-    }
-
-    // --- Lấy trạng thái cũ của khách hàng để ghi log ---
-    const oldCustomer = await Customer.findById(customerId)
-      .populate("status")
-      .lean();
-    if (!oldCustomer) {
-      return NextResponse.json(
-        { status: false, message: "Không tìm thấy khách hàng." },
-        { status: 404 },
-      );
-    }
-
-    let updateOperation;
-    let newCommentData = null;
-
-    // --- Phân loại hành động ---
-    if (updateData._comment) {
-      // Xử lý thêm bình luận mới
-      const newComment = {
-        user: currentUser._id,
-        stage: oldCustomer.stageLevel,
-        detail: updateData._comment.trim(),
-      };
-      updateOperation = {
-        $push: { comments: { $each: [newComment], $sort: { time: -1 } } },
-      };
-      newCommentData = newComment;
-
-      // START: THÊM LOGIC XÓA TRẠNG THÁI
-    } else if (updateData.status === null) {
-      // Xử lý xóa trạng thái
-      // Nếu status được gán giá trị null, chúng ta sẽ unset (xóa) trường này khỏi DB
-      updateOperation = { $unset: { status: "" } };
-      // END: THÊM LOGIC XÓA TRẠNG THÁI
-    } else {
-      // Xử lý cập nhật các trường thông thường
-      updateOperation = { $set: updateData };
-    }
-
-    // --- Thực thi cập nhật ---
-    const updatedCustomer = await Customer.findByIdAndUpdate(
-      customerId,
-      updateOperation,
-      { new: true },
-    )
-      .populate("status")
-      .populate({ path: "comments.user", select: "name" })
-      .lean();
-
-    if (!updatedCustomer) throw new Error("Cập nhật thất bại.");
-
-    // --- Ghi lại lịch sử hành động ---
-    if (updateData.name) {
-      await logUpdateName(
-        currentUser,
-        customerId,
-        oldCustomer.name,
-        updatedCustomer.name,
-      );
-    }
-    // Logic ghi log cho trạng thái giờ đây xử lý được cả cập nhật và xóa
-    if (updateData.status !== undefined) {
-      await logUpdateStatus(
-        currentUser,
-        customerId,
-        oldCustomer.status?.name || "Chưa có",
-        updatedCustomer.status?.name || "Chưa có",
-      );
-    }
-    if (updateData.stageLevel !== undefined) {
-      await logUpdateStage(
-        currentUser,
-        customerId,
-        oldCustomer.stageLevel,
-        updatedCustomer.stageLevel,
-      );
-    }
-    if (newCommentData) {
-      const addedComment = updatedCustomer.comments.find(
-        (c) =>
-          c.detail === newCommentData.detail &&
-          c.user._id.toString() === currentUser._id.toString(),
-      );
-      if (addedComment)
-        await logAddComment(currentUser, customerId, addedComment);
-    }
-    revalidateAndBroadcast("customer_data");
-    return NextResponse.json({ status: true, data: updatedCustomer });
-  } catch (error) {
-    console.error("PATCH Error:", error);
-    return NextResponse.json(
-      { status: false, message: "Lỗi phía máy chủ.", error: error.message },
-      { status: 500 },
-    );
+    return response;
+  } catch (err) {
+    console.error("API error:", err);
+    return NextResponse.json({ status: false, message: err?.message || "Internal error" }, { status: 500 });
   }
 }

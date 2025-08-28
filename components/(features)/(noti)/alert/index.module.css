@@ -13,7 +13,7 @@
 
 .popup {
     position: relative;
-    background-color: #ffffff;
+    background-color: var(--bg-primary);
     width: 100%;
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.15);

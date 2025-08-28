@@ -3,7 +3,7 @@ import styles from './index.module.css';
 
 const ICONS = {
     Image: 'https://assets.minimals.cc/public/assets/icons/files/ic-img.svg',
-    Ppt: 'https://assets.minimals.cc/public/assets/icons/files/ic-power_point.svg',
+    Ppt: 'https://lh3.googleusercontent.com/d/1JKzT-6E0tVU99RLRQ7Q0r6GcIs2_k6S3',
     Video: 'https://assets.minimals.cc/public/assets/icons/files/ic-video.svg',
     default: 'https://assets.minimals.cc/public/assets/icons/files/ic-zip.svg',
 };
