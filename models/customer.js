@@ -68,6 +68,7 @@ const CustomerSchema = new Schema(
     source: { type: Schema.Types.ObjectId, ref: "form" },
     area: { type: String },
     age: { type: String },
+    email: { type: String },
   },
   {
     timestamps: true,
