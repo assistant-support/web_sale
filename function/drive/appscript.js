@@ -1,6 +1,6 @@
 const SCRIPT_URL_SEND_MESSAGE = 'https://script.google.com/macros/s/AKfycbzhEEvakm6VzGRpNNORT9jZ3A8gYya2Bd5zjuTbpAgr8ZYaHO-0LB_DKibXyEHuo3ROfw/exec';
 const SCRIPT_URL_GET_UID = 'https://script.google.com/macros/s/AKfycbxMMwrvLEuqhsyK__QRCU0Xi6-qu-HkUBx6fDHDRAYfpqM9d4SUq4YKVxpPnZtpJ_b6wg/exec';
-const SCRIPT_URL_ACTION = 'https://script.google.com/macros/s/AKfycbz0Un7odETSubA0Xqxj2rUuOes_jE9h-j75mfMjSVEA1Km_5LxF4s7l7npbmdd92tzLng/exec';
+const SCRIPT_URL_ACTION = 'https://script.google.com/macros/s/AKfycbzD_BSTMoywu5KaUSmOAgiYTVjgaP5I1yBirYs1Cb5wBFgNq9wTTojydB4S8vjzafX5sA/exec';
 const SCRIPT_URL_GP = 'https://script.google.com/macros/s/AKfycbxvb6bM9l3Yw0n3QJILbNA4BMynBcuGdQYvXKuxNLWU1fhjoFS54OjZ2qbis3vJEm-QYg/exec';
 
 export async function senMesByPhone({ message, uid, phone }) {
