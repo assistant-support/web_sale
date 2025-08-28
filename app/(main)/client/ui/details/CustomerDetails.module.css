@@ -1,0 +1,473 @@
+/* File: app/client/ui/details/CustomerDetails.module.css */
+
+/* ================================================================ */
+/* === CẤU TRÚC LAYOUT CHÍNH (Main Layout & Structure) === */
+/* ================================================================ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #f3f4f6; /* Nền xám nhạt cho toàn bộ panel */
+}
+
+.content {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.loadingContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #6b7280;
+}
+
+.section {
+  background-color: #ffffff;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  /* Quan trọng: Loại bỏ padding-bottom ở đây để container con quyết định khoảng cách */
+}
+
+.sectionTitle {
+  font-size: 1rem; /* 16px */
+  font-weight: 600;
+  color: #111827;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.infoRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 14px;
+}
+.section .infoRow:last-of-type {
+  border-bottom: none;
+}
+
+.infoLabel {
+  color: #6b7280;
+}
+
+.infoValue {
+  color: #1f2937;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: right;
+}
+
+/* ================================================================ */
+/* === CONTAINER CHO CÁC NÚT (Button Containers) === */
+/* ================================================================ */
+
+/* Lớp cơ sở cho mọi khu vực chứa nút để đảm bảo khoảng cách đồng nhất */
+.buttonContainer {
+  padding: 12px; /* Khoảng đệm bên trong container */
+  /* Thêm đường viền phía trên để tách biệt rõ ràng với nội dung */
+  border-top: 1px solid #f3f4f6;
+  margin-top: 8px; /* Luôn có một khoảng margin nhỏ với infoRow cuối cùng */
+}
+
+.multiButtonContainer {
+  display: flex;
+  gap: 12px; /* Khoảng cách nhất quán giữa các nút */
+  justify-content: space-between;
+}
+
+.actionButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* ================================================================ */
+/* === STYLES CHO NÚT (Buttons) === */
+/* ================================================================ */
+
+/* Lớp cơ sở cho TẤT CẢ các nút để đảm bảo style đồng nhất */
+.buttonBase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid transparent;
+}
+
+/* Kiểu nút chính (nền màu) */
+.greenButton {
+  background-color: #e7f5ef;
+  color: #1e8449;
+  border-color: #a9dfbf;
+}
+.greenButton:hover {
+  background-color: #d4ece1;
+  border-color: #1e8449;
+  box-shadow: 0 2px 8px rgba(30, 132, 73, 0.2);
+}
+
+/* Kiểu nút phụ (viền, nền trong suốt) */
+.ghostButton {
+  background-color: #fff;
+  color: #374151;
+  border-color: #d1d5db;
+}
+.ghostButton:hover {
+  background-color: #f9fafb;
+}
+
+/* Nút rộng 100% */
+.fullWidthButton {
+  width: 100%;
+}
+
+/* Nút inline nhỏ (dùng cho Sửa, Thay đổi...) */
+.inlineButton {
+  background: none;
+  color: #3b82f6;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+.inlineButton:hover {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+/* Nút lưu/hủy inline */
+.inlineSaveButton,
+.inlineCancelButton {
+  padding: 6px 12px;
+  color: white;
+}
+.inlineSaveButton {
+  background-color: #3b82f6;
+}
+.inlineCancelButton {
+  background-color: #9ca3af;
+}
+
+/* ================================================================ */
+/* === CÁC THÀNH PHẦN GIAO DIỆN KHÁC (Other UI Components) === */
+/* ================================================================ */
+
+/* --- Status Tag (Tình trạng TT) --- */
+.statusTag {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+}
+.statusTag[data-status="found"] {
+  background-color: #3b82f6;
+}
+.statusTag[data-status="not-found"] {
+  background-color: #9ca3af;
+}
+.statusTag[data-status="success"] {
+  background-color: #22c55e;
+}
+.statusTag[data-status="warning"] {
+  background-color: #f59e0b;
+}
+.statusTag[data-status="error"] {
+  background-color: #ef4444;
+}
+
+/* --- Input, Select, Textarea --- */
+.statusSelector,
+.noteSection {
+  padding: 10px 16px;
+  animation: slideDown 0.3s ease-out;
+}
+
+.statusSelector select,
+.noteTextArea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.noteTextArea {
+  min-height: 80px;
+  resize: vertical;
+}
+.noteTextArea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+.inlineInput {
+  flex-grow: 1;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+/* --- Stage Selector --- */
+.stageSelector {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  position: relative;
+  padding: 10px 0;
+}
+.stageSelector::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background-color: #e5e7eb;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+.stageStep {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  z-index: 2;
+  background-color: #ffffff;
+  padding: 0 4px;
+}
+.stageDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #d1d5db;
+  background-color: #ffffff;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+.stageLabel {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 5px;
+  text-align: center;
+}
+.stageStep.active .stageDot {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+.stageStep.active .stageLabel {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+/* --- Notification & Animations --- */
+.notificationContainer {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ================================================================ */
+/* === MÀU SẮC CHO NÚT LƯU & XÓA (Save & Danger Buttons) === */
+/* ================================================================ */
+
+/* Kiểu nút LƯU (màu xanh dương) */
+.blueButton {
+  background-color: #3b82f6; /* Nền xanh dương */
+  color: white;
+  border-color: #3b82f6;
+}
+.blueButton:hover {
+  background-color: #2563eb; /* Đậm hơn khi hover */
+}
+
+/* Kiểu nút XÓA/NGUY HIỂM (màu đỏ) */
+.dangerButton {
+  background-color: #ef4444; /* Nền đỏ */
+  color: white;
+  border-color: #ef4444;
+}
+.dangerButton:hover {
+  background-color: #dc2626; /* Đậm hơn khi hover */
+}
+
+.commentSection {
+  margin-top: 20px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+}
+
+.commentInputArea {
+  display: flex;
+  gap: 8px;
+  align-items: center; /* Căn giữa nút và textarea */
+}
+
+.commentTextarea {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 20px; /* Bo tròn giống hình */
+  font-size: 14px;
+  resize: vertical;
+  min-height: 40px;
+  transition: border-color 0.2s;
+  background-color: #f8fafc;
+}
+
+.commentTextarea:focus {
+  outline: none;
+  border-color: #4f46e5;
+  background-color: white;
+}
+
+.commentSubmitButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: transparent;
+  color: #64748b; /* Màu icon mặc định */
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.commentSubmitButton:hover:not(:disabled) {
+  color: #4f46e5;
+  background-color: #eef2ff;
+}
+
+.commentSubmitButton:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.commentListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.commentCount {
+  font-weight: 500;
+}
+
+.commentList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.commentItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Đây là icon Giai đoạn thay thế cho Avatar */
+.commentStageIcon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: #eef2ff;
+  color: #4338ca;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1.2;
+  border: 1px solid #c7d2fe;
+}
+
+.commentStageIcon strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.commentContent {
+  flex-grow: 1;
+}
+
+.commentHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.commentUser {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1e293b;
+}
+
+.commentTime {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.commentDetail {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #334155;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.noComments {
+  text-align: center;
+  font-size: 14px;
+  color: #94a3b8;
+  padding: 20px 0;
+}

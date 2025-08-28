@@ -1,0 +1,63 @@
+/* ++ ADDED: File CSS module dùng chung cho UserDisplay và ZaloDisplay */
+
+.container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%; /* Bo tròn ảnh */
+  object-fit: cover; /* Đảm bảo ảnh không bị méo */
+  flex-shrink: 0;
+}
+
+.mainText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1e293b;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.subText {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.2;
+}
+.userTagContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.userTagContainer > div:first-child {
+  flex-grow: 1; /* Cho phép khối này co giãn để chiếm không gian thừa */
+  flex-shrink: 1; /* Cho phép khối này co lại nếu cần */
+  min-width: 0; /* Cần thiết để flexbox co lại đúng cách khi có overflow */
+}
+
+.roleTag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap; /* Đảm bảo tag không bị xuống dòng */
+  flex-shrink: 0;
+}
+
+.roleAdmin {
+  background-color: #dcfce7; /* green-100 */
+  color: #166534; /* green-800 */
+}
+
+.roleEmployee {
+  background-color: #f1f5f9; /* slate-100 */
+  color: #475569; /* slate-600 */
+}

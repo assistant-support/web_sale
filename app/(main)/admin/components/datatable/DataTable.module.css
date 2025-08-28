@@ -1,0 +1,157 @@
+/* ++ ADDED: File CSS cho component DataTable mới */
+.tableWrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #fff;
+}
+
+.tableHeader {
+  display: grid;
+  background-color: #f8fafc;
+  font-weight: 600;
+  font-size: 12px;
+  color: #475569;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  position: sticky; /* ++ ADDED */
+  top: 0; /* ++ ADDED */
+  z-index: 1; /* ++ ADDED */
+}
+
+.headerCell {
+  padding: 10px 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableBody {
+  flex-grow: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.tableRow {
+  display: grid;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableRow:hover {
+  background-color: #f8fafc;
+}
+.activeRow,
+.tableRow.activeRow:hover {
+  background-color: #eef2ff; /* blue-100 */
+  /* Thêm một đường viền trái để nhấn mạnh */
+  box-shadow: inset 3px 0 0 0 #4f46e5; /* indigo-600 */
+}
+
+.cell {
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actionCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.addButton,
+.deleteButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.addButton {
+  color: #3b82f6; /* blue-500 */
+}
+.addButton:hover {
+  background-color: #dbeafe; /* blue-100 */
+}
+
+.deleteButton {
+  color: #94a3b8; /* slate-400 */
+}
+.deleteButton:hover {
+  background-color: #fee2e2; /* red-100 */
+  color: #ef4444; /* red-500 */
+}
+
+.noData {
+  padding: 40px;
+  text-align: center;
+  color: #64748b;
+}
+/* ++ ADDED: Style cho Footer */
+.tableFooterContainer {
+  flex-shrink: 0; /* Không co lại */
+  border-top: 1px solid #e2e8f0;
+}
+
+.tableFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.footerPlaceholder {
+  height: 41px; /* Chiều cao bằng footer thật để layout không bị giật */
+}
+
+.pageNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background-color: #fff;
+  cursor: pointer;
+}
+.navButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.limitText {
+  font-size: 12px;
+  color: #475569;
+  margin: 0;
+  line-height: 1.4;
+}

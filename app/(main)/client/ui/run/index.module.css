@@ -1,0 +1,300 @@
+.container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background-color: #f9fafb;
+    padding: 6px 16px;
+    border-radius: 5px 0 0 5px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    font-size: 14px;
+    flex-grow: 1;
+}
+
+.loadingContainer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid var(--border-color);
+    border-radius: 50%;
+    border-top-color: var(--main_d);
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.jobInfo {
+    flex-grow: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.jobName {
+    font-weight: 600;
+    color: #1f2937;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.progressText {
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.timeLeft {
+    font-weight: 500;
+    color: #4b5563;
+    background-color: #e5e7eb;
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.updateButton {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 4px 12px;
+    border-radius: 0 5px 5px 0;
+    border: thin solid #e2e8f0;
+    background: #e2e8f0;
+}
+
+.popupContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 8px;
+}
+
+.popupGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.popupLabel {
+    font-weight: 600;
+    font-size: 14px;
+    color: #374151;
+}
+
+.popupValue {
+    font-size: 14px;
+    color: #4b5563;
+    background-color: #f9fafb;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    word-break: break-all;
+}
+
+.recipientSummary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.editRecipientsBtn {
+    background: none;
+    border: none;
+    color: var(--main_a);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 4px;
+}
+
+.popupActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.actionButton {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+.actionButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.stopButton {
+    background-color: #fee2e2;
+    color: #b91c1c;
+}
+
+.stopButton:not(:disabled):hover {
+    background-color: #fecaca;
+}
+
+.saveButton {
+    background-color: var(--main_a);
+    color: white;
+}
+
+.saveButton:not(:disabled):hover {
+    opacity: 0.9;
+}
+
+.progressDisplay {
+    background-color: #f9fafb;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    font-size: 14px;
+}
+
+.progressBarContainerSmall {
+    width: 100%;
+    background-color: #e5e7eb;
+    border-radius: 8px;
+    height: 8px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+.progressBarSmall {
+    height: 100%;
+    background-color: #22c55e;
+    border-radius: 8px;
+    transition: width 0.5s ease-in-out;
+}
+
+.taskList {
+    max-height: 250px;
+    overflow-y: auto;
+    background-color: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.taskItem {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 6px;
+    background-color: white;
+    border: 1px solid #e5e7eb;
+    transition: all 0.2s ease;
+}
+
+.taskItem.removed {
+    opacity: 0.5;
+    background-color: #f3f4f6;
+}
+
+.taskItem.processed {
+    background-color: #eef2ff;
+    border-color: #c7d2fe;
+    color: #6b7280;
+}
+
+.taskInfo {
+    flex-grow: 1;
+}
+
+.taskName {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.taskStatus {
+    font-size: 12px;
+    color: #6b7280;
+    font-style: italic;
+}
+
+.toggleTaskBtn {
+    padding: 4px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    background-color: white;
+}
+
+.toggleTaskBtn.remove {
+    color: #dc3545;
+}
+
+.toggleTaskBtn.reAdd {
+    color: #198754;
+}
+
+.toggleTaskBtn:disabled {
+    cursor: not-allowed;
+    background-color: #e9ecef;
+    color: #adb5bd;
+    border-color: #dee2e6;
+}
+
+.statGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    background-color: #f9fafb;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+}
+
+.statGrid>div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.statTitle {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.statValue {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.statusProcessing {
+    color: var(--main_a);
+    text-transform: capitalize;
+}
+
+.successRate {
+    color: #16a34a;
+}
+
+.failureRate {
+    color: #dc2626;
+}

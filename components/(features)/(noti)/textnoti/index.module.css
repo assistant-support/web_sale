@@ -1,0 +1,25 @@
+/* components/(features)/(noti)/textnoti/index.module.css */
+
+.container {
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* --- CÁC LỚP MÀU MỚI --- */
+.green {
+  background-color: #22c55e; /* Xanh lá */
+}
+
+.red {
+  background-color: #ef4444; /* Đỏ */
+}
+
+.yellow {
+  background-color: #f59e0b; /* Vàng */
+}
+
+.default {
+  background-color: #3b82f6; /* Xanh dương (mặc định) */
+}

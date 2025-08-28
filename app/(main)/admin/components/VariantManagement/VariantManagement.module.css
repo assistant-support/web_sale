@@ -1,0 +1,103 @@
+/* ** MODIFIED: Tái cấu trúc hoàn toàn file CSS */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.header {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mainTitle {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.btnAdd {
+  padding: 8px 16px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btnAdd:hover {
+  background-color: #2563eb;
+}
+
+.listContainer {
+  flex-grow: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Sử dụng Grid cho bảng này */
+.row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 120px 150px; /* Tỉ lệ các cột */
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+  flex-shrink: 0;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.gridHeader {
+  font-weight: 600;
+  color: #475569;
+  background-color: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  position: sticky; /* Giữ header của bảng khi cuộn */
+  top: 0;
+  z-index: 1;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end; /* Đẩy nút về bên phải */
+}
+
+.btn {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btnEdit {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+.btnEdit:hover {
+  background-color: #e2e8f0;
+}
+
+.btnDelete {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+.btnDelete:hover {
+  background-color: #fecaca;
+}

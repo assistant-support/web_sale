@@ -1,0 +1,235 @@
+/* ++ ADDED: CSS Module dùng chung cho các panel chi tiết, đã nâng cấp */
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #f9fafb;
+}
+.header {
+  padding: 16px;
+  background-color: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+.content {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.section {
+  background-color: #fff;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+}
+.listItem {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.listItem:last-child {
+  border-bottom: none;
+}
+.listItemAction:hover {
+  background-color: #f3f4f6;
+  cursor: pointer;
+}
+.emptyText {
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: #9ca3af;
+}
+.infoRow,
+.infoRowReadOnly {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 16px;
+  align-items: center;
+  border-bottom: 1px solid #f3f4f6;
+}
+.infoRow:last-child,
+.infoRowReadOnly:last-child {
+  border-bottom: none;
+}
+.infoLabel {
+  color: #6b7280;
+  font-size: 14px;
+}
+.infoValue {
+  color: #1f2937;
+  font-weight: 500;
+}
+.valueGroup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.scriptUrl {
+  font-family: monospace;
+  font-size: 12px;
+  background-color: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: #fff;
+  border-top: 1px solid #e5e7eb;
+}
+.primaryButton,
+.secondaryButton,
+.deleteButton,
+.assignButton,
+.revokeButton,
+.editInlineBtn,
+.saveInlineBtn,
+.cancelInlineBtn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.deleteButton:disabled,
+.assignButton:disabled,
+.revokeButton:disabled,
+.saveInlineBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.primaryButton {
+  background-color: #2563eb;
+  color: #fff;
+}
+.primaryButton:hover {
+  background-color: #1d4ed8;
+}
+.secondaryButton {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+.deleteButton {
+  background-color: transparent;
+  color: #ef4444;
+  margin-right: auto;
+}
+.deleteButton:hover {
+  background-color: #fee2e2;
+}
+.assignButton {
+  background-color: #dbeafe;
+  color: #2563eb;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+.revokeButton {
+  background-color: #fee2e2;
+  color: #dc2626;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+.editInlineBtn {
+  font-size: 12px;
+  color: #2563eb;
+  background: none;
+  padding: 4px;
+}
+.editInlineBtn:hover {
+  background-color: #eff6ff;
+}
+.saveInlineBtn,
+.cancelInlineBtn {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.saveInlineBtn {
+  background-color: #22c55e;
+  color: white;
+}
+.cancelInlineBtn {
+  background-color: #e5e7eb;
+}
+.editGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.input {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  width: 100%;
+}
+.textareaScript {
+  width: 250px;
+  min-height: 80px;
+  resize: vertical;
+}
+.collapsibleSection {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background-color: #fff;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.collapsibleHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chevron {
+  transition: transform 0.2s;
+}
+.chevronOpen {
+  transform: rotate(180deg);
+}
+.userRole {
+  font-size: 12px;
+  color: #64748b;
+  padding: 2px 8px;
+  background-color: #f1f5f9;
+  border-radius: 10px;
+}
+.error {
+  padding: 24px;
+  text-align: center;
+  color: #ef4444;
+}

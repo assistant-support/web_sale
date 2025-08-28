@@ -1,0 +1,98 @@
+.container {
+  padding: 8px 16px; /* Giảm padding */
+}
+.loading,
+.noHistory {
+  text-align: center;
+  padding: 32px;
+  color: #888;
+}
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px; /* Giảm khoảng cách */
+}
+.item {
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+.item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* Thêm viền màu cho trạng thái */
+.success {
+  border-left: 4px solid #10b981;
+}
+.failed {
+  border-left: 4px solid #ef4444;
+}
+
+.itemHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start; /* Căn lề trên */
+}
+.itemTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px; /* Khoảng cách giữa các dòng title */
+}
+.itemAction {
+  font-weight: 600;
+  font-size: 15px;
+  color: #1f2937;
+}
+.itemUser {
+  /* Bị thay thế bởi itemMeta */
+  display: none;
+}
+.itemMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.itemTime {
+  font-size: 12px;
+  color: #6b7280;
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+.itemBody {
+  font-size: 13px;
+  color: #374151;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed #d1d5db;
+  display: flex; /* Thêm flexbox */
+  flex-direction: column; /* Sắp xếp theo cột */
+  gap: 6px; /* Khoảng cách giữa các dòng chi tiết */
+}
+.itemBody p {
+  margin: 0; /* Bỏ margin mặc định */
+}
+
+.detailRow {
+  display: flex;
+}
+.detailLabel {
+  font-weight: 600;
+  color: #4b5563;
+  min-width: 100px; /* Cố định chiều rộng để thẳng hàng */
+  flex-shrink: 0;
+}
+.detailValue {
+  color: #1f2937;
+}
+.detailValue.code {
+  font-family: monospace;
+  background-color: #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}

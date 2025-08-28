@@ -1,0 +1,112 @@
+/* app/(main)/admin/components/Panel/LabelEditorPanel.module.css */
+
+.panelBody {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formGroup label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.formGroup input,
+.formGroup textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: #f8fafc;
+  transition: all 0.2s ease;
+  box-sizing: border-box; /* Quan trọng */
+}
+
+.formGroup input:focus,
+.formGroup textarea:focus {
+  background-color: #fff;
+  border-color: var(--main);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+}
+
+.formGroup textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.panelFooter {
+  margin-top: auto; /* Đẩy xuống dưới cùng */
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cancelButton,
+.saveButton {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancelButton {
+  background-color: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+.cancelButton:hover:not(:disabled) {
+  background-color: #e2e8f0;
+}
+
+.saveButton {
+  background-color: var(--main);
+  color: rgb(0, 0, 0);
+}
+.saveButton:hover:not(:disabled) {
+  background-color: var(--main_d);
+}
+
+.saveButton:disabled,
+.cancelButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box; /* Đảm bảo padding không làm vỡ layout */
+  margin-top: 4px; /* Thêm khoảng cách nhỏ với label */
+}
+
+.textarea {
+  resize: vertical; /* Cho phép người dùng thay đổi chiều cao */
+  min-height: 120px;
+}
+
+.error {
+  color: #dc2626; /* red-600 */
+  font-size: 14px;
+  margin-top: 8px;
+}

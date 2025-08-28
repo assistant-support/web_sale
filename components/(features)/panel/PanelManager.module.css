@@ -1,0 +1,94 @@
+/* components/(features)/panel/PanelManager.module.css */
+
+/* Container chính cho các nút điều khiển */
+.controlsContainer {
+  /* SỬA LỖI: Dùng `position: fixed` để nó luôn nằm ở góc trên bên trái 
+      của màn hình, bất kể bạn cuộn trang đến đâu.
+    */
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 1050; /* Luôn nằm trên cùng */
+  /* position: relative;  <-- XÓA DÒNG GÂY LỖI NÀY */
+}
+
+/* Nút chính dạng viên thuốc */
+.controlButton {
+  background-color: #1f2937;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Phần hiển thị số lượng panel ẩn */
+.countSection {
+  padding: 8px 16px;
+  transition: background-color 0.2s;
+}
+
+.countSection:hover {
+  background-color: #4b5563;
+}
+
+/* Phần nút X đóng tất cả */
+.closeAllIcon {
+  padding: 8px 12px;
+  border-left: 1px solid #4b5563;
+  transition: background-color 0.2s;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.closeAllIcon:hover {
+  background-color: #ef4444; /* Màu đỏ khi hover */
+}
+
+/* Danh sách dropdown */
+.collapsedList {
+  position: absolute; /* Định vị theo .controlsContainer */
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  width: 280px;
+  overflow: hidden;
+  animation: slideDown 0.2s ease-out;
+}
+
+.collapsedItem {
+  padding: 12px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsedItem:hover {
+  background-color: #f9fafb;
+}
+
+.collapsedItem:last-child {
+  border-bottom: none;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

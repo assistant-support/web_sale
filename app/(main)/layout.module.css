@@ -1,0 +1,15 @@
+/* app/(main)/layout.module.css */
+.layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+.nav {
+  width: 200px;
+  flex-shrink: 0;
+}
+.main {
+  flex-grow: 1;
+  overflow-y: auto;
+  background-color: #f8fafc;
+}

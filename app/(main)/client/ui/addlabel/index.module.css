@@ -1,0 +1,139 @@
+/* ---- Chip “+ Nhãn” ---- */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    font-size: 13px;
+    line-height: 1.4;
+    border-radius: 16px;
+    cursor: pointer;
+    border: 1px dashed var(--main_d);
+    background: var(--bg-secondary);
+    color: var(--main_d);
+    transition: background 0.2s;
+}
+
+.chip:hover,
+.chip:focus-visible {
+    background: var(--hover);
+    outline: none;
+}
+
+/* ---- Modal backdrop ---- */
+.backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 300;
+}
+
+.button {
+    padding: 10px 12px;
+    background: var(--main_d);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    border-radius: 8px;
+    color: rgb(255, 255, 255);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    width: 100%;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.loadingOverlay{
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 400;
+}
+
+/* ---- Modal ---- */
+.modal {
+    width: min(480px, 100%);
+    background: var(--bg-primary);
+    border-radius: 8px;
+    box-shadow: var(--boxshaw2);
+}
+
+/* ---- Form ---- */
+.title {
+    margin: 0 0 16px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+}
+
+
+
+.group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+}
+
+.input {
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
+    font-family: 'Roboto', sans-serif;
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    border-top: thin solid var(--border-color);
+    padding-top: 16px;
+}
+
+.btnCancel,
+.btnSave {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 22px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: opacity 0.2s;
+}
+
+.btnCancel {
+    background: var(--hover);
+    color: var(--text-primary);
+}
+
+.btnSave {
+    background: var(--main_d);
+    color: #fff;
+}
+
+.btnCancel:hover,
+.btnSave:hover,
+.btnCancel:focus-visible,
+.btnSave:focus-visible {
+    opacity: 0.9;
+    outline: none;
+}

@@ -1,0 +1,157 @@
+/* File: PanelStyles.module.css */
+.panelContent {
+  padding: 16px;
+  height: 100%;
+  flex-direction: column;
+}
+
+.contentTitle {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.loading,
+.error {
+  padding: 24px;
+  text-align: center;
+  color: #6b7280;
+}
+.error {
+  color: #ef4444;
+}
+
+/* Search */
+.searchContainer {
+  margin-bottom: 16px;
+}
+.searchInput {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.searchInput:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+/* List */
+.listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.listItem:hover {
+  background-color: #f3f4f6;
+}
+.listItemInfo {
+  display: flex;
+  flex-direction: column;
+}
+.itemName {
+  font-weight: 500;
+  color: #111827;
+}
+.itemSubtext {
+  font-size: 12px;
+  color: #6b7280;
+}
+.listItemStatus {
+  font-size: 12px;
+  color: #374151;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+/* Detail Panel */
+.detailGroup {
+  background-color: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+}
+.detailRow {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+.detailRow:not(:last-child) {
+  border-bottom: 1px dashed #e5e7eb;
+}
+.detailLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+.detailValue {
+  font-size: 14px;
+  color: #1f2937;
+}
+.detailValueJson {
+  font-family: monospace;
+  font-size: 13px;
+  background-color: #e5e7eb;
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #1f2937;
+}
+
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 16px;
+  color: #64748b;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.iconButton:hover {
+  background-color: #e2e8f0;
+}
+
+.deleteButton:hover {
+  background-color: #fee2e2; /* red-100 */
+  color: #b91c1c; /* red-700 */
+}
+/* -------------------- START: THÊM STYLE CHO STT -------------------- */
+.itemIndex {
+  flex-shrink: 0; /* Không co lại */
+  font-size: 14px;
+  color: #888;
+  margin-right: 12px; /* Khoảng cách với nội dung chính */
+  font-weight: 500;
+  width: 25px; /* Đảm bảo các số được căn thẳng hàng */
+  text-align: right;
+}
+
+.noItemsMessage {
+  text-align: center;
+  padding: 20px;
+  color: #888;
+  font-style: italic;
+}

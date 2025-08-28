@@ -1,0 +1,83 @@
+/* === Overlay (Lớp mờ nền) === */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+  /* Quan trọng: Mặc định không bắt sự kiện click */
+  pointer-events: none;
+}
+
+/* Khi popup mở, lớp mờ mới hiện ra và bắt được sự kiện click để đóng */
+.overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* === Style chung cho cả 2 Panel === */
+.popup,
+.popup2 {
+  background: white;
+  height: 100%;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  position: fixed; /* Dùng fixed để nó luôn nằm so với cửa sổ trình duyệt */
+  top: 0;
+  right: 0;
+  transform: translateX(100%); /* Ẩn panel bằng cách đẩy nó ra khỏi màn hình */
+  transition: transform 0.3s ease-in-out; /* Hiệu ứng chuyển động mượt mà */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Khi một panel được mở, nó sẽ trượt vào màn hình */
+.popup.open,
+.popup2.open {
+  transform: translateX(0);
+}
+
+/* === PHÉP THUẬT NẰM Ở ĐÂY: HIỆU ỨNG ĐẨY === */
+/* Khi panel phụ (popup2) mở ra, panel chính (popup) sẽ được gán thêm class này */
+.popup.shifted {
+  /* Đẩy panel chính sang bên trái một khoảng bằng đúng chiều rộng của nó */
+  /* Quan trọng: transform này sẽ GHI ĐÈ lên transform của .popup.open */
+  transform: translateX(-100%);
+}
+
+/* === Các thành phần bên trong Panel === */
+.header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0; /* Không co lại */
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  padding: 0 5px;
+}
+
+.body {
+  padding: 20px;
+  overflow-y: auto; /* Thêm thanh cuộn khi nội dung dài */
+  flex-grow: 1; /* Chiếm hết không gian còn lại */
+}
+
+.error {
+  color: red;
+  padding: 20px;
+}

@@ -1,0 +1,71 @@
+/* web_tslhu/app/(main)/admin/components/LabelSchedule/shared/StackedProgressBar.module.css */
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.statsRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.statNumber {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+
+.value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.label {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.progressBarContainer {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  background-color: #e2e8f0;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.segmentSuccess {
+  background-color: #22c55e; /* green-500 */
+  height: 100%;
+  transition: width 0.3s ease-in-out;
+}
+
+.segmentFailed {
+  background-color: #ef4444; /* red-500 */
+  height: 100%;
+  transition: width 0.3s ease-in-out;
+}
+
+.percentageRow {
+  display: flex;
+  font-size: 11px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.percentageRow span:first-child {
+  flex-basis: 50%;
+  color: #166534; /* green-800 */
+}
+
+.percentageRow span:nth-child(2) {
+  flex-basis: 50%;
+  color: #991b1b; /* red-800 */
+  text-align: left;
+  padding-left: 8px;
+}

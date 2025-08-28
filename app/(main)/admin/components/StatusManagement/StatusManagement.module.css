@@ -1,0 +1,115 @@
+/* ** MODIFIED: Tái cấu trúc hoàn toàn file CSS */
+
+.container {
+  /* Dùng Flexbox để kiểm soát layout */
+  display: flex;
+  flex-direction: column;
+  /* Quan trọng: Chiếm 100% chiều cao của tab cha */
+  height: 100%;
+  padding: 24px;
+  box-sizing: border-box; /* Đảm bảo padding không làm vỡ layout */
+}
+
+.header {
+  /* Không co lại khi list dài ra */
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mainTitle {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.btnAdd {
+  padding: 8px 16px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btnAdd:hover {
+  background-color: #2563eb;
+}
+
+.listContainer {
+  /* Quan trọng: Chiếm toàn bộ không gian còn lại */
+  flex-grow: 1;
+  /* Quan trọng: Tạo thanh cuộn chỉ riêng cho khu vực này */
+  overflow-y: auto;
+  /* Trick để overflow hoạt động đúng trong mọi trình duyệt với flexbox */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background-color: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: var(--boxshaw1);
+  /* Quan trọng: Ngăn các row co lại khi list quá dài */
+  flex-shrink: 0;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  font-weight: 600;
+  color: #334155;
+}
+
+.desc {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btnEdit {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+.btnEdit:hover {
+  background-color: #e2e8f0;
+}
+
+.btnDelete {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+.btnDelete:hover {
+  background-color: #fecaca;
+}

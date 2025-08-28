@@ -1,0 +1,17 @@
+.container {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.pill {
+  width: 24px; /* Chiều rộng của mỗi viên */
+  height: 8px; /* Chiều cao của mỗi viên */
+  border-radius: 4px; /* Bo tròn để tạo hình viên thuốc */
+  background-color: #e5e7eb; /* Màu xám cho ô không tô */
+  transition: background-color 0.3s ease;
+}
+
+.pill.active {
+  background-color: #22c55e; /* Màu xanh lá cho ô được tô */
+}
