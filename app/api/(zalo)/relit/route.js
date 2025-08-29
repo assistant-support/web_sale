@@ -1,5 +1,5 @@
 import ZaloAccount from "@/models/zalo";
-import { connectDB } from "@/lib/mongodb";
+import connectDB from "@/config/connectDB";
 
 export async function GET() {
     await connectDB();
