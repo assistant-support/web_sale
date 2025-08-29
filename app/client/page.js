@@ -14,7 +14,7 @@ function PageSkeleton() {
 export default async function Page({ searchParams }) {
     let c = await searchParams
     const user = await checkAuthToken()
-
+    if (!user) return null
     const [initialResult, userAuth, sources, label, zalo, users, variant, running] = await Promise.all([
         getCombinedData(c),
         user_data({ _id: user.id }),
@@ -25,8 +25,7 @@ export default async function Page({ searchParams }) {
         variant_data(),
         getRunningSchedulesAction()
     ]);
-    console.log(userAuth);
-    
+
     if (!userAuth[0].role.includes('Admin') && !userAuth[0].role.includes('Sale')) {
         return (
             <div className="flex_center" style={{ height: '100%', width: '100%' }}>

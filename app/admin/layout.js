@@ -1,3 +1,5 @@
+import checkAuthToken from "@/utils/checktoken"
+
 export const dynamic = 'force-dynamic';
 
 import { cookies } from 'next/headers';
@@ -13,21 +15,11 @@ export const metadata = {
 };
 
 export default async function RootLayout({ children }) {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(process.env.token)?.value;
-    const response = await fetch(`${process.env.URL}/api/check`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ source: 1 }),
-        cache: 'no-store'
-    });
-    let data = null;
-    const result = await response.json();
-    if (result.status === 2) { data = result.data }
-    if (!data.role.includes('Admin')) {
+    let user = await checkAuthToken()
+    if (!user) {
+        return <Layout_Login />
+    }
+    if (!user.role.includes('Admin')) {
         return (
             <div className="flex_center" style={{ height: '100%', width: '100%' }}>
                 <h4 style={{ fontStyle: 'italic' }}>Bạn không có quyền truy cập trang này</h4>
@@ -35,18 +27,13 @@ export default async function RootLayout({ children }) {
         )
     }
     return (
-        <>
-
-            {data ?
-                <div className={air.layout}>
-                    <div className={air.nav}>
-                        <Nav data={data} />
-                    </div>
-                    <div className={air.main}>
-                        {children}
-                    </div>
-                </div> :
-                <Layout_Login />}
-        </>
+        <div className={air.layout}>
+            <div className={air.nav}>
+                <Nav data={user} />
+            </div>
+            <div className={air.main}>
+                {children}
+            </div>
+        </div>
     );
 }
