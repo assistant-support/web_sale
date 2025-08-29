@@ -7,6 +7,7 @@ import checkAuthToken from '@/utils/checktoken';
 import User from '@/models/users';
 import '@/models/zalo' // Giữ lại nếu Zalo Account vẫn liên quan đến Customer
 import ScheduledJob from "@/models/schedule";
+import { reloadCustomers } from '@/data/customers/wraperdata.db';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
@@ -164,6 +165,7 @@ export async function getCombinedData(params) {
 
 export async function revalidateData() {
     revalidateTag('combined-data');
+    await reloadCustomers();
 }
 
 export async function updateCustomerInfo(previousState, formData) {

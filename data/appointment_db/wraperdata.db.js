@@ -1,7 +1,7 @@
 // data/actions/appointment.actions.js
 'use server'
 
-import { getAppointmentsByCustomer, getAppointmentsByMonth } from './handledata.db'
+import { getAppointmentsByCustomer, getAppointmentsByMonth, dataAppointments } from './handledata.db'
 import { revalidateTag } from 'next/cache'
 
 /**
@@ -23,6 +23,10 @@ export async function appointment_data(params) {
     // Bạn có thể trả về mảng rỗng hoặc throw lỗi nếu không có tham số hợp lệ
     console.warn("appointment_data được gọi mà không có tham số hợp lệ.");
     return [];
+}
+
+export async function appointment_data_all() {
+    return await dataAppointments();
 }
 
 /**

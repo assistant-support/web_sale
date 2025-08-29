@@ -1,0 +1,23 @@
+.wrap {
+    display: flex;
+    padding: 8px;
+    border-radius: 5px;
+    background: var(--bg-primary);
+    gap: 8px;
+    border: thin solid var(--border-color);
+}
+
+.button {
+    padding: 8px 16px;
+    background: unset;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.button.active {
+    background: var(--border-color);
+}
+
+.button:hover {
+    background: var(--bg-secondary);
+}

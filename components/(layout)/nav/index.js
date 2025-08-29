@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, startTransition, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import air from './index.module.css';
-import { Svg_Dark, Svg_Left, Svg_Logout, Svg_Menu, Svg_Mode, Svg_Setting, Svg_Chart } from '../../(icon)/svg';
+import { Svg_Dark, Svg_Left, Svg_Logout, Svg_Menu, Svg_Mode, Svg_Setting, Svg_Chart, Svg_Canlendar, Svg_Profile } from '../../(icon)/svg';
 import Menu from '../../(ui)/(button)/menu';
 import Switch from "@/components/(ui)/(button)/swith";
 import WrapIcon from '../../(ui)/(button)/hoveIcon';
@@ -25,7 +25,9 @@ const initialNavItems = [
     ),
     content: 'Chăm sóc'
   },
-  { href: '/', icon: <Svg_Chart h={22} w={22} c={'var(--text-secondary)'} />, content: 'Thống kê' }
+  { href: '/calendar', icon: <Svg_Canlendar h={22} w={22} c={'var(--text-secondary)'} />, content: 'Lịch hẹn' },
+   { href: '/user', icon: <Svg_Profile h={22} w={22} c={'var(--text-secondary)'} />, content: 'Nhân sự' },
+  { href: '/admin', icon: <Svg_Chart h={22} w={22} c={'var(--text-secondary)'} />, content: 'Thống kê' }
 ];
 
 export default function Nav() {
@@ -33,8 +35,6 @@ export default function Nav() {
   const router = useRouter();
   const [orderedItems, setOrderedItems] = useState(initialNavItems);
   const navContainerRef = useRef(null);
-  const draggedItem = useRef(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   // Popup search (giữ giao diện, bỏ fetch data)
   const [isSearchPopupOpen, setIsSearchPopupOpen] = useState(false);
@@ -133,33 +133,6 @@ export default function Nav() {
     } else {
       startTransition(() => router.push(href));
     }
-  };
-
-  // Drag & drop
-  const handleDragStart = (e, position) => {
-    draggedItem.current = position;
-  };
-
-  const handleDragEnter = (e, position) => {
-    if (draggedItem.current === null || dragOverIndex === position) return;
-    setDragOverIndex(position);
-  };
-
-  const handleDrop = () => {
-    if (draggedItem.current === null || dragOverIndex === null) return;
-    const newItems = [...orderedItems];
-    const draggedItemContent = newItems[draggedItem.current];
-    newItems.splice(draggedItem.current, 1);
-    newItems.splice(dragOverIndex, 0, draggedItemContent);
-    draggedItem.current = null;
-    setDragOverIndex(null);
-    setOrderedItems(newItems);
-    localStorage.setItem('navItemOrder', JSON.stringify(newItems.map(item => item.href)));
-  };
-
-  const handleDragEnd = () => {
-    draggedItem.current = null;
-    setDragOverIndex(null);
   };
 
   const renderSearchContent = () => (

@@ -15,16 +15,11 @@ import mongoose from 'mongoose'
  */
 async function dataAppointment(params = {}) {
     try {
-        await connectDB();
-
+        await connectDB()
         const matchStage = {};
-
-        // Lọc theo một khách hàng cụ thể
         if (params.customerId) {
             matchStage.customer = new mongoose.Types.ObjectId(params.customerId);
         }
-
-        // Lọc theo tháng và năm
         if (params.year && params.month) {
             // Tháng trong JS bắt đầu từ 0 (tháng 1 là 0)
             const monthIndex = params.month - 1;
@@ -37,7 +32,6 @@ async function dataAppointment(params = {}) {
                 $lte: endDate,
             };
         }
-
         // Pipeline để lấy dữ liệu và populate thông tin liên quan
         const aggregationPipeline = [
             { $match: matchStage },
@@ -85,6 +79,19 @@ async function dataAppointment(params = {}) {
         throw new Error('Không thể lấy dữ liệu lịch hẹn.');
     }
 }
+
+
+export async function dataAppointments() {
+    try {
+        await connectDB()
+        let appointments = await Appointment.find({})
+        return JSON.parse(JSON.stringify(appointments));
+    } catch (error) {
+        console.error('Lỗi trong dataAppointment:', error);
+        throw new Error('Không thể lấy dữ liệu lịch hẹn.');
+    }
+}
+
 
 /**
  * Lấy danh sách lịch hẹn của một khách hàng (có cache).

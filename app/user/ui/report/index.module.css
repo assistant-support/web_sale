@@ -1,0 +1,360 @@
+.wrapper {
+    margin-top: 16px;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.mainTitle {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--text-title);
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+
+.chartContainer {
+    flex: 1;
+    overflow: hidden;
+    padding: 8px;
+    background-color: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    max-height: calc(100vh - 180px);
+}
+
+.filterBar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    padding: 8px 16px;
+    background-color: var(--bg-primary);
+    border-radius: 5px;
+    margin-bottom: 16px;
+    border: thin solid var(--border-color);
+}
+
+.modeToggle {
+    display: flex;
+    background-color: #e9ecef;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.modeButton {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    background-color: transparent;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.modeButton.active {
+    background-color: var(--bg-primary);
+    color: var(--text-title);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.searchInput {
+    width: 180px;
+}
+
+.dateFilters {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.dateInput {
+    width: 135px;
+}
+
+.dateSeparator {
+    color: var(--text-primary);
+}
+
+.menuContainer {
+    width: 170px;
+}
+
+.resetButton {
+    padding: 0.5rem 1rem;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.resetButton:hover {
+    background-color: #5a6268;
+}
+
+.reportList {
+    display: flex;
+    flex-direction: column;
+    margin: 0 auto;
+    gap: 8px;
+    flex: 2
+}
+
+.reportCard {
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.cardHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.cardHeader:hover {
+    background-color: var(--bg-secondary);
+}
+
+.teacherName {
+    font-weight: 500;
+    color: var(--text-title);
+    margin: 0;
+}
+
+.violationsSummary {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.summaryText {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    background-color: #f0f0f0;
+    padding: 0.25rem 0.75rem;
+    border-radius: 16px;
+}
+
+.violationCount {
+    font-weight: bold;
+    color: var(--accent-color);
+}
+
+.toggleIcon {
+    color: var(--text-primary);
+    transition: transform 0.2s ease-in-out;
+}
+
+.toggleIcon.expanded {
+    transform: rotate(180deg);
+}
+
+.detailsContainer {
+    padding: 0.25rem 0;
+    border-top: 1px solid #f0f0f0;
+    animation: fadeIn 0.4s ease;
+    background-color: #fafbfd;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        max-height: 0;
+    }
+
+    to {
+        opacity: 1;
+        max-height: 1000px;
+    }
+}
+
+.lessonItem {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.lessonItem:hover {
+    background-color: var(--bg-secondary);
+}
+
+.lessonItem:last-child {
+    border-bottom: none;
+}
+
+.lessonItem.violation {
+    border-left: 4px solid var(--accent-color);
+}
+
+.lessonItem.completed {
+    border-left: 4px solid var(--success-color);
+}
+
+.lessonInfo {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.lessonCourseId {
+    font-weight: 500;
+    color: var(--text-title);
+}
+
+.lessonRoom {
+    font-style: italic;
+}
+
+.errorTags {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.errorTag {
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: white;
+}
+
+.errorTag.attendance {
+    background-color: rgba(255, 159, 64, 0.7);
+    border: thin solid rgba(255, 159, 64, 1);
+}
+
+.errorTag.comment {
+    background-color: #b794ff;
+    border: thin solid rgba(153, 102, 255, 1);
+}
+
+.errorTag.image {
+    background-color: #42A5F5;
+    border: thin solid rgba(54, 162, 235, 1);
+}
+
+.completionStatus {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--success-color);
+}
+
+.completedIcon {
+    color: var(--success-color);
+}
+
+.noResults {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+    border-radius: 8px;
+}
+
+.input {
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    color: var(--text-title);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.filterGroup,
+.globalSummary>div {
+    display: flex;
+    gap: 16px;
+}
+
+.globalSummary {
+    position: relative;
+}
+
+.input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.summaryBox {
+    position: relative;
+    background-color: #f8f9fa;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.summaryMain {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.summaryMain strong {
+    font-size: 1rem;
+    color: var(--text-title);
+}
+
+.summaryToggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 50%;
+}
+
+.summaryToggle:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.summaryDetails {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background-color: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 0.75rem 1rem;
+    width: 160px;
+    z-index: 10;
+    margin-top: 4px;
+    flex-direction: column;
+    gap: 6px !important
+}
+
+.summaryDetails p {
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: space-between;
+}

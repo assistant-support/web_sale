@@ -11,7 +11,7 @@ export async function POST(req) {
             name,
             address = '',
             avt = '',
-            role = ["Teacher"],
+            role = ["Sale"],
             phone = '',
             email,
             password

@@ -14,11 +14,12 @@ export async function area_data(_id) {
     return _id && data ? data[0] || null : data || null
 }
 
+// Lấy tài khoản zalo
 export async function zalo_data(_id) {
     let data = _id ? await getZaloOne(_id) : await getZaloAll()
     return data || null
 }
-
+// lấy thông tin user
 export async function user_data({ _id = null }) {
     console.log(_id);
 
@@ -28,15 +29,15 @@ export async function user_data({ _id = null }) {
         return await getUserAll()
     }
 }
-
+// lấy nhãn
 export async function label_data() {
     return await getLabelAll()
 }
-
+// lấy nguồn
 export async function form_data() {
     return await getFormAll()
 }
-
+// Lịch sử chăm sóc
 export async function history_data(id, type) {
     if (!id || !type) {
         return { success: false, error: "Thiếu ID hoặc loại đối tượng." };
