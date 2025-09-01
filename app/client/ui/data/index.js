@@ -29,11 +29,11 @@ function SubmitButton({ text = 'Thực hiện' }) {
 // Component chọn trường hiển thị
 const fieldOptions = [
     { id: 1, label: 'Họ và Tên' },
-    { id: 2, label: 'Tên phụ huynh' },
+    { id: 2, label: 'Địa chỉ' },
     { id: 3, label: 'Số điện thoại' },
     { id: 4, label: 'Email' },
-    { id: 5, label: 'Khu vực' },
-    { id: 6, label: 'Ngày sinh' },
+    { id: 5, label: 'Ngày sinh' },
+    { id: 6, label: 'Dịch vụ quan tâm' },
 ];
 
 function FieldSelector({ selectedFields, setSelectedFields }) {

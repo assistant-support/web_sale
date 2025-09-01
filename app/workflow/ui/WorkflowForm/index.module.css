@@ -1,0 +1,145 @@
+/* ui/WorkflowForm/index.module.css */
+
+.form {
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    height: 100%;
+    overflow: hidden;
+}
+
+.header {
+    padding: 16px;
+    border-bottom: thin solid var(--border-color);
+}
+
+.footer {
+    padding: 8px 16px;
+    border-top: thin solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+}
+
+.content {
+    display: flex;
+    flex-direction: row;
+    gap: 24px;
+    flex: 1;
+    padding: 16px;
+}
+
+.left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.right {
+    flex: 1;
+    border-left: 1px solid #e0e0e0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.title {
+    text-align: center;
+    color: #333;
+}
+
+.subtitle {
+    font-weight: 600;
+    color: #555;
+}
+
+.input {
+    background-color: #f9f9f9;
+}
+
+.addStep {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background-color: #fafafa;
+}
+
+.delayContainer {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+}
+
+.addButton {
+    align-self: flex-start;
+}
+
+.radioGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.submitButton {
+    padding: 8px 16px;
+}
+
+.cancelButton {
+    padding: 8px 16px;
+}
+
+.timeline {
+    position: relative;
+    padding-left: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.timelineItem {
+    position: relative;
+}
+
+.timelineDot {
+    position: absolute;
+    left: -28px;
+    top: 8px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #1976d2;
+}
+
+.timelineConnector {
+    position: absolute;
+    left: -20px;
+    top: 24px;
+    bottom: -16px;
+    width: 2px;
+    background-color: #e0e0e0;
+}
+
+.stepChip {
+    margin-bottom: 8px;
+}
+
+.stepDetails {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}

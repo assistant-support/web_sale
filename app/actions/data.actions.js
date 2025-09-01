@@ -4,14 +4,13 @@ import dbConnect from "@/config/connectDB";
 import Form from "@/models/formclient";
 import checkAuthToken from '@/utils/checktoken';
 import { reloadForm } from '@/data/form_database/wraperdata.db.js'
-import getSheets from '@/function/drive'
 import Customer from '@/models/customer';
-
+import mongoose from 'mongoose';
 export async function createAreaAction(_previousState, formData) {
     await dbConnect();
     const name = formData.get('name');
     const user = await checkAuthToken();
-    
+
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
     if (!user.role.includes('Admin')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
@@ -113,105 +112,116 @@ export async function deleteAreaAction(_previousState, formData) {
         return { status: false, message: 'Đã xảy ra lỗi. Không thể xóa khu vực.' };
     }
 }
-
-// =================================================================
-// 2. CẤU HÌNH & KẾT NỐI DỊCH VỤ GOOGLE
-// =================================================================
-const SPREADSHEET_ID = '1QOHqG1wvV-oDoPAxSDw37hfP0AHctPYpHxyJlHenZJY';
-const RANGE_DATA = 'Data';
+import { revalidateData } from '@/app/actions/customer.actions';
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxvb6bM9l3Yw0n3QJILbNA4BMynBcuGdQYvXKuxNLWU1fhjoFS54OjZ2qbis3vJEm-QYg/exec';
 
+
 export async function addRegistrationToAction(_previousState, formData) {
-    // --- BƯỚC 1: LẤY DỮ LIỆU, CHỈ CÓ PHONE LÀ BẮT BUỘC ---
+    // --- BƯỚC 1: LẤY DỮ LIỆU VÀ SANITIZE ---
+    // Sử dụng trim() để loại bỏ khoảng trắng thừa, tránh injection cơ bản
     const rawFormData = {
-        name: formData.get('name')?.trim(),
-        nameparent: formData.get('nameparent')?.trim(),
-        phone: formData.get('phone')?.trim(),
-        email: formData.get('email')?.trim(),
-        bd: formData.get('bd'),
-        area: formData.get('area')?.trim(),
-        source: formData.get('source')?.trim(),
-        sourceName: formData.get('sourceName')?.trim(),
+        name: formData.get('name')?.trim() || '',
+        address: formData.get('address')?.trim() || '',
+        phone: formData.get('phone')?.trim() || '',
+        email: formData.get('email')?.trim() || '',
+        bd: formData.get('bd')?.trim() || '',
+        service: formData.get('service')?.trim() || '',
+        source: formData.get('source')?.trim() || '',
+        sourceName: formData.get('sourceName')?.trim() || '',
     };
 
     // --- BƯỚC 2: VALIDATE DỮ LIỆU ---
+    // Name: Bắt buộc theo model
+    if (!rawFormData.name) {
+        return { message: 'Vui lòng nhập họ và tên.', type: 'error' };
+    }
 
-    // Chỉ có SĐT là bắt buộc và phải đúng định dạng
+    // Phone: Bắt buộc, normalize, regex strict (Việt Nam: 10 chữ số, bắt đầu bằng 0)
     if (!rawFormData.phone) {
         return { message: 'Vui lòng nhập số điện thoại.', type: 'error' };
     }
     rawFormData.phone = normalizePhone(rawFormData.phone);
-
-    await dbConnect();
-    const g = await Customer.findOne({ phone: rawFormData.phone });
-    if (g) return { message: 'Số điện thoại đã được đăng ký.', type: 'error' };
     const phoneRegex = /^0\d{9}$/;
     if (!phoneRegex.test(rawFormData.phone)) {
-        return { message: 'Số điện thoại không hợp lệ. Vui lòng kiểm tra lại.', type: 'error' };
+        return { message: 'Số điện thoại không hợp lệ (phải là 10 chữ số, bắt đầu bằng 0).', type: 'error' };
     }
 
-    // THAY ĐỔI: Chỉ xử lý và validate ngày sinh nếu nó được cung cấp
-    let formattedBirthDate = ''; // Mặc định là chuỗi rỗng
+    // Email: Nếu có, check format cơ bản
+    if (rawFormData.email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(rawFormData.email)) {
+            return { message: 'Email không hợp lệ.', type: 'error' };
+        }
+    }
+
+    // Birthdate: Nếu có, validate và convert sang Date
+    let birthDate = null;
     if (rawFormData.bd) {
-        const birthDate = new Date(rawFormData.bd);
+        birthDate = new Date(rawFormData.bd);
         if (isNaN(birthDate.getTime())) {
-            // Nếu ngày sinh được nhập nhưng không hợp lệ -> báo lỗi
             return { message: 'Ngày sinh không hợp lệ.', type: 'error' };
         }
-        formattedBirthDate = birthDate.toLocaleDateString('vi-VN');
     }
 
-    // --- BƯỚC 3: CHUẨN BỊ DỮ LIỆU ĐỂ GỬI ĐI ---
-    const createAt = new Date();
-    const formattedCreateAt = createAt.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    // Source: Phải là ObjectId hợp lệ
+    if (!rawFormData.source || !mongoose.Types.ObjectId.isValid(rawFormData.source)) {
+        return { message: 'Nguồn dữ liệu không hợp lệ.', type: 'error' };
+    }
 
-    // THAY ĐỔI: Thêm `|| ''` để đảm bảo không có giá trị "undefined" trong tin nhắn
-    const messageForAppScript = `📅 Đăng ký từ Form ${rawFormData.sourceName || 'Form trực tiếp'}
+    // Check missing info cho trạng thái
+    let initialStatus = 'new_unconfirmed';
+    if (!rawFormData.name || !rawFormData.phone || !rawFormData.service) {
+        initialStatus = 'missing_info';
+    }
+
+    await dbConnect();
+    const existingCustomer = await Customer.findOne({ phone: rawFormData.phone });
+    if (existingCustomer) {
+        // Merge nếu trùng (PDF: Data trùng – Gộp hồ sơ)
+        existingCustomer.tags = [...new Set([...existingCustomer.tags, rawFormData.service])]; // Merge tags
+        existingCustomer.care.push({ content: 'Data trùng từ form mới, gộp hồ sơ', createBy: '68b0af5cf58b8340827174e0' });
+        await existingCustomer.save();
+        return { message: 'Data trùng, đã gộp hồ sơ.', type: 'success' };
+    }
+
+    // --- BƯỚC 3: TẠO CUSTOMER TRONG MONGODB ---
+    try {
+        const newCustomer = new Customer({
+            name: rawFormData.name,
+            bd: birthDate,
+            email: rawFormData.email,
+            phone: rawFormData.phone,
+            area: rawFormData.address,
+            source: rawFormData.source,
+            sourceDetails: rawFormData.sourceName, // Map
+            tags: [rawFormData.service], // Push dịch vụ vào tags
+            pipelineStatus: initialStatus,
+            care: [{ content: `Tiếp nhận từ ${rawFormData.sourceName || 'form'}, nguồn: ${rawFormData.source}`, createBy: '68b0af5cf58b8340827174e0' }], // Log tự động
+        });
+
+        await newCustomer.save();
+        revalidateData();
+
+        // --- BƯỚC 4: CHUẨN BỊ VÀ GỬI THÔNG BÁO QUA APPS SCRIPT ---
+        const createAt = new Date();
+        const formattedCreateAt = createAt.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        const formattedBirthDate = birthDate ? birthDate.toLocaleDateString('vi-VN') : 'Không có';
+
+        const messageForAppScript = `📅 Đăng ký từ Form ${rawFormData.sourceName || 'Form trực tiếp'}
 -----------------------------------
-Họ và Tên PH: ${rawFormData.nameparent || 'Không có'}
+Họ và tên: ${rawFormData.name}
 Liên hệ: ${rawFormData.phone}
-Tên HS: ${rawFormData.name || 'Không có'}
-Ngày sinh: ${formattedBirthDate || 'Không có'}
-Khu vực: ${rawFormData.area || 'Không có'}
+Địa chỉ: ${rawFormData.address || 'Không có'}
+Ngày sinh: ${formattedBirthDate}
+Dịch vụ quan tâm: ${rawFormData.service || 'Không có'}
 Thời gian: ${formattedCreateAt}`;
 
-    // THAY ĐỔI: Giữ nguyên cấu trúc cột cho Google Sheet.
-    // Dùng `|| ''` để điền vào các ô trống nếu dữ liệu không có.
-    const newRowForSheet = [
-        rawFormData.nameparent || '', // Cột 1: Tên PH
-        rawFormData.phone,            // Cột 2: SĐT (luôn có)
-        rawFormData.name || '',       // Cột 3: Tên HS
-        rawFormData.email || '',      // Cột 4: Email
-        formattedBirthDate,           // Cột 5: Ngày sinh (đã xử lý ở trên)
-        rawFormData.area || '',       // Cột 6: Khu vực
-        rawFormData.source || '',     // Cột 7: Nguồn
-        formattedCreateAt,            // Cột 8: Thời gian (luôn có)
-    ];
-
-    // --- BƯỚC 4: THỰC THI GỬI DỮ LIỆU ---
-    try {
-        await Promise.all([
-            // Gửi tới Google Sheets
-            (async () => {
-                const sheets = await getSheets();
-                await sheets.spreadsheets.values.append({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: RANGE_DATA,
-                    valueInputOption: 'USER_ENTERED',
-                    insertDataOption: 'INSERT_ROWS',
-                    requestBody: { values: [newRowForSheet] },
-                });
-            })(),
-            // Gửi thông báo qua Apps Script
-            (async () => {
-                const encodedMessage = encodeURIComponent(messageForAppScript);
-                const url = `${APPS_SCRIPT_URL}?mes=${encodedMessage}`;
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`Apps Script request failed with status ${response.status}`);
-                }
-            })(),
-        ]);
+        const encodedMessage = encodeURIComponent(messageForAppScript);
+        const url = `${APPS_SCRIPT_URL}?mes=${encodedMessage}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Apps Script request failed with status ${response.status}`);
+        }
 
         return { message: 'Đăng ký thành công! Chúng tôi sẽ liên hệ với bạn sớm nhất.', type: 'success' };
 
@@ -225,7 +235,7 @@ Thời gian: ${formattedCreateAt}`;
 }
 
 function normalizePhone(phone) {
-    const t = (phone ?? '').trim();
-    if (!t) return t;
+    const t = (phone ?? '').trim().replace(/\D/g, ''); // Chỉ giữ số, tránh injection
+    if (!t) return '';
     return t.startsWith('0') ? t : '0' + t;
 }

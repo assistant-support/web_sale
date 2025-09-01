@@ -6,6 +6,7 @@ import checkAuthToken from "@/utils/checktoken";
 import CustomerView from './index';
 import { variant_data } from '../actions/variant.actions';
 import { getRunningSchedulesAction } from '../actions/schedule.actions';
+import { workflow_data } from '@/data/workflow/wraperdata.db';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -15,7 +16,7 @@ export default async function Page({ searchParams }) {
     let c = await searchParams
     const user = await checkAuthToken()
     if (!user) return null
-    const [initialResult, userAuth, sources, label, zalo, users, variant, running] = await Promise.all([
+    const [initialResult, userAuth, sources, label, zalo, users, variant, running, workflow] = await Promise.all([
         getCombinedData(c),
         user_data({ _id: user.id }),
         form_data(),
@@ -23,7 +24,8 @@ export default async function Page({ searchParams }) {
         zalo_data(),
         user_data({}),
         variant_data(),
-        getRunningSchedulesAction()
+        getRunningSchedulesAction(),
+        workflow_data()
     ]);
 
     if (!userAuth[0].role.includes('Admin') && !userAuth[0].role.includes('Sale')) {
@@ -34,7 +36,7 @@ export default async function Page({ searchParams }) {
         )
     }
     const reversedLabel = [...label].reverse();
-
+    
     return (
         <Suspense fallback={<PageSkeleton />}>
             <CustomerView
@@ -48,6 +50,7 @@ export default async function Page({ searchParams }) {
                 variant={variant}
                 running={running.data}
                 c={c}
+                workflow={workflow}
             />
         </Suspense>
     );

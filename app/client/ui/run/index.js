@@ -1,11 +1,11 @@
 'use client';
 
-// Import thêm các hook và action mới
 import React, { useState, useEffect, useMemo, useRef, useActionState, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createScheduleAction } from '@/app/actions/schedule.actions';
-import { updateCustomerStatusAction, assignRoleToCustomersAction } from '@/app/actions/customer.actions'; // THAY ĐỔI: Import action mới
+import { updateCustomerStatusAction, assignRoleToCustomersAction } from '@/app/actions/customer.actions';
+import { createWorkflowScheduleAction } from '@/data/workflow/wraperdata.db';
 import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
 import Noti from '@/components/(features)/(noti)/noti';
 import AlertPopup from '@/components/(features)/(noti)/alert';
@@ -14,7 +14,7 @@ import Loading from '@/components/(ui)/(loading)/loading';
 import { Svg_Send } from '@/components/(icon)/svg';
 import styles from './index.module.css';
 
-// Component SubmitButton không đổi
+// Nút submit với trạng thái pending từ form.
 function SubmitButton({ text = 'Xác nhận', disabled = false }) {
     const { pending } = useFormStatus();
     return (
@@ -24,7 +24,7 @@ function SubmitButton({ text = 'Xác nhận', disabled = false }) {
     );
 }
 
-// Component ProgressPopup không đổi
+// Hiển thị popup tiến trình xử lý hàng loạt.
 function ProgressPopup({ open, progress, onBackdropClick }) {
     if (!open) return null;
     const successPercent = progress.total > 0 ? (progress.success / progress.total) * 100 : 0;
@@ -47,8 +47,7 @@ function ProgressPopup({ open, progress, onBackdropClick }) {
     );
 }
 
-
-// Component MessageEditor không đổi
+// Editor cho nội dung tin nhắn với gợi ý biến.
 function MessageEditor({ value, onChange, variants }) {
     const [suggestions, setSuggestions] = useState([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -119,18 +118,21 @@ function MessageEditor({ value, onChange, variants }) {
     );
 }
 
-// THAY ĐỔI: Thêm prop `users`
-function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, labels, variants, users }) {
+// Form để chọn và thực hiện hành động hàng loạt.
+function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, labels, variants, users, workflows }) {
     const [actionType, setActionType] = useState('findUid');
     const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
     const [isLabelMenuOpen, setIsLabelMenuOpen] = useState(false);
-    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // THAY ĐỔI: State cho menu user
+    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [isWorkflowMenuOpen, setIsWorkflowMenuOpen] = useState(false);
     const [actionsPerHour, setActionsPerHour] = useState(30);
     const [estimatedTime, setEstimatedTime] = useState('');
     const [messageContent, setMessageContent] = useState('');
     const [selectedLabelTitle, setSelectedLabelTitle] = useState('Chọn chiến dịch có sẵn');
-    const [selectedUserId, setSelectedUserId] = useState(''); // THAY ĐỔI: State cho userId được chọn
-    const [selectedUserName, setSelectedUserName] = useState('Chọn người phụ trách'); // THAY ĐỔI: State cho tên user được chọn
+    const [selectedUserId, setSelectedUserId] = useState('');
+    const [selectedUserName, setSelectedUserName] = useState('Chọn người phụ trách');
+    const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+    const [selectedWorkflowName, setSelectedWorkflowName] = useState('Chọn Workflow');
     const totalCustomers = selectedCustomers.size;
 
     const actionOptions = useMemo(() => {
@@ -140,6 +142,7 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
             { value: 'assignRole', name: 'Gán người phụ trách' },
             { value: 'checkFriend', name: 'Kiểm tra bạn bè' },
             { value: 'addFriend', name: 'Gửi kết bạn' },
+            { value: 'workflow', name: 'Chạy theo Workflow' }
         ];
         const customerActions = [
             { value: 4, name: 'Chuyển trạng thái: Đang chăm sóc' },
@@ -150,11 +153,12 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
     }, [currentType]);
 
     const isScheduleAction = useMemo(() => ['findUid', 'sendMessage', 'checkFriend', 'addFriend'].includes(actionType), [actionType]);
-    const isAssignAction = useMemo(() => actionType === 'assignRole', [actionType]); // THAY ĐỔI: check action mới
+    const isAssignAction = useMemo(() => actionType === 'assignRole', [actionType]);
+    const isWorkflowAction = useMemo(() => actionType === 'workflow', [actionType]);
     const selectedActionName = useMemo(() => actionOptions.find(opt => opt.value === actionType)?.name, [actionType, actionOptions]);
     const customersArray = useMemo(() => Array.from(selectedCustomers.values()).map(c => ({ _id: c._id, name: c.name, phone: c.phone, uid: c.uid })), [selectedCustomers]);
 
-    // formatDuration không đổi
+    // Định dạng thời gian ước tính.
     function formatDuration(ms) {
         if (ms <= 0) return '~ 0 phút';
         const totalMinutes = Math.ceil(ms / 60000);
@@ -173,43 +177,53 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
         }
     }, [totalCustomers, actionsPerHour, isScheduleAction]);
 
+    // Xử lý chọn label cho tin nhắn.
     const handleSelectLabel = (label) => {
         setMessageContent(label.content);
         setSelectedLabelTitle(label.title);
         setIsLabelMenuOpen(false);
     };
 
-    // THAY ĐỔI: Hàm xử lý chọn user
+    // Xử lý chọn user để gán.
     const handleSelectUser = (user) => {
         setSelectedUserId(user._id);
         setSelectedUserName(user.name);
         setIsUserMenuOpen(false);
     };
 
+    // Xử lý chọn workflow.
+    const handleSelectWorkflow = (workflow) => {
+        setSelectedWorkflowId(workflow._id);
+        setSelectedWorkflowName(workflow.name);
+        setIsWorkflowMenuOpen(false);
+    };
+
+    // Xử lý submit form.
     const handleSubmit = (event) => {
         event.preventDefault();
-        // THAY ĐỔI: Validation cho hành động gán
         if (isAssignAction && !selectedUserId) {
             alert('Vui lòng chọn một người để gán.');
+            return;
+        }
+        if (isWorkflowAction && !selectedWorkflowId) {
+            alert('Vui lòng chọn một workflow.');
             return;
         }
         const formData = new FormData(event.target);
         onSubmitAction(formData);
     };
 
-    // THAY ĐỔI: check disable nút submit
-    const isSubmitDisabled = isAssignAction && !selectedUserId;
+    const isSubmitDisabled = (isAssignAction && !selectedUserId) || (isWorkflowAction && !selectedWorkflowId);
 
     return (
         <form onSubmit={handleSubmit} className={styles.formContainer}>
             <input type="hidden" name="actionType" value={actionType} />
             <input type="hidden" name="selectedCustomersJSON" value={JSON.stringify(customersArray)} />
-            {/* THAY ĐỔI: Thêm input ẩn cho userId */}
             {isAssignAction && <input type="hidden" name="userId" value={selectedUserId} />}
+            {isWorkflowAction && <input type="hidden" name="workflowId" value={selectedWorkflowId} />}
 
             <div className={styles.inputGroup}><label>Hành động</label><Menu isOpen={isActionMenuOpen} onOpenChange={setIsActionMenuOpen} customButton={<div className='input text_6_400'>{selectedActionName}</div>} menuItems={<div className={`${styles.menulist} scroll`}>{actionOptions.map(opt => <p key={opt.value} className='text_6_400' onClick={() => { setActionType(opt.value); setIsActionMenuOpen(false); }}>{opt.name}</p>)}</div>} menuPosition="bottom" /></div>
 
-            {/* THAY ĐỔI: Hiển thị Menu chọn user */}
             {isAssignAction && (
                 <div className={styles.inputGroup}>
                     <label>Chọn người phụ trách</label>
@@ -229,6 +243,33 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
                         menuPosition="bottom"
                     />
                 </div>
+            )}
+
+            {isWorkflowAction && (
+                <>
+                    <div className={styles.inputGroup}>
+                        <label>Chọn Workflow</label>
+                        <Menu
+                            isOpen={isWorkflowMenuOpen}
+                            onOpenChange={setIsWorkflowMenuOpen}
+                            customButton={<div className='input text_6_400'>{selectedWorkflowName}</div>}
+                            menuItems={
+                                <div className={`${styles.menulist} scroll`}>
+                                    {workflows.map(workflow => (
+                                        <p key={workflow._id} className='text_6_400' onClick={() => handleSelectWorkflow(workflow)}>
+                                            {workflow.name}
+                                        </p>
+                                    ))}
+                                </div>
+                            }
+                            menuPosition="bottom"
+                        />
+                    </div>
+                    <div className={styles.inputGroup}>
+                        <label>Thời gian bắt đầu</label>
+                        <input type="datetime-local" name="startTime" className='input' required />
+                    </div>
+                </>
             )}
 
             {isScheduleAction && (
@@ -256,8 +297,8 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
     );
 }
 
-// THAY ĐỔI: Thêm prop `users`
-export default function BulkActions({ selectedCustomers, onActionComplete, labels = [], variants = [], users = [] }) {
+// Component chính để xử lý hành động hàng loạt cho khách hàng.
+export default function BulkActions({ selectedCustomers, onActionComplete, labels = [], variants = [], users = [], workflows = [] }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentType = searchParams.get('type');
@@ -270,13 +311,11 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
 
     const [isTransitionPending, startTransition] = useTransition();
 
-    // Action state cho Lịch trình
     const [scheduleState, scheduleAction] = useActionState(createScheduleAction, { success: null, message: null, error: null });
-    // THAY ĐỔI: Action state cho Gán người phụ trách
     const [assignState, assignAction] = useActionState(assignRoleToCustomersAction, { success: null, message: null, error: null });
+    const [workflowState, workflowAction] = useActionState(createWorkflowScheduleAction, { success: null, message: null, error: null });
 
-    // Gộp trạng thái pending từ các action
-    const isAnyActionPending = isTransitionPending || (scheduleState.success === null && isTransitionPending) || (assignState.success === null && isTransitionPending);
+    const isAnyActionPending = isTransitionPending || (scheduleState.success === null && isTransitionPending) || (assignState.success === null && isTransitionPending) || (workflowState.success === null && isTransitionPending);
 
 
     const onActionCompleteRef = useRef(onActionComplete);
@@ -284,7 +323,6 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
         onActionCompleteRef.current = onActionComplete;
     }, [onActionComplete]);
 
-    // Effect cho Lịch trình
     useEffect(() => {
         if (scheduleState.success !== null) {
             setNotification({ open: true, status: scheduleState.success, mes: scheduleState.message || scheduleState.error });
@@ -296,7 +334,6 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
         }
     }, [scheduleState, router]);
 
-    // THAY ĐỔI: Effect cho Gán người phụ trách
     useEffect(() => {
         if (assignState.success !== null) {
             setNotification({ open: true, status: assignState.success, mes: assignState.message || assignState.error });
@@ -308,8 +345,19 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
         }
     }, [assignState, router]);
 
+    useEffect(() => {
+        if (workflowState.success !== null) {
+            setNotification({ open: true, status: workflowState.success, mes: workflowState.message || workflowState.error });
+            if (workflowState.success) {
+                onActionCompleteRef.current();
+                setIsPopupOpen(false);
+                router.refresh();
+            }
+        }
+    }, [workflowState, router]);
+
+    // Bắt đầu xử lý cập nhật trạng thái khách hàng.
     const startProcessing = async (formData) => {
-        // ... (hàm này không đổi)
         const customersArray = JSON.parse(formData.get('selectedCustomersJSON'));
         const actionType = formData.get('actionType');
         setIsPopupOpen(false);
@@ -333,22 +381,23 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
         router.refresh();
     };
 
+    // Xử lý submit form hành động.
     const handleFormSubmit = (formData) => {
         const actionType = formData.get('actionType');
         startTransition(() => {
             if (['findUid', 'sendMessage', 'checkFriend', 'addFriend'].includes(actionType)) {
                 scheduleAction(formData);
             } else if (actionType === 'assignRole') {
-                // THAY ĐỔI: Gọi action mới
                 assignAction(formData);
+            } else if (actionType === 'workflow') {
+                workflowAction(formData);
             } else {
-                // Hủy transition nếu không phải action server
                 startTransition(() => startProcessing(formData));
             }
         });
     };
 
-
+    // Dừng quá trình xử lý.
     const handleStopProcess = () => {
         stopSignal.current = true;
         setIsCancelConfirmOpen(false);
@@ -373,7 +422,8 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
                         currentType={currentType}
                         labels={labels}
                         variants={variants}
-                        users={users} // THAY ĐỔI: Truyền prop users
+                        users={users}
+                        workflows={workflows}
                     />
                 )}
             />
@@ -391,7 +441,7 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
                     </div>
                 }
             />
-            {isAnyActionPending && ( // THAY ĐỔI: Dùng biến gộp
+            {isAnyActionPending && (
                 <div className='loadingOverlay'>
                     <Loading content={<h5>Đang gửi yêu cầu...</h5>} />
                 </div>

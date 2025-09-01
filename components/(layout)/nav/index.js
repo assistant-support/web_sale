@@ -11,6 +11,7 @@ import Link from 'next/link';
 import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
 import Image from 'next/image';
 import { driveImage } from '@/function';
+import { FaBusinessTime } from "react-icons/fa6";
 
 const ITEM_HEIGHT = 82;
 const initialNavItems = [
@@ -26,8 +27,9 @@ const initialNavItems = [
     content: 'Chăm sóc'
   },
   { href: '/calendar', icon: <Svg_Canlendar h={22} w={22} c={'var(--text-secondary)'} />, content: 'Lịch hẹn' },
-   { href: '/user', icon: <Svg_Profile h={22} w={22} c={'var(--text-secondary)'} />, content: 'Nhân sự' },
-  { href: '/admin', icon: <Svg_Chart h={22} w={22} c={'var(--text-secondary)'} />, content: 'Thống kê' }
+  { href: '/user', icon: <Svg_Profile h={22} w={22} c={'var(--text-secondary)'} />, content: 'Nhân sự' },
+  { href: '/admin', icon: <Svg_Chart h={22} w={22} c={'var(--text-secondary)'} />, content: 'Thống kê' },
+  { href: '/workflow', icon: <FaBusinessTime style={{ width: 22 }} />, content: 'Quy trình' }
 ];
 
 export default function Nav() {

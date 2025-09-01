@@ -159,18 +159,15 @@ export default async function ReportPage() {
     const kpiData = processKpiData(customerList, formList);
     // [CẬP NHẬT] Truyền appointmentList vào hàm xử lý
     const employeeData = processEmployeePerformance(customerList, userList, appointmentList);
-
+    console.log(customerList);
+    
     return (
-        <Container maxWidth="xl" sx={{ py: 3 }}>
-            <Box>
-                <Typography variant="h4" component="h1" fontWeight="bold" gutterBottom>
-                    Báo cáo & Phân tích
-                </Typography>
-                <Typography variant="body1" color="textSecondary" sx={{ mb: 4 }}>
-                    Tổng quan hiệu suất kinh doanh, hiệu quả nhân viên và cài đặt hệ thống.
-                </Typography>
+        <div>
+            <Box sx={{ mb: 1 }}>
+                <p className="text_w_600">Báo cáo & Phân tích</p>
+                <h5>Tổng quan hiệu suất kinh doanh, hiệu quả nhân viên và cài đặt hệ thống.</h5>
             </Box>
             <ReportDashboard kpiData={kpiData} employeeData={employeeData} />
-        </Container>
+        </div>
     );
 }
