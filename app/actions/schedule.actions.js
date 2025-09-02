@@ -1,7 +1,7 @@
 'use server';
 import connectToDatabase from "@/config/connectDB";
 import "@/models/users";
-import ZaloAccount from "@/models/zalo";
+import ZaloAccount from "@/models/zalo.model";
 import ScheduledJob from "@/models/schedule";
 import checkAuthToken from "@/utils/checktoken";
 import { user_data } from '@/data/actions/get';

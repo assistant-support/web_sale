@@ -1,6 +1,6 @@
 'use server';
 import dbConnect from "@/config/connectDB";
-import Variant from "@/models/variant";
+import Variant from "@/models/variant.model";
 import checkAuthToken from "@/utils/checktoken";
 import { unstable_cache as nextCache, revalidateTag } from 'next/cache';
 

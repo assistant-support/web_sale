@@ -7,8 +7,8 @@
 
 .main {
     margin-left: 100px;
-    width: calc(100% - 132px);
-    height: calc(100% - 32px);
+    width: calc(100% - 100px);
+    height: calc(100%);
     background-color: var(--bg-secondary);
     padding: 16px;
     overflow: hidden;
@@ -23,6 +23,6 @@
     width: 100px;
     border-right: thin solid var(--border-color);
     background-color: var(--bg-primary);
-    z-index: 99;
+    z-index: 1;
 }
 

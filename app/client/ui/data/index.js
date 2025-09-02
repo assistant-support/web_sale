@@ -16,6 +16,7 @@ import Title from '@/components/(features)/(popup)/title';
 import WrapIcon from '@/components/(ui)/(button)/hoveIcon';
 import { formatDate } from '@/function';
 import { revalidateData } from '@/app/actions/customer.actions';
+import Customer_add from './addcustomer';
 
 function SubmitButton({ text = 'Thực hiện' }) {
     const { pending } = useFormStatus();
@@ -128,7 +129,7 @@ function AreaForm({ formAction, formState, initialData = null, submitText }) {
     );
 }
 
-export default function SettingData({ data }) {
+export default function SettingData({ data, service }) {
     const router = useRouter();
     const [isRightPopupOpen, setIsRightPopupOpen] = useState(false);
     const [isCreatePopupOpen, setIsCreatePopupOpen] = useState(false);
@@ -214,6 +215,7 @@ export default function SettingData({ data }) {
             </button>
 
             <FlexiblePopup
+                globalZIndex={9}
                 open={isRightPopupOpen}
                 onClose={() => setIsRightPopupOpen(false)}
                 title="Cài đặt nguồn dữ liệu"
@@ -225,7 +227,7 @@ export default function SettingData({ data }) {
                                 <Svg_Add w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
                                 <h5 className='text_w_400'>Tạo Form mới</h5>
                             </button>
-                            {/* Bỏ nút và form cho sync action */}
+                            <Customer_add service={service} />
                         </div>
                         <div className={styles.wraplistForms}>
                             <div className={styles.title}>

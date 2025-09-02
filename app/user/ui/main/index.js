@@ -9,6 +9,7 @@ import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
 import Noti from '@/components/(features)/(noti)/noti';
 import Loading from '@/components/(ui)/(loading)/loading';
 
+// CẬP NHẬT: Form thêm mới
 function AddTeacherForm({ onSubmit, onClose, isLoading }) {
     const [formData, setFormData] = useState({
         name: '',
@@ -17,6 +18,7 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
         phone: '',
         address: '',
         role: ['Sale'],
+        group: 'noi_khoa', // MỚI: Thêm trường group với giá trị mặc định
     });
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -40,6 +42,14 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
                 <label>Mật khẩu<span>*</span></label>
                 <input type="password" name="password" onChange={handleChange} value={formData.password} className='input' required />
             </div>
+            {/* MỚI: Thêm trường chọn Group */}
+            <div className={styles.formGroup}>
+                <label>Nhóm<span>*</span></label>
+                <select name="group" value={formData.group} onChange={handleChange} className='input' required>
+                    <option value="noi_khoa">Nội khoa</option>
+                    <option value="ngoai_khoa">Ngoại khoa</option>
+                </select>
+            </div>
             <div className={styles.formGroup}>
                 <label>Số điện thoại</label>
                 <input type="tel" name="phone" onChange={handleChange} value={formData.phone} className='input' />
@@ -58,13 +68,16 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
     );
 }
 
+// CẬP NHẬT: Form chỉnh sửa
 function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
     const [formData, setFormData] = useState({
         name: '',
         phone: '',
         address: '',
         role: 'Teacher',
+        group: 'noi_khoa', // MỚI
     });
+
     useEffect(() => {
         if (teacherData) {
             setFormData({
@@ -72,9 +85,11 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
                 phone: teacherData.phone || '',
                 address: teacherData.address || '',
                 role: teacherData.role?.[0] || 'Teacher',
+                group: teacherData.group || 'noi_khoa', // MỚI
             });
         }
     }, [teacherData]);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
@@ -83,7 +98,7 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
         e.preventDefault();
         onSubmit(teacherData._id, formData);
     };
-    const ROLES = ["Admin", "Sale"];
+    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager"];
     return (
         <form onSubmit={handleSubmit} className={styles.addTeacherForm}>
             <div className={styles.formGroup}>
@@ -106,6 +121,14 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
                     ))}
                 </select>
             </div>
+            {/* MỚI: Thêm trường chọn Group để cập nhật */}
+            <div className={styles.formGroup}>
+                <label>Nhóm</label>
+                <select name="group" value={formData.group} onChange={handleChange} className='input'>
+                    <option value="noi_khoa">Nội khoa</option>
+                    <option value="ngoai_khoa">Ngoại khoa</option>
+                </select>
+            </div>
             <div className={styles.formActions}>
                 <button type="button" className='btn_s' onClick={onClose}>Hủy</button>
                 <button type="submit" className='btn_s_b' disabled={isLoading}>
@@ -126,9 +149,11 @@ const Main = ({ initialTeachers }) => {
     const [editingTeacher, setEditingTeacher] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [notification, setNotification] = useState({ open: false, status: false, message: '' });
+
     const handleAddTeacher = async (formData) => {
-        if (!formData.name || !formData.email || !formData.password) {
-            setNotification({ open: true, status: false, message: 'Tên, Email và Mật khẩu là bắt buộc.' });
+        // CẬP NHẬT: Thêm điều kiện kiểm tra group
+        if (!formData.name || !formData.email || !formData.password || !formData.group) {
+            setNotification({ open: true, status: false, message: 'Tên, Email, Mật khẩu và Nhóm là bắt buộc.' });
             return;
         }
         setIsLoading(true);
@@ -154,6 +179,7 @@ const Main = ({ initialTeachers }) => {
             setIsLoading(false);
         }
     };
+
     const handleUpdateTeacher = async (teacherId, formData) => {
         setIsLoading(true);
         try {
@@ -178,13 +204,16 @@ const Main = ({ initialTeachers }) => {
             setIsLoading(false);
         }
     };
+
     const handleCloseNoti = () => {
         setNotification(prev => ({ ...prev, open: false }));
     };
+
     const handleOpenEditPopup = (teacher) => {
         setEditingTeacher(teacher);
         setIsEditTeacherPopupOpen(true);
     };
+
     const filteredTeachers = useMemo(() => {
         return initialTeachers.filter((teacher) => {
             const nameMatch = teacher.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -197,6 +226,7 @@ const Main = ({ initialTeachers }) => {
             return searchMatch && roleMatch
         })
     }, [initialTeachers, searchTerm, filterRole]);
+
     const allRoles = useMemo(() => {
         const roles = new Set()
         initialTeachers.forEach(teacher => {
@@ -206,6 +236,7 @@ const Main = ({ initialTeachers }) => {
         })
         return ['all', ...Array.from(roles)]
     }, [initialTeachers]);
+
     const roleMenuItems = (
         <div className={styles.list_menu}>
             {allRoles.map(role => {
@@ -247,20 +278,22 @@ const Main = ({ initialTeachers }) => {
                                         <img src={teacher.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'} alt={`Avatar của ${teacher.name}`} className={styles.avatar} onError={(e) => { e.target.onerror = null; e.target.src = 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'; }} />
                                         <div>
                                             <p className='text_4'>{teacher.name}</p>
-                                            <p className='text_6_400'>Chức vụ:  {teacher.role?.join(', ')}</p>
+                                            <p className='text_6_400'>Chức vụ:  {teacher.role?.join(', ')}</p>
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                         <p className='text_6_400'><strong>Email:</strong> {teacher.email}</p>
                                         <p className='text_6_400'><strong>SĐT:</strong> {teacher.phone}</p>
                                         <p className='text_6_400'><strong>Địa chỉ:</strong> {teacher.address}</p>
+                                        {/* MỚI: Hiển thị thông tin nhóm */}
+                                        <p className='text_6_400'><strong>Nhóm:</strong> {teacher.group === 'noi_khoa' ? 'Nội khoa' : 'Ngoại khoa'}</p>
                                     </div>
                                 </div>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <p className={styles.noResults}>Không tìm thấy giáo viên nào.</p>
+                    <p className={styles.noResults}>Không tìm thấy nhân sự nào.</p>
                 )}
             </div>
             <FlexiblePopup

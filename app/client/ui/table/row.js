@@ -1,508 +1,441 @@
 'use client';
-import { useState, useEffect, useActionState, useRef } from 'react';
-import { useFormStatus } from 'react-dom';
-import { useRouter } from 'next/navigation';
-import styles from './index.module.css';
-import { truncateString } from '@/function';
-import { FaCalendarDay } from "react-icons/fa";
 
-// Import các action của Customer, đã loại bỏ convertToStudentAction
-import {
-    updateCustomerInfo,
-    addCareNoteAction,
-    updateCustomerStatusAction,
-    revalidateData
-} from '@/app/actions/customer.actions';
-
-// Import các action và hàm lấy dữ liệu của Appointment
-import {
-    createAppointmentAction,
-    updateAppointmentStatusAction as updateApptStatusAction,
-    cancelAppointmentAction,
-} from '@/app/actions/appointment.actions';
-import { appointment_data } from '@/data/appointment_db/wraperdata.db';
-
-// Giữ nguyên các import UI và Icon
-import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
-import CenterPopup from '@/components/(features)/(popup)/popup_center';
-import Title from '@/components/(features)/(popup)/title';
-import Noti from '@/components/(features)/(noti)/noti';
-import Loading from '@/components/(ui)/(loading)/loading';
+import React, { useState, useEffect, useActionState, useRef, useMemo, useCallback } from 'react';
 import Image from 'next/image';
-import { Svg_Send, Svg_Pen, Svg_Out, Svg_History, Svg_Chat_1, Svg_Check } from '@/components/(icon)/svg';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+
+// --- Icon Imports ---
+import {
+    PenSquare, CalendarClock, History, MessageSquare, SendHorizonal, CheckCircle2,
+    CircleDot, Circle, Loader2, LayoutDashboard, Clock, User, CalendarCheck, X
+} from 'lucide-react';
+
+// --- Action & Data Function Imports ---
+import { updateCustomerInfo, addCareNoteAction } from '@/app/actions/customer.actions';
+import { createAppointmentAction, updateAppointmentStatusAction as updateApptStatusAction, cancelAppointmentAction } from '@/app/actions/appointment.actions';
+import { appointment_data } from '@/data/appointment_db/wraperdata.db';
 import { history_data } from '@/data/actions/get';
+import useActionUI from '@/hooks/useActionUI';
+
+// --- Shadcn UI Component Imports ---
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { TableRow, TableCell } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
+import { Form, FormControl, FormField, FormItem } from '@/components/ui/form';
 
 // =============================================================
-// SUB-COMPONENT MỚI: QUẢN LÝ LỊCH HẸN TRONG POPUP
+// == 1. CÁC COMPONENT PHỤ
 // =============================================================
-function AppointmentManager({ customer, previousState, createAction, updateAction, cancelAction, pending, setNotification }) {
-    const [appointmentData, setAppointmentData] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const createFormRef = useRef(null);
-    const processedActionState = useRef(null);
-    const { pending: createPending } = useFormStatus();
 
-    const fetchAppointments = async () => {
-        setIsLoading(true);
-        try {
-            const appointments = await appointment_data({ customerId: customer._id });
-            setAppointmentData(appointments);
-        } catch (error) {
-            console.error("Lỗi khi tải danh sách lịch hẹn:", error);
-            setNotification({ open: true, status: false, mes: "Không thể tải danh sách lịch hẹn." });
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        if (!customer?._id) return;
-        fetchAppointments();
-    }, [customer._id]);
-
-    useEffect(() => {
-        const anyActionState = previousState[0] || previousState[1] || previousState[2];
-        if (anyActionState && anyActionState !== processedActionState.current) {
-            if (anyActionState.status === true) {
-                setNotification({ open: true, status: true, mes: anyActionState.message });
-                if (createFormRef.current) createFormRef.current.reset();
-                fetchAppointments();
-            } else if (anyActionState.status === false) {
-                setNotification({ open: true, status: false, mes: anyActionState.message });
-            }
-            processedActionState.current = anyActionState;
-        }
-    }, [previousState, setNotification]);
-
-
-    const getStatusInfo = (status) => {
-        switch (status) {
-            case 'pending': return { text: 'Sắp diễn ra', color: 'var(--blue)' };
-            case 'completed': return { text: 'Hoàn thành', color: 'var(--green)' };
-            case 'cancelled': return { text: 'Đã hủy', color: '#989898' };
-            case 'missed': return { text: 'Vắng mặt', color: 'var(--red)' };
-            default: return { text: status, color: 'var(--text-secondary)' };
-        }
-    };
-
+/**
+ * Hiển thị phần header của popup chi tiết khách hàng.
+ */
+function CustomerDetailHeader({ customer, zalo }) {
+    const zaloAccount = customer.uid?.[0]?.zalo ? zalo.find(z => z._id === customer.uid[0].zalo) : null;
     return (
-        <div className={styles.appointmentManager}>
-            <div className={styles.section}>
-                <h4>Tạo Lịch Hẹn Mới</h4>
-                <form action={createAction} ref={createFormRef} className={styles.appointmentForm}>
-                    <input type="hidden" name="customerId" value={customer._id} />
-                    <input name="title" placeholder="Mục đích cuộc hẹn..." className='input' required disabled={pending} />
-                    <input name="appointmentDate" type="datetime-local" className='input' required disabled={pending} />
-                    <textarea name="notes" placeholder="Ghi chú thêm..." rows={2} className='input' disabled={pending}></textarea>
-                    <button type="submit" className='btn_s_b' disabled={pending || createPending}>
-                        <h5 style={{ color: 'white' }}>{createPending ? 'Đang tạo...' : 'Tạo Lịch Hẹn'}</h5>
-                    </button>
-                </form>
-            </div>
-            <div className={styles.section}>
-                <h4>Danh Sách Lịch Hẹn</h4>
-                <div className={`${styles.appointmentList} scroll`}>
-                    {isLoading ? <Loading content="Đang tải..." /> :
-                        appointmentData.length > 0 ? (
-                            appointmentData.map(app => (
-                                <div key={app._id} className={styles.appointmentItem}>
-                                    <div className={styles.appointmentInfo}>
-                                        <h5>{app.title}</h5>
-                                        <h6>Ngày hẹn: {new Date(app.appointmentDate).toLocaleString('vi-VN')}</h6>
-                                        <h6>Tạo bởi: {app.createdBy.name}</h6>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: getStatusInfo(app.status).color }}></span>
-                                            <h6 style={{ color: getStatusInfo(app.status).color }}>{getStatusInfo(app.status).text}</h6>
-                                        </div>
-                                    </div>
-                                    {app.status === 'pending' && (
-                                        <div className={styles.appointmentActions}>
-                                            <form action={updateAction}> <input type="hidden" name="appointmentId" value={app._id} /> <input type="hidden" name="newStatus" value="completed" /> <button type="submit" disabled={pending} className='btn_s'>Hoàn thành</button> </form>
-                                            <form action={updateAction}> <input type="hidden" name="appointmentId" value={app._id} /> <input type="hidden" name="newStatus" value="missed" /> <button type="submit" disabled={pending} className='btn_s'>Vắng mặt</button> </form>
-                                            <form action={cancelAction}> <input type="hidden" name="appointmentId" value={app._id} /> <button type="submit" disabled={pending} className='btn_s'>Hủy</button> </form>
-                                        </div>
-                                    )}
-                                </div>
-                            ))
-                        ) : (
-                            <h5 style={{ fontStyle: 'italic', textAlign: 'center' }}>Chưa có lịch hẹn nào.</h5>
-                        )}
+        <DialogHeader className="p-4 border-b">
+            <div className="flex items-center gap-3">
+                <Avatar className="h-12 w-12"><AvatarImage src={customer.zaloavt || undefined} alt={customer.zaloname} /><AvatarFallback>{customer.name.charAt(0)}</AvatarFallback></Avatar>
+                <div>
+                    <DialogTitle asChild><h4>{customer.zaloname || customer.name}</h4></DialogTitle>
+                    <DialogDescription asChild><h6>{customer.phone}</h6></DialogDescription>
+                    {zaloAccount && <h6 className='text-muted-foreground'>CSKH: {zaloAccount.name}</h6>}
                 </div>
+            </div>
+        </DialogHeader>
+    );
+}
+
+/**
+ * Hiển thị một ghi chú trong lịch sử chăm sóc.
+ */
+function CareNoteItem({ note }) {
+    return (
+        <div className="flex gap-3 items-start py-2">
+            <Avatar className="h-8 w-8"><AvatarImage src={note.createBy?.avt || undefined} alt={note.createBy?.name} /><AvatarFallback>{note.createBy?.name?.charAt(0) || 'S'}</AvatarFallback></Avatar>
+            <div className="flex-1">
+                <div className="flex justify-between items-center"><h6 className="font-semibold">{note.createBy?.name || 'Hệ thống'}</h6><h6 className="text-xs text-muted-foreground">{new Date(note.createAt).toLocaleString('vi-VN')}</h6></div>
+                <h6 className="text-sm text-muted-foreground mt-1">{note.content}</h6>
             </div>
         </div>
     );
 }
 
-function HistoryLogItem({ log }) {
-    const getActionTypeName = (type) => {
-        switch (type) { case 'findUid': return 'Tìm UID'; case 'sendMessage': return 'Gửi Tin Nhắn'; case 'addFriend': return 'Kết Bạn'; default: return 'Hành động'; }
-    };
-    const statusSuccess = log.status?.status === true;
-    const message = (log.status?.message ?? '').replace(/\r\n?/g, '\n');
-    return (
-        <div className={styles.noteItem} style={{ padding: '12px 16px', alignItems: 'flex-start' }}>
-            <Image src={log.zalo?.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'} alt={log.zalo?.name || 'Zalo'} width={40} height={40} style={{ objectFit: 'cover', borderRadius: 50, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-            <div className={styles.noteContent}>
-                <h5 style={{ lineHeight: 1.3 }}>{getActionTypeName(log.type)} - Zalo thực hiện: {log.zalo?.name || 'Không rõ'}</h5>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <h6>Người thực hiện: {log.createBy?.name || 'Hệ thống'}</h6>
-                    <h6>Thời gian: {new Date(log.createdAt).toLocaleString('vi-VN')}</h6>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusSuccess ? 'var(--green)' : 'var(--red)' }}></span>
-                    {log.type == 'checkFriend' ?
-                        <h5 className='text_w_400' style={{ fontStyle: 'italic', color: statusSuccess ? 'var(--green)' : 'var(--red)' }}>{log.status?.data?.error_message == 1 ? 'Đã là bạn bè' : 'Chưa là bạn bè'}</h5> :
-                        <h5 className='text_w_400' style={{ fontStyle: 'italic', color: statusSuccess ? 'var(--green)' : 'var(--red)' }}>{log.status?.data?.error_message == 'Successful.' ? 'Thành công!' : 'Lỗi'}</h5>
-                    }
-                </div>
-                {log.type != 'findUid' && log.type != 'checkFriend' && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}><h6 className='text_w_400'>Nội dung gửi :</h6><h6 style={{ whiteSpace: 'pre-line' }}>{message}</h6></div>}
-            </div>
-        </div>
-    );
-}
+/**
+ * SỬA LẠI: Form để thêm một ghi chú chăm sóc mới.
+ * Component này không tự quản lý state action nữa.
+ */
+function AddNoteForm({ customerId, dispatchAddNote, isNotePending, noteState, currentStep }) {
+    const formRef = useRef(null);
 
-function MiniSubmitButton({ text, pending }) {
-    return <button type="submit" disabled={pending} className='btn_s'> <Svg_Send w={'var(--font-size-xs)'} h={'var(--font-size-xs)'} c={'var(--text-primary)'} /> <h5>{text}</h5> </button>;
-}
+    useEffect(() => {
+        if (noteState?.success) {
+            formRef.current?.reset();
+        }
+    }, [noteState]);
 
-function CustomerUpdateForm({ formAction, initialData, onClose, isAnyActionPending }) {
-    const { pending } = useFormStatus();
-    const formatDateForInput = (isoDate) => {
-        if (!isoDate) return '';
-        try { return new Date(isoDate).toISOString().split('T')[0]; } catch { return ''; }
-    };
     return (
-        <form action={formAction} className={styles.updateForm}>
-            <input type="hidden" name="_id" value={initialData._id} />
-            <div className={styles.inputGroup}> <label htmlFor="name">Tên khách hàng</label> <input id="name" name="name" defaultValue={initialData.name} className='input' required disabled={isAnyActionPending} /> </div>
-            <div className={styles.inputGroup}> <label htmlFor="bd">Ngày sinh</label> <input id="bd" name="bd" type="date" defaultValue={formatDateForInput(initialData.bd)} className='input' disabled={isAnyActionPending} /> </div>
-            <div className={styles.inputGroup}> <label htmlFor="nameparent">Tên phụ huynh</label> <input id="nameparent" name="nameparent" defaultValue={initialData.nameparent} className='input' disabled={isAnyActionPending} /> </div>
-            <div className={styles.inputGroup}> <label htmlFor="email">Email</label> <input id="email" name="email" type="email" defaultValue={initialData.email} className='input' disabled={isAnyActionPending} /> </div>
-            <div className={styles.formActions}> <button type="button" onClick={onClose} className='btn_s' disabled={pending || isAnyActionPending}><h5>Hủy</h5></button> <button type="submit" className='btn_s_b' disabled={pending || isAnyActionPending}><h5>Lưu thay đổi</h5></button> </div>
+        <form action={dispatchAddNote} ref={formRef} className="flex gap-3 items-start pt-3 mt-3 border-t">
+            <input type="hidden" name="customerId" value={customerId} />
+            {/* MỚI: Thêm input ẩn để gửi step hiện tại */}
+            <input type="hidden" name="step" value={currentStep} />
+
+            <Textarea
+                name="content"
+                placeholder="Thêm ghi chú..."
+                className="flex-1 text-sm"
+                rows={2}
+                required
+                disabled={isNotePending}
+            />
+            <Button type="submit" size="icon" disabled={isNotePending}>
+                {isNotePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizonal className="h-4 w-4" />}
+            </Button>
         </form>
     );
 }
 
-export default function CustomerRow({ customer, index, isSelected, onSelect, visibleColumns, user, viewMode, zalo }) {
-    const router = useRouter();
+/**
+ * Component quản lý (thêm, sửa, xóa) lịch hẹn.
+ */
+function AppointmentManager({ customer, createAction, updateAction, cancelAction }) {
+    const [appointments, setAppointments] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const createFormRef = useRef(null);
+    const actionUI = useActionUI();
+
+    const [createState, dispatchCreate] = useActionState(createAction, null);
+    const [updateState, dispatchUpdate] = useActionState(updateAction, null);
+    const [cancelState, dispatchCancel] = useActionState(cancelAction, null);
+
+    const fetchAppointments = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const data = await appointment_data({ customerId: customer._id });
+            setAppointments(data);
+        } catch (error) {
+            actionUI.showNoti(false, "Không thể tải danh sách lịch hẹn.");
+        } finally {
+            setIsLoading(false);
+        }
+    }, [customer._id, actionUI]);
+
+    useEffect(() => {
+        if (customer._id) fetchAppointments();
+    }, [customer._id, fetchAppointments]);
+
+    useEffect(() => {
+        const state = createState || updateState || cancelState;
+        if (state) {
+            actionUI.showNoti(state.status, state.message);
+            if (state.status) {
+                fetchAppointments();
+                if (createState) createFormRef.current?.reset();
+            }
+        }
+    }, [createState, updateState, cancelState, fetchAppointments, actionUI]);
+
+    return (
+        <div className="p-4 space-y-6">
+            <div>
+                <h5 className="font-semibold mb-2">Tạo Lịch Hẹn Mới</h5>
+                <form action={dispatchCreate} ref={createFormRef} className="space-y-3">
+                    <input type="hidden" name="customerId" value={customer._id} />
+                    <Input name="title" placeholder="Mục đích cuộc hẹn..." required />
+                    <Input name="appointmentDate" type="datetime-local" required />
+                    <Textarea name="notes" placeholder="Ghi chú thêm..." rows={2} />
+                    <Button type="submit" className="w-full"><h6>Tạo Lịch Hẹn</h6></Button>
+                </form>
+            </div>
+            <div>
+                <h5 className="font-semibold mb-2">Danh Sách Lịch Hẹn</h5>
+                <div className="space-y-2 max-h-60 scroll pr-2">
+                    {isLoading ? <h6 className="text-center">Đang tải...</h6> : appointments.length > 0 ? (
+                        appointments.map(app => (
+                            <div key={app._id} className="border p-3 rounded-md">
+                                <h6 className="font-semibold">{app.title}</h6>
+                                <h6 className="text-sm text-muted-foreground">{new Date(app.appointmentDate).toLocaleString('vi-VN')}</h6>
+                                {app.status === 'pending' && (
+                                    <div className="flex gap-2 mt-2">
+                                        <form action={dispatchUpdate}><input type="hidden" name="appointmentId" value={app._id} /><input type="hidden" name="newStatus" value="completed" /><Button type="submit" variant="outline" size="sm">Hoàn thành</Button></form>
+                                        <form action={dispatchCancel}><input type="hidden" name="appointmentId" value={app._id} /><Button type="submit" variant="destructive" size="sm">Hủy</Button></form>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    ) : <h6 className="text-center text-muted-foreground">Chưa có lịch hẹn nào.</h6>}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const updateFormSchema = z.object({
+    name: z.string().min(2, { message: 'Tên là bắt buộc.' }),
+    email: z.string().email({ message: 'Email không hợp lệ.' }).optional().or(z.literal('')),
+    area: z.string().optional(),
+    bd: z.string().optional(),
+});
+
+/**
+ * Form cập nhật thông tin chi tiết của khách hàng.
+ */
+function CustomerUpdateForm({ customer, updateAction, onClose }) {
+    const actionUI = useActionUI();
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const form = useForm({
+        resolver: zodResolver(updateFormSchema),
+        defaultValues: {
+            name: customer.name || '',
+            email: customer.email || '',
+            area: customer.area || '',
+            bd: customer.bd ? new Date(customer.bd).toISOString().split('T')[0] : '',
+        },
+    });
+
+    const onSubmit = async (values) => {
+        setIsSubmitting(true);
+        const formData = new FormData();
+        formData.append('_id', customer._id);
+        Object.entries(values).forEach(([key, value]) => {
+            formData.append(key, value);
+        });
+
+        await actionUI.run(async () => updateAction(null, formData), {
+            loadingText: "Đang cập nhật...",
+            silentOnSuccess: false,
+            onSuccess: (result) => {
+                if (result.success) onClose();
+            }
+        });
+        setIsSubmitting(false);
+    };
+
+    return (
+        <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-4 max-h-[calc(80vh-100px)] scroll">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="name" render={({ field }) => (<FormItem><Label><h6>Tên khách hàng *</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
+                    <FormField control={form.control} name="email" render={({ field }) => (<FormItem><Label><h6>Email</h6></Label><FormControl><Input type="email" {...field} /></FormControl></FormItem>)} />
+                    <FormField control={form.control} name="bd" render={({ field }) => (<FormItem><Label><h6>Ngày sinh</h6></Label><FormControl><Input type="date" {...field} /></FormControl></FormItem>)} />
+                    <FormField control={form.control} name="area" render={({ field }) => (<FormItem><Label><h6>Khu vực</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
+                </div>
+                <Separator className="my-4" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1"><Label><h6>Số điện thoại</h6></Label><Input defaultValue={customer.phone} disabled /></div>
+                    <div className="space-y-1"><Label><h6>Tên Zalo</h6></Label><Input defaultValue={customer.zaloname} disabled /></div>
+                </div>
+                <div className="space-y-1"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
+                <div className="space-y-1"><Label><h6>Dịch vụ quan tâm</h6></Label><Textarea defaultValue={Array.isArray(customer.tags) ? customer.tags.join(', ') : ''} disabled /></div>
+                <DialogFooter>
+                    <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>Hủy</Button>
+                    <Button type="submit" disabled={isSubmitting}>{isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /><h6>Đang lưu...</h6></> : <h6>Lưu thay đổi</h6>}</Button>
+                </DialogFooter>
+            </form>
+        </Form>
+    );
+}
+
+/**
+ * Component hiển thị lịch sử tương tác (Logs).
+ */
+function InteractionHistory({ customer, showNoti }) {
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    useEffect(() => {
+        const fetchHistory = async () => {
+            setIsLoading(true);
+            try {
+                const result = await history_data(customer._id, 'customer');
+                if (result.success) { setHistory(result.data); }
+                else { showNoti(false, result.error || "Không thể tải lịch sử."); }
+            } catch (error) { showNoti(false, "Lỗi khi tải lịch sử."); }
+            finally { setIsLoading(false); }
+        };
+        if (customer._id) { fetchHistory(); }
+    }, [customer._id, showNoti]);
+    console.log(customer, history);
+
+    return (
+        <div className="p-4 max-h-[calc(80vh-100px)] scroll">
+            <h4 className="mb-4 font-semibold" style={{ marginBottom: 8 }}>Lịch sử tương tác Zalo</h4>
+            {isLoading ? <h6 className="text-center text-muted-foreground">Đang tải...</h6> : history.length > 0 ? (
+                <div className="space-y-3">
+                    {history.map((item, i) => (
+                        <div key={item._id || i} className="border p-3 rounded-md">
+                            <h6 className="font-semibold">Hành động: {item.type || 'Hành động'} - {new Date(item.createdAt).toLocaleString('vi-VN')}</h6>
+                            <h6 className="font-semibold">Trạng thái: {item?.status?.status ? 'Thành công' : 'Thất bại'}</h6>
+                            {item.createBy && <h6 className="text-xs text-muted-foreground">Thực hiện bởi: {item.createBy.name}</h6>}
+                            <h6 className="text-sm text-muted-foreground mt-1">Nội dung: {item.status.message || 'Không có mô tả.'}</h6>
+
+                        </div>
+                    ))}
+                </div>
+            ) : <h6 className="text-center text-muted-foreground">Chưa có lịch sử.</h6>}
+        </div>
+    );
+}
+
+function CustomerPipelineDisplay({ customer, addNoteAction, isNotePending, noteState }) {
+    const PIPELINE_STAGES = useMemo(() => [
+        { id: 1, title: 'Tiếp nhận & Xử lý', statuses: ['new_unconfirmed', 'missing_info', 'duplicate_merged', 'rejected_immediate', 'valid'] },
+        { id: 2, title: 'Nhắn tin xác nhận', statuses: [] },
+        { id: 3, title: 'Phân bổ Telesale', statuses: ['assigned'] },
+        { id: 4, title: 'Telesale Tư vấn', statuses: ['consulted'] },
+        { id: 5, title: 'Nhắc lịch & Xác nhận', statuses: ['appointed'] },
+        { id: 6, title: 'Chốt dịch vụ', statuses: ['serviced', 'rejected'] }
+    ], []);
+
+    const currentStageIndex = useMemo(() => {
+        const maxStep = customer.care.reduce((max, note) => Math.max(max, note.step || 0), 0);
+        if (maxStep > 0) return maxStep - 1;
+
+        const foundIndex = PIPELINE_STAGES.findIndex(stage => stage.statuses.includes(customer.pipelineStatus));
+        return foundIndex > -1 ? foundIndex : 0;
+    }, [customer, PIPELINE_STAGES]);
+
+    return (
+        <div className="p-4 max-h-[calc(80vh-100px)] scroll">
+            <Accordion type="single" collapsible defaultValue={`item-${currentStageIndex}`} className="w-full">
+                {PIPELINE_STAGES.map((stage, index) => {
+                    const status = index < currentStageIndex ? 'completed' : (index === currentStageIndex ? 'current' : 'pending');
+                    const Icon = status === 'completed' ? CheckCircle2 : (status === 'current' ? CircleDot : Circle);
+                    const color = status === 'completed' ? 'text-green-500' : (status === 'current' ? 'text-blue-500' : 'text-slate-400');
+                    const notesForStage = customer.care.filter(note => note.step === stage.id);
+
+                    return (
+                        <AccordionItem key={stage.id} value={`item-${index}`}>
+                            <AccordionTrigger className={`hover:no-underline ${status === 'current' ? 'bg-muted/50' : ''}`}>
+                                <div className="flex items-center gap-3">
+                                    <Icon className={`h-5 w-5 ${color}`} />
+                                    <h5>{stage.id}. {stage.title}</h5>
+                                </div>
+                                {notesForStage.length > 0 && <MessageSquare className="h-4 w-4 text-muted-foreground ml-auto" />}
+                            </AccordionTrigger>
+                            <AccordionContent className="p-2">
+                                <div className="border rounded-md p-2">
+                                    {notesForStage.length > 0
+                                        ? notesForStage.map(note => <CareNoteItem key={note._id} note={note} />)
+                                        : <h6 className='text-center text-muted-foreground p-4'>Chưa có hoạt động.</h6>
+                                    }
+                                    {/* MỚI: Truyền step hiện tại (stage.id) xuống AddNoteForm */}
+                                    <AddNoteForm
+                                        customerId={customer._id}
+                                        dispatchAddNote={addNoteAction}
+                                        isNotePending={isNotePending}
+                                        noteState={noteState}
+                                        currentStep={stage.id}
+                                    />
+                                </div>
+                            </AccordionContent>
+                        </AccordionItem>
+                    );
+                })}
+            </Accordion>
+        </div>
+    );
+}
+
+// =============================================================
+// == 2. COMPONENT CHÍNH VÀ CÁC POPUP
+// =============================================================
+export default function CustomerRow({ customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, viewMode, zalo }) {
     const [isPopupOpen, setIsPopupOpen] = useState(false);
-    const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
-    const [isUpdatePopupOpen, setIsUpdatePopupOpen] = useState(false);
-    const [comment, setComment] = useState('');
-    const noteFormRef = useRef(null);
-    const [historyData, setHistoryData] = useState(null);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const [historyError, setHistoryError] = useState('');
-    const [isHistoryPopupOpen, setIsHistoryPopupOpen] = useState(false);
-    const [infoState, updateInfoAction, isInfoPending] = useActionState(updateCustomerInfo, null);
-    const [noteState, addNoteAction, isNotePending] = useActionState(addCareNoteAction, null);
-    const [statusState, updateStatusAction, isStatusPending] = useActionState(updateCustomerStatusAction, null);
-    const [isAppointmentPopupOpen, setIsAppointmentPopupOpen] = useState(false);
-    const [createAppointmentState, createAppointmentActionFn, isCreateAppointmentPending] = useActionState(createAppointmentAction, null);
-    const [updateAppointmentState, updateAppointmentStatusActionFn, isUpdateAppointmentPending] = useActionState(updateApptStatusAction, null);
-    const [cancelAppointmentState, cancelAppointmentActionFn, isCancelAppointmentPending] = useActionState(cancelAppointmentAction, null);
+    const [activeTab, setActiveTab] = useState('pipeline');
+    const actionUI = useActionUI();
+    const processedNoteState = useRef(null);
 
-    const isAnyActionPending = isInfoPending || isNotePending || isStatusPending || isCreateAppointmentPending || isUpdateAppointmentPending || isCancelAppointmentPending;
-
-    const handleClosePopup = () => setIsPopupOpen(false);
+    // SỬA LẠI: Quản lý state action tại component cha
+    const [noteState, addNoteActionFn, isNotePending] = useActionState(addCareNoteAction, null);
 
     useEffect(() => {
-        if (!infoState) return;
-        if (infoState.success) {
-            setNotification({ open: true, status: true, mes: 'Cập nhật thông tin thành công!' });
-            router.refresh();
-            setIsUpdatePopupOpen(false);
-        } else if (infoState.error) { setNotification({ open: true, status: false, mes: infoState.error }); }
-    }, [infoState, router]);
-
-    useEffect(() => {
-        if (noteState?.success) {
-            setNotification({ open: true, status: true, mes: 'Thêm ghi chú thành công!' });
-            setComment('');
-            noteFormRef.current?.reset();
-            router.refresh();
-        } else if (noteState?.error) { setNotification({ open: true, status: false, mes: noteState.error }); }
-        if (statusState?.success) {
-            setNotification({ open: true, status: true, mes: statusState.message });
-            router.refresh();
-        } else if (statusState?.error) { setNotification({ open: true, status: false, mes: statusState.error }); }
-    }, [noteState, statusState, router]);
+        if (noteState && noteState !== processedNoteState.current) {
+            actionUI.showNoti(noteState.success, noteState.message || noteState.error);
+            processedNoteState.current = noteState;
+        }
+    }, [noteState, actionUI]);
 
     const handleOpenPopup = (e) => {
-        if (!e.target.closest(`.${styles.checkboxContainer}`) && !isAnyActionPending) {
-            setIsPopupOpen(true);
+        if (e.target.closest('input[type="checkbox"]')) return;
+        setIsPopupOpen(true);
+    };
+
+    const handlePointerDownOutside = (event) => {
+        const target = event.target;
+        if (target.closest('[data-action-ui-container]')) {
+            event.preventDefault();
         }
     };
 
-    const handleCloseNoti = () => setNotification(p => ({ ...p, open: false }));
-
-    const getStatusText = (status) => {
-        switch (status) { case 0: return 'Mới'; case 1: return 'Tiềm năng'; case 2: return 'Đã liên hệ'; case 3: return 'Chốt đơn'; case 4: return 'Từ chối'; default: return 'Mới'; }
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'pipeline':
+                return <CustomerPipelineDisplay
+                    customer={customer}
+                    addNoteAction={addNoteActionFn}
+                    isNotePending={isNotePending}
+                    noteState={noteState}
+                />;
+            case 'history': return <InteractionHistory customer={customer} showNoti={actionUI.showNoti} />;
+            case 'info': return <CustomerUpdateForm customer={customer} updateAction={updateCustomerInfo} onClose={() => setIsPopupOpen(false)} />;
+            case 'appointments': return <AppointmentManager customer={customer} createAction={createAppointmentAction} updateAction={updateApptStatusAction} cancelAction={cancelAppointmentAction} />;
+            default: return null;
+        }
     };
-
-    const handleShowHistory = async () => {
-        if (isAnyActionPending) return;
-        setIsHistoryPopupOpen(true);
-        setIsLoadingHistory(true);
-        setHistoryError('');
-        const result = await history_data(customer._id, customer.type ? 'student' : 'customer');
-        if (result.success) { setHistoryData(result.data); }
-        else { setHistoryError(result.error); }
-        setIsLoadingHistory(false);
-    };
-
-    const handleCloseHistory = () => {
-        setIsHistoryPopupOpen(false);
-        setHistoryData(null);
-        setHistoryError('');
-    };
-
-    const handleOpenAppointmentPopup = () => !isAnyActionPending && setIsAppointmentPopupOpen(true);
-    const handleCloseAppointmentPopup = () => !isAnyActionPending && setIsAppointmentPopupOpen(false);
 
     return (
         <>
-            <div className={`${styles.row} ${isAnyActionPending ? styles.disabledRow : ''} ${viewMode === 'manage' ? '' : styles.manageRow}`} onClick={handleOpenPopup}>
-                {viewMode === 'manage' && <div className={`${styles.td} ${styles.fixedColumn}`}>
-                    <label className={styles.checkboxContainer}>
-                        <input type="checkbox" checked={isSelected} onChange={(e) => onSelect(customer, e.target.checked)} onClick={(e) => e.stopPropagation()} disabled={isAnyActionPending} />
-                        <span className={styles.checkmark}></span>
-                    </label>
-                </div>}
-                <div className={`${styles.td} ${styles.fixedColumn}`}><h6>{index}</h6></div>
+            <actionUI.UI />
+            {isPopupOpen && <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
+
+            <TableRow data-state={isSelected ? "selected" : "unselected"} className="cursor-pointer">
+                <TableCell onClick={(e) => e.stopPropagation()} className="w-[60px]">
+                    <Checkbox checked={isSelected} onCheckedChange={(checked) => onSelect(customer, checked)} />
+                </TableCell>
+                <TableCell className="font-medium w-[80px]" onClick={handleOpenPopup}><h6>{index}</h6></TableCell>
                 {visibleColumns.map(colKey => (
-                    <div key={colKey} className={styles.td}>
-                        <h6 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {(() => {
-                                const value = customer[colKey];
-                                if (value === null || value === undefined || value === '') return '-';
-                                switch (colKey) {
-                                    case 'bd': return new Date(value).toLocaleDateString('vi-VN');
-                                    case 'status': return <>
-                                        <span style={{
-                                            width: 8, height: 8, borderRadius: 50, display: 'block',
-                                            background: customer.status == 3 ? 'var(--green)' : customer.status == 4 ? 'var(--red)' : customer.status == 2 ? 'var(--yellow)' : customer.status == 1 ? 'var(--main_b)' : '#989898'
-                                        }}></span> {getStatusText(customer.status)} ({customer.care.length} ghi chú)</>;
-                                    case 'type': return value ? 'Học viên' : 'Khách hàng';
-                                    case 'statusaction': return value ? value.actionType == "findUid" ? "Đang tìm uid" : 'Đang gửi tin nhắn' : 'Chưa có hành động';
-                                    default: return truncateString(value.toString(), 30, 1);
-                                }
-                            })()}
-                        </h6>
-                    </div>
+                    <TableCell key={colKey} className="truncate" onClick={handleOpenPopup}>
+                        {renderCellContent(customer, colKey)}
+                    </TableCell>
                 ))}
-            </div>
-            {isAnyActionPending && (<div className='loadingOverlay' style={{ zIndex: 9999 }}> <Loading content={<h5>Đang xử lý...</h5>} /> </div>)}
-            <FlexiblePopup
-                open={isPopupOpen}
-                onClose={handleClosePopup}
-                title={`Chi tiết: ${customer.name}`}
-                width={'500px'}
-                secondaryOpen={isHistoryPopupOpen}
-                onCloseSecondary={handleCloseHistory}
-                secondaryTitle={`Lịch sử hành động`}
-                providedDataSecondary={customer.care}
-                width2={'550px'}
-                renderSecondaryList={() => (
-                    <div className={`${styles.historywrap} scroll`}>
-                        {isLoadingHistory && <Loading content="Đang tải lịch sử..." />}
-                        {historyError && <p style={{ color: 'red', textAlign: 'center', padding: '16px' }}>{historyError}</p>}
-                        {!isLoadingHistory && !historyError && (
-                            historyData && historyData.length > 0 ? (
-                                historyData.map((log) => (<HistoryLogItem key={log._id} log={log} />))
-                            ) : (
-                                <div className='flex_center' style={{ height: 30 }}>
-                                    <h5 className='text_w_400' style={{ fontStyle: 'italic' }}>Không có lịch sử Zalo nào</h5>
-                                </div>
-                            )
-                        )}
+            </TableRow>
+
+            <Dialog open={isPopupOpen} onOpenChange={setIsPopupOpen} modal={false}>
+                <DialogContent
+                    onPointerDownOutside={handlePointerDownOutside}
+                    showCloseButton={false}
+                    className="max-w-4xl p-0 gap-0 flex flex-col md:flex-row h-[80vh] z-50"
+                >
+                    <div className="md:hidden flex-shrink-0"><CustomerDetailHeader customer={customer} zalo={zalo} /></div>
+                    <div className="flex-1 scroll">
+                        <div className="hidden md:block"><CustomerDetailHeader customer={customer} zalo={zalo} /></div>
+                        {renderContent()}
                     </div>
-                )}
-                renderItemList={() => (
-                    <div className={styles.popupContainer}>
-                        <div style={{ borderBottom: 'thin solid var(--border-color)', padding: 16 }}>
-                            <h4 style={{ paddingBottom: 8, borderBottom: 'thin dashed var(--border-color)' }}>Hành động</h4>
-                            <div className={styles.actionsGrid}>
-                                {customer.type === false && (
-                                    <>
-                                        <form action={updateStatusAction} className={styles.actionItem}>
-                                            <input type="hidden" name="customerId" value={customer._id} />
-                                            <input type="hidden" name="status" value="2" />
-                                            <button type="submit" disabled={isAnyActionPending} className={styles.actionItemButton}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <Svg_Chat_1 w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                                    <h5 className='text_w_500'>Đã liên hệ</h5>
-                                                </div>
-                                                <h6 className='text_w_400'>Đang tiến hành chăm sóc</h6>
-                                            </button>
-                                        </form>
-                                        <button className={styles.actionItem} onClick={() => setIsUpdatePopupOpen(true)} disabled={isAnyActionPending}>
-                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                <Svg_Pen w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                                <h5 className='text_w_500'>Cập nhật thông tin</h5>
-                                            </div>
-                                            <h6 className='text_w_400'>Chỉnh sửa thông tin khách hàng</h6>
-                                        </button>
-                                        <form action={updateStatusAction} className={styles.actionItem}>
-                                            <input type="hidden" name="customerId" value={customer._id} />
-                                            <input type="hidden" name="status" value="4" />
-                                            <button type="submit" disabled={isAnyActionPending} className={styles.actionItemButton}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <Svg_Out w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                                    <h5 className='text_w_500'>Không quan tâm</h5>
-                                                </div>
-                                                <h6 className='text_w_400'>Kết thúc chăm sóc</h6>
-                                            </button>
-                                        </form>
-                                        <form action={updateStatusAction} className={styles.actionItem}>
-                                            <input type="hidden" name="customerId" value={customer._id} />
-                                            <input type="hidden" name="status" value="3" />
-                                            <button type="submit" disabled={isAnyActionPending} className={styles.actionItemButton}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <Svg_Check w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                                    <h5 className='text_w_500'>Chốt đơn</h5>
-                                                </div>
-                                                <h6 className='text_w_400'>Xác nhận chốt đơn</h6>
-                                            </button>
-                                        </form>
-                                        <form action={updateStatusAction} className={styles.actionItem}>
-                                            <input type="hidden" name="customerId" value={customer._id} />
-                                            <input type="hidden" name="status" value="1" />
-                                            <button type="submit" disabled={isAnyActionPending} className={styles.actionItemButton}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <Svg_History w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                                    <h5 className='text_w_500'>Tiềm năng</h5>
-                                                </div>
-                                                <h6 className='text_w_400'>Khách hàng có tương tác</h6>
-                                            </button>
-                                        </form>
-
-
-                                        <div className={styles.actionItem}>
-                                            <button type="button" onClick={handleOpenAppointmentPopup} disabled={isAnyActionPending} className={styles.actionItemButton}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <FaCalendarDay style={{ width: 'var(--font-size-sm)' }} color={'var(--text-primary)'} />
-                                                    <h5 className='text_w_500'>Quản lý lịch hẹn</h5>
-                                                </div>
-                                                <h6 className='text_w_400'>Tạo và xem các cuộc hẹn</h6>
-                                            </button>
-                                        </div>
-
-                                    </>
-                                )}
-                                <button className={styles.actionItem} onClick={handleShowHistory} disabled={isAnyActionPending}>
-                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                        <Svg_History w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
-                                        <h5 className='text_w_500'>Lịch sử chăm sóc</h5>
-                                    </div>
-                                    <h6 className='text_w_400'>Lịch sử gửi tin nhắn zalo</h6>
-                                </button>
-                            </div>
-                        </div>
-                        {customer.type === false && (
-                            <>
-                                <div className={styles.wrapDetail} >
-                                    <h4 style={{ paddingBottom: 8, borderBottom: 'thin dashed var(--border-color)' }}>Chi tiết khách hàng</h4>
-                                    <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                        <div className={styles.formGroup}><h5>Tên:</h5> <h5>{customer.name}</h5></div>
-                                        <div className={styles.formGroup}><h5>Ngày sinh: </h5><h5>{customer.bd ? new Date(customer.bd).toLocaleDateString('vi-VN') : 'Thiếu thông tin'}</h5></div>
-                                        <div className={styles.formGroup}><h5>Tên phụ huynh:</h5> <h5>{customer.nameparent || 'Thiếu thông tin'}</h5></div>
-                                        <div className={styles.formGroup}><h5>Số điện thoại: </h5><h5>{customer.phone}</h5></div>
-                                        <div className={styles.formGroup}><h5>Email: </h5><h5>{customer.email || 'Thiếu thông tin'}</h5></div>
-                                        <div className={styles.formGroup}><h5>Kết quả chăm sóc: </h5><h5>{getStatusText(customer.status)}</h5></div>
-                                        <div className={styles.formGroup}><h5>Nguồn dữ liệu: </h5><h5>{customer.source}</h5></div>
-                                    </div>
-                                </div>
-                                <div className={styles.wrapDetail} >
-                                    <h4 style={{ paddingBottom: 8, borderBottom: 'thin dashed var(--border-color)' }}>Thông tin zalo</h4>
-                                    <div style={{ display: 'flex', gap: 8, paddingTop: 8, flexDirection: 'column' }}>
-                                        {customer.uid == null ? (<h5>Không tìm được zalo</h5>) :
-                                            <>
-                                                {customer.uid.length > 0 ? customer.zaloname &&
-                                                    <div style={{ display: 'flex', gap: 8 }}>
-                                                        <div style={{ width: 40, height: 40, objectFit: 'cover', backgroundSize: 'cover', backgroundPosition: 'center', borderRadius: 50, backgroundImage: `url(${customer.zaloavt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'})` }} />
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                                            <h5 >{customer.zaloname || 'Chưa rõ'}</h5>
-                                                            <h6>{customer.phone}</h6>
-                                                        </div>
-                                                    </div> :
-                                                    customer.uid.length === 0 ? <h6 style={{ fontStyle: 'italic' }}>Chưa tìm kiếm uid</h6> : <h6 style={{ fontStyle: 'italic' }}>Không tìm thấy tài khoản zalo</h6>
-                                                }
-                                                <h4 style={{ padding: '16px 0 8px 0', borderBottom: 'thin dashed var(--border-color)' }}>Zalo chăm sóc</h4>
-                                                {customer.uid.map((r, index) => {
-                                                    let ac = zalo.filter(t => t._id == r.zalo);
-                                                    if (ac.length) ac = ac[0];
-                                                    if (!ac) return null;
-                                                    return (
-                                                        <div key={index}>
-                                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                                <h5>{ac.name} </h5> <h6>{ac.phone}</h6>
-                                                            </div>
-                                                            <h6>Trạng thái kết bạn: {r.isReques ? 'Đang chờ xác nhận' : 'Chưa gửi kết bạn'} ({r.isFriend ? 'Bạn bè' : 'Không phải bạn bè'})</h6>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </>
-                                        }
-                                    </div>
-                                </div>
-                                <div style={{ borderBottom: 'thin solid var(--border-color)', padding: 16 }}>
-                                    <h4 style={{ paddingBottom: 8, borderBottom: 'thin dashed var(--border-color)' }}>Ghi chú chăm sóc</h4>
-                                    <div className={`${styles.notesList} scroll`}>
-                                        {customer.care?.slice().reverse().map((note, index) => (
-                                            <div key={index} className={styles.noteItem}>
-                                                <Image src={note.createBy?.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'} alt={note.createBy?.name || 'Chưa rõ'} width={40} height={40} style={{ objectFit: 'cover', borderRadius: 50, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-                                                <div className={styles.noteContent}>
-                                                    <h5 style={{ lineHeight: 1.3 }}>{note.createBy?.name || 'Chưa rõ'}<small style={{ marginLeft: '8px', fontWeight: '400' }}>{new Date(note.createAt).toLocaleString('vi-VN')}</small></h5>
-                                                    <h5 className='text_w_400' style={{ marginTop: 8, lineHeight: 1.3 }}>{note.content}</h5>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {(!customer.care || customer.care.length === 0) && (
-                                            <div className='flex_center' style={{ height: 30 }}>
-                                                <h5 className='text_w_400' style={{ fontStyle: 'italic' }}>Chưa có ghi chú nào</h5>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <form action={addNoteAction} ref={noteFormRef} className={styles.noteForm}>
-                                        <Image src={user.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'} alt={user.name || 'Chưa rõ'} width={40} height={40} style={{ objectFit: 'cover', borderRadius: 50 }} />
-                                        <input type="hidden" name="customerId" value={customer._id} />
-                                        <textarea style={{ width: '100%' }} name="content" placeholder="Viết bình luận chăm sóc..." className='input' value={comment} onChange={(e) => setComment(e.target.value)} rows={3} disabled={isAnyActionPending} />
-                                        <MiniSubmitButton text={'Gửi'} pending={isAnyActionPending} />
-                                    </form>
-                                </div>
-                            </>
-                        )}
+                    <Separator orientation="vertical" className="hidden md:block" />
+                    <div className="w-full md:w-56 p-4 flex-shrink-0 flex md:flex-col gap-3 border-t md:border-t-0 md:border-l overflow-x-auto md:scroll">
+                        <Button variant={activeTab === 'pipeline' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('pipeline')}><LayoutDashboard className="h-5 w-5" /><h6 className="text-xs">Lịch trình</h6></Button>
+                        <Button variant={activeTab === 'history' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('history')}><Clock className="h-5 w-5" /><h6 className="text-xs">Lịch sử</h6></Button>
+                        <Button variant={activeTab === 'info' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('info')}><User className="h-5 w-5" /><h6 className="text-xs">Thông tin</h6></Button>
+                        <Button variant={activeTab === 'appointments' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('appointments')}><CalendarCheck className="h-5 w-5" /><h6 className="text-xs">Lịch hẹn</h6></Button>
                     </div>
-                )}
-            />
-            <CenterPopup open={isAppointmentPopupOpen} onClose={handleCloseAppointmentPopup} size="lg">
-                <Title content={`Lịch hẹn cho: ${customer.name}`} click={handleCloseAppointmentPopup} />
-                <div className={`${styles.mainform} scroll`}>
-                    <AppointmentManager
-                        customer={customer}
-                        previousState={[createAppointmentState, updateAppointmentState, cancelAppointmentState]}
-                        createAction={createAppointmentActionFn}
-                        updateAction={updateAppointmentStatusActionFn}
-                        cancelAction={cancelAppointmentActionFn}
-                        pending={isAnyActionPending}
-                        setNotification={setNotification}
-                    />
-                </div>
-            </CenterPopup>
-
-            <CenterPopup open={isUpdatePopupOpen} onClose={() => !isAnyActionPending && setIsUpdatePopupOpen(false)} size="md" >
-                <Title content="Chỉnh sửa thông tin khách hàng" click={() => !isAnyActionPending && setIsUpdatePopupOpen(false)} />
-                <div className={styles.mainform}>
-                    <CustomerUpdateForm
-                        formAction={updateInfoAction}
-                        initialData={customer}
-                        onClose={() => setIsUpdatePopupOpen(false)}
-                        isAnyActionPending={isAnyActionPending}
-                    />
-                </div>
-            </CenterPopup >
-            <Noti open={notification.open} onClose={handleCloseNoti} status={notification.status} mes={notification.mes} />
+                    <DialogClose className="absolute top-4 right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+                        <X className="h-4 w-4" />
+                        <VisuallyHidden><span>Close</span></VisuallyHidden>
+                    </DialogClose>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

@@ -1,7 +1,9 @@
+// File: /api/register/route.js
+
 import bcrypt from 'bcryptjs';
 import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
-import PostUser from '@/models/users';
+import PostUser from '@/models/users'; // Đảm bảo bạn import đúng model users
 import { reloadUser } from '@/data/actions/reload';
 
 export async function POST(req) {
@@ -14,11 +16,18 @@ export async function POST(req) {
             role = ["Sale"],
             phone = '',
             email,
-            password
+            password,
+            group // MỚI: Nhận trường 'group' từ request
         } = await req.json();
 
-        if (!email || !password) {
-            return jsonRes(400, { error: 'Email và mật khẩu là bắt buộc' });
+        // CẬP NHẬT: Thêm 'group' vào điều kiện bắt buộc
+        if (!email || !password || !group) {
+            return jsonRes(400, { error: 'Email, mật khẩu và nhóm là bắt buộc' });
+        }
+
+        // CẬP NHẬT: Kiểm tra giá trị của group có hợp lệ không
+        if (!['noi_khoa', 'ngoai_khoa'].includes(group)) {
+            return jsonRes(400, { error: 'Giá trị của nhóm không hợp lệ.' });
         }
 
         const exists = await PostUser.exists({ email });
@@ -26,8 +35,9 @@ export async function POST(req) {
             return jsonRes(409, { error: 'Email đã tồn tại' });
         }
 
-        const hash = await bcrypt.hash(password, 10);      
+        const hash = await bcrypt.hash(password, 10);
 
+        // CẬP NHẬT: Thêm 'group' khi tạo user mới
         await PostUser.create({
             name,
             address,
@@ -35,7 +45,8 @@ export async function POST(req) {
             role,
             phone,
             email,
-            uid: hash                                    
+            uid: hash,
+            group // MỚI
         });
         reloadUser()
         return jsonRes(201, { message: 'Tạo tài khoản thành công' });

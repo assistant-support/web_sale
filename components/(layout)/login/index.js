@@ -30,7 +30,7 @@ const InputField = ({ label, type, value, setValue }) => {
         onFocus={handleFocus}
         onBlur={handleBlur}
         style={{
-          width: 'calc(100% - 32px)',
+          width: 'calc(100%)',
           padding: '16px',
           paddingTop: focused || value !== '' ? 22 : 16,
           paddingBottom: focused || value !== '' ? 10 : 16,
@@ -39,7 +39,7 @@ const InputField = ({ label, type, value, setValue }) => {
           fontSize: '16px',
           color: '#333',
           borderRadius: 5,
-          background: 'var(--background)',
+          background: 'var(--bg-secondary)',
         }}
       />
       <label
@@ -70,7 +70,7 @@ const InputField = ({ label, type, value, setValue }) => {
           }}
           className='flex_center'
         >
-          {showPassword ? <Svg_Eye  w={18} h={18} c={'gray'}/> : <Svg_unEye  w={18} h={18} c={'gray'}/>}
+          {showPassword ? <Svg_Eye w={18} h={18} c={'gray'} /> : <Svg_unEye w={18} h={18} c={'gray'} />}
         </div>
       )}
     </div>
@@ -88,7 +88,9 @@ const LoginPage = () => {
   const handleSubmit = async () => {
     setloading(true)
     try {
-      const data = { email: username, password, re: rememberMe };
+      const trimmedUsername = username.trim();
+      const trimmedPassword = password.trim();
+      const data = { email: trimmedUsername, password: trimmedPassword, re: rememberMe };
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: {
@@ -96,16 +98,20 @@ const LoginPage = () => {
         },
         body: JSON.stringify(data),
       });
-      
-      if (!response.ok) {
-        throw new Error('Đăng nhập thất bại');
-      }
       const result = await response.json();
+      console.log(result);
       window.location.reload()
     } catch (err) {
       console.error('Lỗi:', err);
     }
     setloading(false)
+  };
+
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    if (isFormValid) {
+      handleSubmit();
+    }
   };
 
   return (
@@ -116,14 +122,14 @@ const LoginPage = () => {
           backgroundColor: 'white',
           padding: '32px 32px 0 32px',
           borderRadius: '8px',
-          width: 'calc(100% - 64px)',
+          width: '100%',
         }}
       >
         {loading ?
           <div style={{ width: '100%', aspectRatio: 1, height: 'auto' }} className='flex_center'>
             {/* <CircularProgress color="inherit" /> */}
           </div> :
-          <>
+          <form onSubmit={handleFormSubmit}>
             <InputField label="Email" type="text" value={username} setValue={setUsername} />
             <InputField label="Mật khẩu" type="password" value={password} setValue={setPassword} />
 
@@ -142,7 +148,9 @@ const LoginPage = () => {
             </div>
 
             <div className="flex_center" style={{ margin: '40px 0' }}>
-              <div
+              <button
+                type="submit"
+                disabled={!isFormValid}
                 style={{
                   height: 60,
                   width: 60,
@@ -152,13 +160,13 @@ const LoginPage = () => {
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
-                onClick={isFormValid ? handleSubmit : undefined}
                 className={isFormValid ? air.submit : air.unsubmit}
               >
-                <Svg_ArowRight w={28} h={28} c={'white'}/>
-              </div>
+                <Svg_ArowRight w={28} h={28} c={'white'} />
+              </button>
             </div>
-          </>}
+          </form>
+        }
       </div>
     </>
   );

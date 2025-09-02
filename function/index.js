@@ -54,3 +54,12 @@ export const driveImage = (id) => {
     return `https://lh3.googleusercontent.com/d/${id}`;
 }
 
+
+export function formatDelay(ms) {
+    if (typeof ms !== 'number' || ms < 0) return 'Thời gian không hợp lệ';
+    const min = ms / 60000;
+    if (min === 0) return '0 phút';
+    if (min >= 1440) return (min / 1440).toFixed(1) + ' ngày'; // .toFixed(1) cho đẹp hơn
+    if (min >= 60) return (min / 60).toFixed(1) + ' giờ'; // .toFixed(1) cho đẹp hơn
+    return min.toFixed(0) + ' phút';
+}

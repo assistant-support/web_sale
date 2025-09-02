@@ -1,26 +1,29 @@
 'use client';
-
 import air from './index.module.css'
 
 export default function Noti({ open, onClose, status, mes, button, width }) {
   if (!open) return null;
+  const handleOverlayClick = (e) => {
+    e.stopPropagation(); 
+    onClose();
+  };
 
   return (
     <div
       style={{
         position: 'fixed',
         top: 0,
-        left: width ? 'calc(-100vw + ' + width + 'px)' : '0',
+        left: 0,
         width: '100vw',
         height: '100vh',
-        backgroundColor: 'rgba(0,0,0,0.5)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 2000,
+        zIndex: 9999, 
       }}
     >
-      <div onClick={onClose}
+      <div 
+        onClick={handleOverlayClick} 
         style={{
           position: 'fixed',
           top: 0,
@@ -28,9 +31,12 @@ export default function Noti({ open, onClose, status, mes, button, width }) {
           width: '100%',
           height: '100%',
           backgroundColor: 'rgba(0,0,0,0.5)',
-          zIndex: 9,
-        }}>
+          zIndex: 9, // z-index thấp hơn hộp thoại
+        }}
+      >
       </div>
+
+      {/* Đây là hộp thoại thông báo chính */}
       <div
         style={{
           background: 'var(--bg-secondary)',
@@ -38,7 +44,7 @@ export default function Noti({ open, onClose, status, mes, button, width }) {
           width: 350,
           borderRadius: 8,
           boxShadow: '0 2px 8px rgba(0,0,0,0.26)',
-          zIndex: 10,
+          zIndex: 10, // z-index cao hơn lớp phủ
         }}
       >
         <h4

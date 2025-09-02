@@ -1,4 +1,4 @@
-import Zalo from '@/models/zalo'
+import Zalo from '@/models/zalo.model'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache'
 

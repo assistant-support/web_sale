@@ -1,11 +1,11 @@
 'use server';
 import { unstable_cache as nextCache, revalidateTag } from 'next/cache';
 import connectDB from "@/config/connectDB";
-import Customer from "@/models/customer";
+import Customer from "@/models/customer.model";
 import mongoose from 'mongoose';
 import checkAuthToken from '@/utils/checktoken';
 import User from '@/models/users';
-import '@/models/zalo' // Giữ lại nếu Zalo Account vẫn liên quan đến Customer
+import '@/models/zalo.model' // Giữ lại nếu Zalo Account vẫn liên quan đến Customer
 import ScheduledJob from "@/models/schedule";
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
 // Các import không liên quan đến Student đã được bỏ đi
@@ -169,47 +169,78 @@ export async function revalidateData() {
 }
 
 export async function updateCustomerInfo(previousState, formData) {
+    console.log(formData);
+    
+    // Thêm bước kiểm tra để đảm bảo formData tồn tại
+    if (!formData) {
+        return { success: false, error: 'Không nhận được dữ liệu từ form.' };
+    }
+
     const id = formData.get('_id');
-    // const isStudent = formData.get('type') === 'true'; // Loại bỏ check này vì luôn là Customer
-    if (!id) return { success: false, error: 'Thiếu ID.' };
+    if (!id) return { success: false, error: 'Thiếu ID khách hàng.' };
+
     try {
-        await connectDB();
+        await connectDB(); // Giả định hàm kết nối DB của bạn
+
+        // Chỉ lấy những trường được phép chỉnh sửa từ form
         const payload = {
             name: formData.get('name'),
-            phone: formData.get('phone'),
             email: formData.get('email'),
-            nameparent: formData.get('nameparent'),
+            area: formData.get('area'),
             bd: formData.get('bd') ? new Date(formData.get('bd')) : null,
         };
-        // Chỉ cập nhật Customer
+        
+        // Lọc ra các giá trị null hoặc undefined để không ghi đè dữ liệu cũ không cần thiết
+        Object.keys(payload).forEach(key => (payload[key] === null || payload[key] === undefined) && delete payload[key]);
+
         await Customer.findByIdAndUpdate(id, payload);
 
-        revalidateData();
-        return { success: true };
+        revalidateData(); // Giả định hàm revalidate của bạn
+        return { success: true, message: 'Cập nhật thông tin thành công!' };
     } catch (error) {
+        console.error("Lỗi khi cập nhật khách hàng:", error);
         return { success: false, error: 'Lỗi server khi cập nhật.' };
     }
 }
 
 export async function addCareNoteAction(previousState, formData) {
     const user = await checkAuthToken();
-    if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
+    if (!user || !user.id) return { success: false, message: 'Bạn cần đăng nhập để thực hiện hành động này.' };
     if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
-        return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
+        return { success: false, message: 'Bạn không có quyền thực hiện chức năng này' };
     }
+
+    // MỚI: Lấy thêm 'step' từ formData
     const customerId = formData.get('customerId');
     const content = formData.get('content');
-    if (!customerId || !content) return { success: false, error: 'Thiếu thông tin.' };
+    const step = formData.get('step');
+
+    // MỚI: Thêm 'step' vào điều kiện kiểm tra
+    if (!customerId || !content || !step) {
+        return { success: false, error: 'Thiếu thông tin ghi chú.' };
+    }
+    
     try {
         await connectDB();
-        const newNote = { content, createBy: user.id, createAt: new Date() };
+
+        // MỚI: Thêm trường 'step' vào object newNote
+        // Chuyển step sang dạng Number để đảm bảo đúng kiểu dữ liệu trong CSDL
+        const newNote = { 
+            content, 
+            step: Number(step), 
+            createBy: user.id, 
+            createAt: new Date() 
+        };
+
         await Customer.findByIdAndUpdate(customerId, {
             $push: { care: newNote }
         });
+
         revalidateData();
-        return { success: true };
+        return { success: true, message: 'Thêm ghi chú thành công.' };
     } catch (error) {
-        return { success: false, error: 'Không thể thêm ghi chú.' };
+        console.error("Error adding care note:", error);
+        return { success: false, error: 'Lỗi máy chủ: Không thể thêm ghi chú.' };
     }
 }
 

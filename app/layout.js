@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 import '@/styles/all.css'
 import '@/styles/font.css';
 import './globals.css'
-import { ThemeProvider } from "@/components/theme-provider"
 
 export const metadata = {
   title: "AI Robotic",
@@ -11,18 +10,10 @@ export const metadata = {
 };
 
 export default async function RootLayout({ children }) {
-
   return (
-    <html lang="en"  suppressHydrationWarning>
+    <html lang="en" >
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
           {children}
-        </ThemeProvider>
       </body>
     </html>
   );

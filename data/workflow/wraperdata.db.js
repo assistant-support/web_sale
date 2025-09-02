@@ -7,7 +7,7 @@ import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflow.model';
 import connectDB from '@/config/connectDB';
 import { revalidateTag } from 'next/cache';
 import initAgenda from '@/config/agenda';
-import Customer from '@/models/customer'; // Giả sử để update zaloPhase
+import Customer from '@/models/customer.model'; // Giả sử để update zaloPhase
 
 // Hàm sẵn (giả định): findUID, sendMessage, sendFriendRequest, checkFriendStatus, changeZaloName
 // import { findUID, sendMessage, sendFriendRequest, checkFriendStatus, changeZaloName } from '@/lib/zaloFunctions';
@@ -39,7 +39,7 @@ export async function createWorkflow(formData) {
     });
     await newTemplate.save();
     revalidateTag('workflows');
-    return { success: true, id: newTemplate._id };
+    return { success: true };
   } catch (error) {
     console.error('Lỗi tạo workflow:', error);
     return { success: false, error: 'Không thể tạo workflow.' };
@@ -199,4 +199,20 @@ function getFixedSteps(type) {
     // 5 giai đoạn Zalo
   }
   return [];
+}
+
+export async function deleteWorkflow(id) {
+  try {
+    await connectDB();
+    const template = await WorkflowTemplate.findById(id);
+    if (!template || template.type !== 'custom') {
+      throw new Error('Workflow không tồn tại hoặc không thể xóa.');
+    }
+    await template.deleteOne();
+    revalidateTag('workflows');
+    return { success: true };
+  } catch (error) {
+    console.error('Lỗi xóa workflow:', error);
+    return { success: false, error: 'Không thể xóa workflow.' };
+  }
 }

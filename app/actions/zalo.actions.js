@@ -3,7 +3,7 @@
 
 import { google } from 'googleapis';
 import connectDB from '@/config/connectDB';
-import ZaloAccount from '@/models/zalo';
+import ZaloAccount from '@/models/zalo.model';
 import checkAuthToken from '@/utils/checktoken';
 import { reloadUser, reloadZalo } from '@/data/actions/reload';
 import User from '@/models/users';

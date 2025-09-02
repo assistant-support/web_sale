@@ -23,7 +23,12 @@ const postUser = new Schema({
     type: Schema.Types.ObjectId, ref: 'zaloaccount'
   },
   uid: {
-    type: String, 
+    type: String,
+  },
+  group: {
+    type: String,
+    enum: ['noi_khoa', 'ngoai_khoa'],
+    required: true
   }
 }, { timestamps: true })
 

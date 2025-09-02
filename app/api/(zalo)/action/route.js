@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import ScheduledJob from "@/models/schedule";
 import ZaloAccount from "@/models/zalo";
 import Customer from "@/models/customer";
-import Variant from "@/models/variant";
+import Variant from "@/models/variant.model";
 import Logs from "@/models/log";
 import dbConnect from "@/config/connectDB";
 import { actionZalo } from '@/function/drive/appscript';

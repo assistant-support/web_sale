@@ -1,4 +1,4 @@
-import Customer from '@/models/customer'
+import Customer from '@/models/customer.model'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache' // Giả sử bạn có một hàm cacheData tương tự
 

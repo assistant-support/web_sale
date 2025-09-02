@@ -1,38 +1,40 @@
+// File: /api/roleuser/[id]/route.js (Tạo file này nếu chưa có)
+
+import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
-import { reloadUser } from '@/data/actions/reload';
 import PostUser from '@/models/users';
-import jsonRes from '@/utils/response';
+import { reloadUser } from '@/data/actions/reload';
 
-export async function PATCH(request, { params }) {
+export async function PATCH(req, { params }) {
     try {
-        const { id } = params;
-        if (!id) {
-            return jsonRes(400, { error: 'Thiếu ID người dùng.' });
-        }
-
         await connectDB();
+        const { id } = params;
+        const { name, phone, address, role, group } = await req.json(); // MỚI: Nhận cả group
 
-        const body = await request.json();
-        const { name, address, phone, role } = body;
-
-        const updateData = {};
-        if (name) updateData.name = name;
-        if (address) updateData.address = address;
-        if (phone) updateData.phone = phone;
-        if (role && typeof role === 'string') {
-            updateData.role = [role];
+        if (!id) {
+            return new NextResponse(JSON.stringify({ error: 'Thiếu ID người dùng' }), { status: 400 });
         }
+        
+        // Tạo object chứa các trường cần cập nhật
+        const updateData = {
+            name,
+            phone,
+            address,
+            role: [role], // Form gửi lên role là string, model yêu cầu array
+            group // MỚI
+        };
 
-        const updatedUser = await PostUser.findByIdAndUpdate(id, { $set: updateData }, { new: true });
+        const updatedUser = await PostUser.findByIdAndUpdate(id, updateData, { new: true });
 
         if (!updatedUser) {
-            return jsonRes(404, { error: 'Không tìm thấy người dùng để cập nhật.' });
+            return new NextResponse(JSON.stringify({ error: 'Không tìm thấy người dùng' }), { status: 404 });
         }
-        reloadUser()
-        return jsonRes(200, { message: 'Cập nhật thông tin thành công.', user: updatedUser });
 
-    } catch (err) {
-        console.error(err);
-        return jsonRes(500, { error: 'Lỗi máy chủ' });
+        reloadUser(); // Làm mới cache/dữ liệu
+        return new NextResponse(JSON.stringify({ message: 'Cập nhật thành công', user: updatedUser }), { status: 200 });
+
+    } catch (error) {
+        console.error("Lỗi cập nhật user:", error);
+        return new NextResponse(JSON.stringify({ error: 'Lỗi máy chủ' }), { status: 500 });
     }
 }

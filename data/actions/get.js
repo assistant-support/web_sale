@@ -5,8 +5,8 @@ import { getUserAll, getUserOne } from '@/data/database/user'
 import { getLabelAll } from '../database/label'
 import { getFormAll } from '../database/form'
 import { getZaloAll, getZaloOne } from '../database/zalo'
-import Logs from '@/models/log'
-import '@/models/zalo'
+import Logs from '@/models/log.model'
+import '@/models/zalo.model'
 import connectDB from '@/config/connectDB'
 
 export async function area_data(_id) {

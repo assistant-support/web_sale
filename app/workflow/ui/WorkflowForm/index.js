@@ -9,22 +9,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AnimatePresence, motion } from 'framer-motion';
-
-// === Import icon từ lucide-react ===
 import { PlusCircle, Pencil, Trash2, MessageSquare, UserPlus, CheckCircle2, Tag, ArrowRight } from 'lucide-react';
-
-// === Giữ nguyên các hàm data và helper ===
 import { createWorkflow, updateWorkflow } from '@/data/workflow/wraperdata.db';
 
-function formatDelay(ms) { /* ... Giữ nguyên ... */ }
+function formatDelay(ms) {
+    const min = ms / 60000;
+    if (min === 0) return 'Ngay lập tức';
+    if (min >= 1440) return `${(min / 1440).toFixed(1)} ngày`;
+    if (min >= 60) return `${(min / 60).toFixed(1)} giờ`;
+    return `${min.toFixed(0)} phút`;
+}
 
 const actionIcons = {
     message: MessageSquare,
     friendRequest: UserPlus,
     checkFriend: CheckCircle2,
     tag: Tag,
+};
+
+const actionLabels = {
+    message: 'Nhắn Tin',
+    friendRequest: 'Kết Bạn',
+    checkFriend: 'Kiểm Tra Kết Bạn',
+    tag: 'Gắn Tag/Đổi Tên',
 };
 
 // --- Component con cho từng bước, với logic chỉnh sửa tại chỗ ---
@@ -34,15 +43,19 @@ const WorkflowStep = ({ step, index, onRemove, onUpdateDelay, onUpdateParam, isF
 
     // State cục bộ để chỉnh sửa mà không ảnh hưởng ngay lập tức đến state cha
     const [editableDelay, setEditableDelay] = useState(step.delay / 60000);
-    const [editableMessage, setEditableMessage] = useState(step.params.message || '');
+    const [editableMessage, setEditableMessage] = useState(step?.params?.message || '');
 
     const handleSave = () => {
-        onUpdateDelay(index, editableDelay);
+        if (!isFixed) {
+            onUpdateDelay(index, editableDelay);
+        }
         if (['message', 'tag'].includes(step.action)) {
             onUpdateParam(index, 'message', editableMessage);
         }
         setIsEditing(false);
     };
+
+    const canEditMessage = ['message', 'tag'].includes(step.action);
 
     return (
         <Card className="transition-shadow duration-300 hover:shadow-lg">
@@ -52,19 +65,22 @@ const WorkflowStep = ({ step, index, onRemove, onUpdateDelay, onUpdateParam, isF
                         <Icon className="h-5 w-5" />
                     </div>
                     <div>
-                        <h5 className="font-semibold capitalize text-gray-800">{step.action.replace(/([A-Z])/g, ' $1')}</h5>
-                        <p className="text-sm text-gray-500">Delay: {formatDelay(step.delay)}</p>
-                        {step.params.message && <p className="text-sm text-gray-600 mt-1 italic break-all">"{step.params.message}"</p>}
+                        <h5 className="font-semibold capitalize text-gray-800">{actionLabels[step.action] || step.action.replace(/([A-Z])/g, ' $1')}</h5>
+                        <h5 className="text-sm text-gray-500">Delay: {formatDelay(step.delay)}</h5>
+                        {step?.params?.message &&
+                            <h6 className="text-sm text-gray-600 mt-1 italic break-all">"{step.params.message}"</h6>}
                     </div>
                 </div>
-                {!isFixed && (
+                {(!isFixed || canEditMessage) && (
                     <div className="flex gap-2 flex-shrink-0">
                         <Button variant="ghost" size="icon" onClick={() => setIsEditing(!isEditing)}>
                             <Pencil className="h-4 w-4 text-gray-500" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => onRemove(index)}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
+                        {!isFixed && (
+                            <Button variant="ghost" size="icon" onClick={() => onRemove(index)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                        )}
                     </div>
                 )}
             </div>
@@ -78,14 +94,16 @@ const WorkflowStep = ({ step, index, onRemove, onUpdateDelay, onUpdateParam, isF
                         className="overflow-hidden"
                     >
                         <div className="border-t p-4 space-y-4 bg-gray-50/50">
-                            <div className='grid grid-cols-2 gap-4'>
-                                <div>
-                                    <Label>Delay (phút)</Label>
-                                    <Input type="number" value={editableDelay} onChange={e => setEditableDelay(parseFloat(e.target.value) || 0)} />
+                            {!isFixed && (
+                                <div className='grid grid-cols-2 gap-4'>
+                                    <div>
+                                        <Label>Delay (phút)</Label>
+                                        <Input type="number" value={editableDelay} onChange={e => setEditableDelay(parseFloat(e.target.value) || 0)} />
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
-                            {['message', 'tag'].includes(step.action) && (
+                            {canEditMessage && (
                                 <div>
                                     <Label>{step.action === 'tag' ? 'Tag/Tên' : 'Tin nhắn'}</Label>
                                     <Textarea value={editableMessage} onChange={e => setEditableMessage(e.target.value)} rows={3} />
@@ -113,88 +131,123 @@ export default function WorkflowForm({ workflow, forms, onSuccess, onCancel }) {
     const [delayUnit, setDelayUnit] = useState('minutes');
     const isFixed = workflow?.type === 'fixed';
 
-    useEffect(() => { /* Giữ nguyên logic */ }, [workflow]);
+    useEffect(() => {
+        if (workflow) {
+            setName(workflow.name);
+            setSteps(workflow.steps);
+        } else {
+            setName('');
+            setSteps([]);
+            setNewStep({ action: '', delay: 0, params: {} });
+        }
+    }, [workflow]);
 
     // === Toàn bộ các hàm xử lý logic được giữ nguyên ===
-    const handleActionChange = (value) => { /* Giữ nguyên logic */ };
-    const handleAddStep = () => { /* Giữ nguyên logic */ };
-    const handleRemoveStep = (index) => { /* Giữ nguyên logic */ };
-    const handleUpdateParam = (index, key, value) => { /* Giữ nguyên logic */ };
-    const handleUpdateDelay = (index, value) => { /* Giữ nguyên logic */ };
-    const handleSubmit = async () => { /* Giữ nguyên logic */ };
+    const handleActionChange = (value) => setNewStep({ ...newStep, action: value, params: {} });
+    const handleAddStep = () => {
+        if (newStep.action) {
+            let ms = (parseFloat(newStep.delay) || 0) * 60000;
+            if (delayUnit === 'hours') ms *= 60;
+            if (delayUnit === 'days') ms *= 1440;
+            setSteps(prev => [...prev, { ...newStep, delay: ms }]);
+            setNewStep({ action: '', delay: 0, params: {} });
+            setDelayUnit('minutes');
+        }
+    };
+    const handleRemoveStep = (index) => setSteps(prev => prev.filter((_, i) => i !== index));
+    const handleUpdateParam = (index, key, value) => {
+        setSteps(prev => prev.map((s, i) => i === index ? { ...s, params: { ...s.params, [key]: value } } : s));
+    };
+    const handleUpdateDelay = (index, value) => {
+        const ms = value * 60000;
+        setSteps(prev => prev.map((s, i) => i === index ? { ...s, delay: ms } : s));
+    };
+    const handleSubmit = async () => {
+        if (name && steps.length > 0) {
+            const formData = { name, steps };
+            let result;
+            if (workflow && workflow._id) {
+                result = await updateWorkflow(workflow._id, formData);
+            } else {
+                formData.type = isFixed ? 'fixed' : 'custom';
+                result = await createWorkflow(formData);
+            }
+            if (result.success) onSuccess(formData);
+        }
+    };
 
     const sortedSteps = [...steps].sort((a, b) => a.delay - b.delay);
 
     return (
         <>
-            <SheetHeader className="p-4 border-b bg-white flex-shrink-0">
-                <SheetTitle>{workflow ? 'Chỉnh Sửa' : 'Tạo'} Workflow {isFixed ? '(Cố Định)' : '(Tùy Biến)'}</SheetTitle>
-                <SheetDescription>
-                    Điền thông tin và thêm các bước để cấu hình luồng công việc của bạn.
-                </SheetDescription>
-            </SheetHeader>
+            <DialogHeader className="p-4 border-b bg-white flex-shrink-0">
+                <DialogTitle><p>{workflow ? 'Chỉnh Sửa' : 'Tạo'} Workflow {isFixed ? '(Cố Định)' : ''}</p></DialogTitle>
+                <h5>Điền thông tin và thêm các bước để cấu hình luồng công việc của bạn.</h5>
+            </DialogHeader>
 
-            <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-                <Card>
-                    <CardHeader><CardTitle>Thông tin cơ bản</CardTitle></CardHeader>
-                    <CardContent>
-                        <Label htmlFor="workflow-name">Tên Workflow</Label>
-                        <Input id="workflow-name" value={name} onChange={e => setName(e.target.value)} />
-                    </CardContent>
-                </Card>
-
-                {!isFixed && (
+            <main className="flex-1 scroll p-4 md:p-6 space-y-6" style={{ maxHeight: '60vh', display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: '35%' }}>
                     <Card>
-                        <CardHeader><CardTitle>Thêm bước mới</CardTitle></CardHeader>
-                        <CardContent className="space-y-4">
-                            <div>
-                                <Label>Hành động</Label>
-                                <Select value={newStep.action} onValueChange={handleActionChange}>
-                                    <SelectTrigger><SelectValue placeholder="Chọn một hành động..." /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="message">Nhắn Tin</SelectItem>
-                                        <SelectItem value="friendRequest">Kết Bạn</SelectItem>
-                                        <SelectItem value="checkFriend">Kiểm Tra Kết Bạn</SelectItem>
-                                        <SelectItem value="tag">Gắn Tag/Đổi Tên</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
+                        <CardHeader><CardTitle>Thông tin cơ bản</CardTitle></CardHeader>
+                        <CardContent>
+                            <Label htmlFor="workflow-name">Tên Workflow</Label>
+                            <Input id="workflow-name" value={name} onChange={e => setName(e.target.value)} />
+                        </CardContent>
+                    </Card>
+
+                    {!isFixed && (
+                        <Card>
+                            <CardHeader><CardTitle>Thêm bước mới</CardTitle></CardHeader>
+                            <CardContent className="space-y-4">
                                 <div>
-                                    <Label>Delay</Label>
-                                    <Input type="number" value={newStep.delay} onChange={e => setNewStep({ ...newStep, delay: parseFloat(e.target.value) || 0 })} />
-                                </div>
-                                <div>
-                                    <Label>Đơn vị</Label>
-                                    <Select value={delayUnit} onValueChange={setDelayUnit}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <Label>Hành động</Label>
+                                    <Select value={newStep.action} onValueChange={handleActionChange}>
+                                        <SelectTrigger><SelectValue placeholder="Chọn một hành động..." /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="minutes">Phút</SelectItem>
-                                            <SelectItem value="hours">Giờ</SelectItem>
-                                            <SelectItem value="days">Ngày</SelectItem>
+                                            <SelectItem value="message">Nhắn Tin</SelectItem>
+                                            <SelectItem value="friendRequest">Kết Bạn</SelectItem>
+                                            <SelectItem value="checkFriend">Kiểm Tra Kết Bạn</SelectItem>
+                                            <SelectItem value="tag">Gắn Tag/Đổi Tên</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
-                            </div>
-                            {['message', 'tag'].includes(newStep.action) && (
-                                <div>
-                                    <Label>{newStep.action === 'tag' ? 'Tag/Tên' : 'Tin nhắn'}</Label>
-                                    <Textarea value={newStep.params.message || ''} onChange={e => setNewStep({ ...newStep, params: { message: e.target.value } })} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label>Delay</Label>
+                                        <Input type="number" value={newStep.delay} onChange={e => setNewStep({ ...newStep, delay: parseFloat(e.target.value) || 0 })} />
+                                    </div>
+                                    <div>
+                                        <Label>Đơn vị</Label>
+                                        <Select value={delayUnit} onValueChange={setDelayUnit}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="minutes">Phút</SelectItem>
+                                                <SelectItem value="hours">Giờ</SelectItem>
+                                                <SelectItem value="days">Ngày</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
-                            )}
-                        </CardContent>
-                        <CardFooter>
-                            <Button className="w-full" onClick={handleAddStep}>
-                                <PlusCircle className="mr-2 h-4 w-4" /> Thêm Bước
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                )}
+                                {['message', 'tag'].includes(newStep.action) && (
+                                    <div>
+                                        <Label>{newStep.action === 'tag' ? 'Tag/Tên' : 'Tin nhắn'}</Label>
+                                        <Textarea value={newStep.params.message || ''} onChange={e => setNewStep({ ...newStep, params: { message: e.target.value } })} />
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter>
+                                <Button className="w-full" onClick={handleAddStep}>
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Thêm Bước
+                                </Button>
+                            </CardFooter>
+                        </Card>
+                    )}
+                </div>
 
-                <div>
-                    <h3 className="text-lg font-semibold mb-3">Các bước trong luồng</h3>
+                <div style={{ flex: 1, overflowY: 'auto' }} className='scroll'>
+                    <h6 className="font-semibold text-gray-700 mb-3">Các Bước Workflow:</h6>
                     {sortedSteps.length > 0 ? (
-                        <div className="space-y-3">
+                        <div className="space-y-4">
                             {sortedSteps.map((step, index) => (
                                 <WorkflowStep
                                     key={index}
@@ -207,13 +260,8 @@ export default function WorkflowForm({ workflow, forms, onSuccess, onCancel }) {
                                 />
                             ))}
                         </div>
-                    ) : (
-                        <div className="text-center text-gray-500 border-2 border-dashed rounded-lg p-8">
-                            <p>Chưa có bước nào.</p>
-                        </div>
-                    )}
+                    ) : (<div className="text-center text-gray-500 border-2 border-dashed rounded-lg p-8 h-full flex flex-col justify-center items-center bg-white"><p>Chưa có bước nào.</p></div>)}
                 </div>
-
             </main>
 
             <footer className="p-4 border-t bg-white flex justify-end gap-3 flex-shrink-0">

@@ -4,7 +4,7 @@ import Customer from "@/models/customer";
 import ZaloAccount from "@/models/zalo";
 import Setting from "@/models/setting";
 import Form from "@/models/formclient";
-import Variant from "@/models/variant";
+import Variant from "@/models/variant.model";
 import Logs from "@/models/log";
 import { actionZalo, sendGP } from "@/function/drive/appscript";
 import { formatMessage } from "@/app/api/(zalo)/action/route";

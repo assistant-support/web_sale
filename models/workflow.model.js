@@ -20,7 +20,7 @@ const workflowTemplateSchema = new Schema({
     steps: [
         {
             /** Action type like 'message' or 'friendRequest'. */
-            action: { type: String, enum: ['message', 'friendRequest', 'checkFriend', 'tag'], required: true },
+            action: { type: String, enum: ['message', 'friendRequest', 'checkFriend', 'tag', 'findUid'], required: true },
             /** Delay in milliseconds from the start. */
             delay: { type: Number, required: true },
             /** Flexible parameters for the action. */

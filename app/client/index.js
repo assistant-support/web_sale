@@ -16,7 +16,7 @@ import { reloadUser } from '@/data/actions/reload';
 function TableSkeleton() {
     return <div style={{ height: '500px', background: '#f8f9fa', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Đang tải dữ liệu...</div>;
 }
-export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow }) {
+export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
     const [selectedCustomers, setSelectedCustomers] = useState(new Map());
     const [viewMode, setViewMode] = useState('manage');
     const handleActionComplete = () => {
@@ -65,7 +65,7 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                                 <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
                                 <SettingVariant data={variant} />
                                 <SettingLabel data={labelData} />
-                                <SettingData data={formData} />
+                                <SettingData data={formData} service={service} />
                             </div>
                         </div>
                     </div>
