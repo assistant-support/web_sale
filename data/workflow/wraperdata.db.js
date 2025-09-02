@@ -26,7 +26,7 @@ export async function reloadWorkflow() {
 export async function createWorkflow(formData) {
   try {
     await connectDB();
-    const { name, type, steps, excludedSources } = formData;
+    let { name, type, steps, excludedSources } = formData;
     if (type === 'fixed') {
       // Fixed: Steps cố định cho CRM hoặc Zalo
       steps = getFixedSteps(type); // Hàm helper định nghĩa 6/5 steps fixed

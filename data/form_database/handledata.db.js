@@ -1,4 +1,5 @@
 import Form from '@/models/formclient'
+import '@/models/users'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache'
 

@@ -1,11 +1,9 @@
 export const dynamic = 'force-dynamic';
 
-import { cookies } from 'next/headers';
-import Layout_Login from '@/app/(auth)/login';
-import Nav from '@/components/(layout)/nav';
 import '@/styles/all.css'
 import '@/styles/font.css';
-import air from './layout.module.css'
+import './globals.css'
+import { ThemeProvider } from "@/components/theme-provider"
 
 export const metadata = {
   title: "AI Robotic",
@@ -15,9 +13,16 @@ export const metadata = {
 export default async function RootLayout({ children }) {
 
   return (
-    <html lang="en">
+    <html lang="en"  suppressHydrationWarning>
       <body>
-        {children}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

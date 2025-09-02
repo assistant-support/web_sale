@@ -1,6 +1,6 @@
 // lib/workflow.db.js
 
-import WorkflowTemplate from '@/models/workflow.model';
+import { WorkflowTemplate } from '@/models/workflow.model';
 import connectDB from '@/config/connectDB';
 import { cacheData } from '@/lib/cache';
 

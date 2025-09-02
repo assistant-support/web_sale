@@ -1,4 +1,3 @@
-import Zalo from '@/app/client/ui/zalo'
 import { Schema, model, models } from 'mongoose'
 
 const postUser = new Schema({
@@ -20,13 +19,13 @@ const postUser = new Schema({
   email: {
     type: String,
   },
-  uid: {
-    type: String,
-  },
   zalo: {
     type: Schema.Types.ObjectId, ref: 'zaloaccount'
   },
-})
+  uid: {
+    type: String, 
+  }
+}, { timestamps: true })
 
 const users = models.user || model('user', postUser)
 
