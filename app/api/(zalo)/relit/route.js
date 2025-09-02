@@ -1,4 +1,4 @@
-import ZaloAccount from "@/models/zalo";
+import ZaloAccount from "@/models/zalo.model";
 import connectDB from "@/config/connectDB";
 
 export async function GET() {

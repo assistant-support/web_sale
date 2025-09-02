@@ -11,6 +11,7 @@
   "dependencies": {
     "@fontsource/be-vietnam-pro": "^5.2.6",
     "@hookform/resolvers": "^5.2.1",
+    "@img/sharp-linux-x64": "^0.34.3",
     "@img/sharp-win32-x64": "^0.34.3",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-avatar": "^1.1.10",
