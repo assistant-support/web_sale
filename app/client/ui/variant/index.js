@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { createVariantAction, updateVariantAction } from '@/app/actions/variant.actions';
@@ -65,7 +65,7 @@ export default function SettingVariant({ data }) {
     const [createState, createAction] = useActionState(createVariantAction, { message: null, status: null });
     const [updateState, updateAction] = useActionState(updateVariantAction, { message: null, status: null });
     const isActionPending = createState.pending || updateState.pending;
-    const handleActionComplete = (state, callback) => {
+    const handleActionComplete = useCallback((state, callback) => {
         if (state.message) {
             setNotification({ open: true, status: state.status, mes: state.message });
             if (state.status) {
@@ -73,9 +73,9 @@ export default function SettingVariant({ data }) {
                 if (callback) callback();
             }
         }
-    };
-    useEffect(() => { handleActionComplete(createState, () => setIsCreateOpen(false)) }, [createState]);
-    useEffect(() => { handleActionComplete(updateState, () => setIsUpdateOpen(false)) }, [updateState]);
+    }, [router]);
+    useEffect(() => { handleActionComplete(createState, () => setIsCreateOpen(false)) }, [createState, handleActionComplete]);
+    useEffect(() => { handleActionComplete(updateState, () => setIsUpdateOpen(false)) }, [updateState, handleActionComplete]);
     const handleOpenUpdate = (item) => {
         setEditingItem(item);
         setIsUpdateOpen(true);

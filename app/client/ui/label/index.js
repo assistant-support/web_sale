@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { createLabelAction, updateLabelAction, deleteLabelAction } from '@/app/actions/label.actions';
@@ -83,7 +83,7 @@ export default function SettingLabel({ data }) {
     const [updateState, updateAction, isUpdatePending] = useActionState(updateLabelAction, { message: null, status: null });
     const [deleteState, deleteAction, isDeletePending] = useActionState(deleteLabelAction, { message: null, status: null });
     const isActionPending = isCreatePending || isUpdatePending || isDeletePending;
-    const handleActionComplete = (state, callback) => {
+    const handleActionComplete = useCallback((state, callback) => {
         if (state.message) {
             setNotification({ open: true, status: state.status, mes: state.message });
             if (state.status) {
@@ -91,15 +91,15 @@ export default function SettingLabel({ data }) {
                 if (callback) callback();
             }
         }
-    };
-    useEffect(() => { handleActionComplete(createState, () => setIsCreateOpen(false)) }, [createState]);
-    useEffect(() => { handleActionComplete(updateState, () => setIsUpdateOpen(false)) }, [updateState]);
+    }, [router]);
+    useEffect(() => { handleActionComplete(createState, () => setIsCreateOpen(false)) }, [createState, handleActionComplete]);
+    useEffect(() => { handleActionComplete(updateState, () => setIsUpdateOpen(false)) }, [updateState, handleActionComplete]);
     useEffect(() => {
         handleActionComplete(deleteState, () => {
             setIsDeleteConfirmOpen(false);
             setIsUpdateOpen(false);
         })
-    }, [deleteState]);
+    }, [deleteState, handleActionComplete]);
     const handleOpenUpdate = (item) => {
         setEditingItem(item);
         setIsUpdateOpen(true);
@@ -159,7 +159,7 @@ export default function SettingLabel({ data }) {
             <AlertPopup open={isDeleteConfirmOpen} onClose={() => setIsDeleteConfirmOpen(false)} title="Bạn có chắc chắn muốn xóa chiến dịch này?" type="warning" width={600}
                 content={
                     itemToDelete && (
-                        <h5>Hành động này sẽ xóa vĩnh viễn chiến dịch <strong>"{itemToDelete.title}"</strong>. Bạn sẽ không thể hoàn tác.</h5>
+                        <h5>Hành động này sẽ xóa vĩnh viễn chiến dịch <strong>&quot;{itemToDelete.title}&quot;</strong>. Bạn sẽ không thể hoàn tác.</h5>
                     )
                 }
                 actions={

@@ -68,7 +68,7 @@ const WorkflowStep = ({ step, index, onRemove, onUpdateDelay, onUpdateParam, isF
                         <h5 className="font-semibold capitalize text-gray-800">{actionLabels[step.action] || step.action.replace(/([A-Z])/g, ' $1')}</h5>
                         <h5 className="text-sm text-gray-500">Delay: {formatDelay(step.delay)}</h5>
                         {step?.params?.message &&
-                            <h6 className="text-sm text-gray-600 mt-1 italic break-all">"{step.params.message}"</h6>}
+                            <h6 className="text-sm text-gray-600 mt-1 italic break-all">&quot;{step.params.message}&quot;</h6>}
                     </div>
                 </div>
                 {(!isFixed || canEditMessage) && (

@@ -9,6 +9,7 @@ import Noti from '@/components/(features)/(noti)/noti';
 import AlertPopup from '@/components/(features)/(noti)/alert';
 import TextNoti from '@/components/(features)/(noti)/textnoti';
 import { Re_lesson } from '@/data/course';
+import Image from 'next/image';
 
 const FileUploadModal = ({ isOpen, onClose, onFileSelect, imageId }) => {
     const fileInputRef = useRef(null);
@@ -192,9 +193,23 @@ const ImageComponent = ({ width, imageInfo, refreshData, width2 }) => {
         <>
             <div className={styles.imageContainer} style={containerStyle} onClick={handleImageClick}>
                 {imageInfo.type === 'image' ? (
-                    <img src={imageSrc} alt={`Image ${imageInfo.id}`} className={styles.image} />
+                    <Image
+                        src={imageSrc}
+                        alt={`Image ${imageInfo.id}`}
+                        width={100}
+                        height={100}
+                        className={styles.image}
+                        objectFit="cover"
+                    />
                 ) : imageInfo.type === 'video' ? (
-                    <img src={videoThumbSrc} alt={`Video thumbnail ${imageInfo.id}`} className={styles.image} />
+                    <Image
+                        src={videoThumbSrc}
+                        alt={`Video thumbnail ${imageInfo.id}`}
+                        width={100}
+                        height={100}
+                        className={styles.image}
+                        objectFit="cover"
+                    />
                 ) : (
                     <div className={styles.filePlaceholder}>
                         File: {imageInfo.type} (ID: {imageInfo.id})
@@ -206,7 +221,14 @@ const ImageComponent = ({ width, imageInfo, refreshData, width2 }) => {
                 <div className={styles.popupOverlay} style={{ left: width ? `-${width2}px` : 0 }} onClick={handleClosePopup}>
                     <div className={imageInfo.type === 'image' ? styles.popupContent : styles.popupImages} onClick={(e) => e.stopPropagation()}>
                         {imageInfo.type === 'image' ? (
-                            <img src={imageSrc} alt={`Detail ${imageInfo.id}`} className={styles.popupImage} />
+                            <Image
+                                src={imageSrc}
+                                alt={`Detail ${imageInfo.id}`}
+                                width={100}
+                                height={100}
+                                className={styles.popupImage}
+                                objectFit="cover"
+                            />
                         ) : imageInfo.type === 'video' ? (
                             <iframe
                                 src={videoEmbedSrc}

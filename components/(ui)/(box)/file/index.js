@@ -1,5 +1,6 @@
 import React from 'react';
 import styles from './index.module.css';
+import Image from 'next/image';
 
 const ICONS = {
     Image: 'https://assets.minimals.cc/public/assets/icons/files/ic-img.svg',
@@ -18,11 +19,13 @@ export default function BoxFile({ type, name, href }) {
             rel="noopener noreferrer"
             className={styles.container}
         >
-            <img
+            <Image
                 src={iconSrc}
                 alt={`${type} icon`}
                 loading="lazy"
                 className={styles.icon}
+                width={100}
+                height={100}
             />
             <div className={styles.name}>{name}</div>
         </a>

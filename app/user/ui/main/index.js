@@ -8,6 +8,7 @@ import { Svg_Add } from '@/components/(icon)/svg';
 import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
 import Noti from '@/components/(features)/(noti)/noti';
 import Loading from '@/components/(ui)/(loading)/loading';
+import Image from 'next/image';
 
 // CẬP NHẬT: Form thêm mới
 function AddTeacherForm({ onSubmit, onClose, isLoading }) {
@@ -275,7 +276,14 @@ const Main = ({ initialTeachers }) => {
                             <div key={teacher._id} className={styles.teacherBox} onClick={() => handleOpenEditPopup(teacher)}>
                                 <div className={styles.teacherInfo}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: 12 }}>
-                                        <img src={teacher.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'} alt={`Avatar của ${teacher.name}`} className={styles.avatar} onError={(e) => { e.target.onerror = null; e.target.src = 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'; }} />
+                                        <Image
+                                          src={teacher.avt || 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'}
+                                          alt={`Avatar của ${teacher.name}`}
+                                          width={40}
+                                          height={40}
+                                          className="rounded-full"
+                                          onError={(e) => { e.target.onerror = null; e.target.src = 'https://lh3.googleusercontent.com/d/1iq7y8VE0OyFIiHmpnV_ueunNsTeHK1bG'; }}
+                                        />
                                         <div>
                                             <p className='text_4'>{teacher.name}</p>
                                             <p className='text_6_400'>Chức vụ:  {teacher.role?.join(', ')}</p>

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useActionState, useMemo } from 'react';
+import React, { useState, useEffect, useActionState, useMemo, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { updateZaloRolesAction, addZaloAccountAction } from '@/app/actions/zalo.actions';
@@ -89,17 +89,17 @@ export default function SettingZaloRoles({ data, allUsers = [] }) {
     const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
     const [updateState, updateAction, isUpdatePending] = useActionState(updateZaloRolesAction, { message: null, status: null });
     const [addState, addAction, isAddPending] = useActionState(addZaloAccountAction, { message: null, status: null });
-    const handleActionComplete = (state, closePopupCallback) => {
+    const handleActionComplete = useCallback((state, callback) => {
         if (state.message) {
             setNotification({ open: true, status: state.status, mes: state.message });
-            if (state.status === true) {
+            if (state.status) {
                 router.refresh();
-                if (closePopupCallback) closePopupCallback();
+                if (callback) callback();
             }
         }
-    };
-    useEffect(() => { handleActionComplete(updateState, () => { if (updateState.status) { setIsManagerOpen(false); setSelectedZalo(null); } }); }, [updateState]);
-    useEffect(() => { handleActionComplete(addState, () => { if (addState.status) setIsCreateOpen(false); }); }, [addState]);
+    }, [router]);
+    useEffect(() => { handleActionComplete(updateState, () => { if (updateState.status) { setIsManagerOpen(false); setSelectedZalo(null); } }); }, [updateState, handleActionComplete]);
+    useEffect(() => { handleActionComplete(addState, () => { if (addState.status) setIsCreateOpen(false); }); }, [addState, handleActionComplete]);
     const handleOpenManager = (zaloAccount) => {
         const populatedRoles = zaloAccount.roles?.map(roleId => allUsers.find(u => u._id === roleId)).filter(Boolean) || [];
         setSelectedZalo({ ...zaloAccount, roles: populatedRoles });

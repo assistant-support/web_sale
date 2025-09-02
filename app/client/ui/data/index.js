@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useMemo, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 // Bỏ syncCustomersFromSheetAction ra khỏi import
@@ -66,7 +66,7 @@ function FieldSelector({ selectedFields, setSelectedFields }) {
 function AreaForm({ formAction, formState, initialData = null, submitText }) {
     const [name, setName] = useState('');
     const [describe, setDescribe] = useState('');
-    const defaultFields = [1, 2, 3, 4, 5, 6];
+    const defaultFields = useMemo(() => [1, 2, 3, 4, 5, 6], []);
     const [selectedFields, setSelectedFields] = useState(defaultFields);
 
     useEffect(() => {
@@ -85,7 +85,7 @@ function AreaForm({ formAction, formState, initialData = null, submitText }) {
                 ? initialData.formInput
                 : defaultFields
         );
-    }, [initialData]);
+    }, [initialData, defaultFields]);
 
     return (
         <form action={formAction} className={styles.createForm}>
@@ -146,16 +146,16 @@ export default function SettingData({ data, service }) {
     // Bỏ useActionState cho sync action
     // const [syncState, syncAction, isSyncPending] = useActionState(syncCustomersFromSheetAction, { message: null, status: null });
 
-    const handleActionComplete = (state, closePopupCallback) => {
+    // First, wrap handleActionComplete in useCallback to prevent it from changing on every render
+    const handleActionComplete = useCallback((state, callback) => {
         if (state.message) {
             setNotification({ open: true, status: state.status, mes: state.message });
-            if (state.status === true) {
-                revalidateData();
+            if (state.status) {
                 router.refresh();
-                if (closePopupCallback) closePopupCallback();
+                if (callback) callback();
             }
         }
-    };
+    }, [router]);
 
     useEffect(() => handleActionComplete(createState, () => setIsCreatePopupOpen(false)), [createState]);
     useEffect(() => {
@@ -165,7 +165,7 @@ export default function SettingData({ data, service }) {
                 setEditingItem(null);
             }
         });
-    }, [updateState]);
+    }, [updateState, handleActionComplete]);
     useEffect(() => {
         handleActionComplete(deleteState, () => {
             setIsDeleteConfirmOpen(false);
@@ -174,7 +174,7 @@ export default function SettingData({ data, service }) {
                 setItemToDelete(null);
             }
         });
-    }, [deleteState]);
+    }, [deleteState, handleActionComplete]);
     // Bỏ useEffect cho sync state
     // useEffect(() => handleActionComplete(syncState, null), [syncState]);
 
@@ -313,7 +313,7 @@ export default function SettingData({ data, service }) {
                 content={
                     itemToDelete && (
                         <h5>
-                            Hành động này sẽ xóa vĩnh viễn form <strong>"{itemToDelete.name}"</strong>.
+                            Hành động này sẽ xóa vĩnh viễn form <strong>&quot;{itemToDelete.name}&quot;</strong>.
                             Bạn sẽ không thể hoàn tác hành động này.
                         </h5>
                     )

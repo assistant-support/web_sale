@@ -24,7 +24,7 @@ export default function AdminDashboard({ dashboardData, historyData }) {
                 chartInstance.current.destroy();
             }
             
-            // Add a timeout to ensure DOM is fully rendered
+            // Add a proper delay to ensure canvas is ready before chart initialization
             const timer = setTimeout(() => {
                 const ctx = chartRef.current.getContext('2d');
                 chartInstance.current = new Chart(ctx, {
@@ -65,7 +65,7 @@ export default function AdminDashboard({ dashboardData, historyData }) {
                         }
                     }
                 });
-            }, 200); // Short delay to ensure canvas is ready
+            }, 200); // Short delay to ensure canvas is fully rendered
             
             return () => {
                 clearTimeout(timer);

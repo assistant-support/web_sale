@@ -71,7 +71,7 @@ function ActionDetailItem({ job, onShowDetails, onCancel }) {
             setRemainingTime(formatRemainingTime(msLeft));
         }, 1000);
         return () => clearInterval(intervalId);
-    }, [job.estimatedCompletionTime]);
+    }, [job.estimatedCompletionTime, job.tasks]);
 
 
     return (
@@ -285,7 +285,7 @@ export default function RunningActions({ user, running = [] }) {
                 onClose={handleCloseCancelConfirm}
                 title="Xác nhận hủy lịch trình"
                 type="warning"
-                content={jobToCancel && (<h5>Bạn có chắc chắn muốn hủy vĩnh viễn lịch trình <strong>"{jobToCancel.jobName}"</strong>? Hành động này không thể hoàn tác.</h5>)}
+                content={jobToCancel && (<h5>Bạn có chắc chắn muốn hủy vĩnh viễn lịch trình <strong>{jobToCancel.jobName}</strong>? Hành động này không thể hoàn tác.</h5>)}
                 actions={
                     <form action={cancelAction}>
                         <input type="hidden" name="jobId" value={jobToCancel?._id || ''} />
