@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/config/connectDB";
-import Customer from "@/models/customer";
+import Customer from "@/models/customer.model";
 import ZaloAccount from "@/models/zalo.model";
-import Setting from "@/models/setting";
+import Setting from "@/models/setting.model";
 import Form from "@/models/formclient";
 import Variant from "@/models/variant.model";
-import Logs from "@/models/log";
+import Logs from "@/models/log.model";
 import { actionZalo, sendGP } from "@/function/drive/appscript";
 import { formatMessage } from "@/app/api/(zalo)/action/route";
 import { revalidateData } from "@/app/actions/customer.actions";

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import ScheduledJob from "@/models/schedule";
 import ZaloAccount from "@/models/zalo.model";
-import Customer from "@/models/customer";
+import Customer from "@/models/customer.model";
 import Variant from "@/models/variant.model";
-import Logs from "@/models/log";
+import Logs from "@/models/log.model";
 import dbConnect from "@/config/connectDB";
 import { actionZalo } from '@/function/drive/appscript';
 
