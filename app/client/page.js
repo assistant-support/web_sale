@@ -32,8 +32,8 @@ export default async function Page({ searchParams }) {
 
     if (!userAuth[0].role.includes('Admin') && !userAuth[0].role.includes('Sale')) {
         return (
-            <div className="flex_center" style={{ height: '100%', width: '100%' }}>
-                <h4 style={{ fontStyle: 'italic' }}>Bạn không có quyền truy cập trang này</h4>
+            <div className="flex items-center justify-center h-full w-full">
+                <h4 className="italic">Bạn không có quyền truy cập trang này</h4>
             </div>
         )
     }

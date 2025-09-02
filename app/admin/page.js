@@ -1,6 +1,7 @@
-import Box from "@mui/material/Box";
-import { user_data, customer_data_all } from "@/data/actions/get";
-import AdminDashboard from "./ui/AdminDashboard";
+import { customer_data } from '@/data/customers/wraperdata.db';
+import { user_data, form_data, history_data as fetch_history_data } from '@/data/actions/get';
+import { appointment_data_all } from '@/data/appointment_db/wraperdata.db';
+import AdminDashboard from './ui/AdminDashboard';
 
 function processDashboardData(customers) {
     if (!customers || customers.length === 0) {
@@ -69,21 +70,137 @@ function processDashboardData(customers) {
     };
 }
 
-export default async function ReportPage() {
-    const [customerList, userList] = await Promise.all([
-        customer_data_all(),
-        user_data({}),
-    ]);
+function processHistoryData(history) {
+    if (!history || !history.data || history.data.length === 0) {
+        return {
+            byType: {},
+            overall: {
+                total: 0,
+                success: 0,
+                failed: 0,
+                successRate: 0
+            },
+            recentActivities: [],
+            zaloLimits: {
+                hourly: 0,
+                daily: 0,
+                yearly: {
+                    total: 200000,
+                    used: 0,
+                    remaining: 200000
+                }
+            }
+        };
+    }
 
-    const dashboardData = processDashboardData(customerList);
+    const stats = {
+        byType: {
+            sendMessage: {
+                name: 'Gửi tin nhắn',
+                total: 0,
+                success: 0,
+                failed: 0
+            },
+            addFriend: {
+                name: 'Kết bạn',
+                total: 0,
+                success: 0,
+                failed: 0
+            },
+            findUid: {
+                name: 'Tìm UID',
+                total: 0,
+                success: 0,
+                failed: 0
+            },
+            checkFriend: {
+                name: 'Kiểm tra bạn bè',
+                total: 0,
+                success: 0,
+                failed: 0
+            },
+            tag: {
+                name: 'Gắn thẻ',
+                total: 0,
+                success: 0,
+                failed: 0
+            }
+        },
+        overall: {
+            total: 0,
+            success: 0,
+            failed: 0
+        },
+        zaloLimits: {
+            hourly: history.zaloLimits?.hourly || 0,
+            daily: history.zaloLimits?.daily || 0,
+            yearly: {
+                total: 200000,
+                used: 0,
+                remaining: 200000
+            }
+        }
+    };
+
+    // Xử lý các loại sự kiện
+    history.data.forEach((log) => {
+        if (stats.byType[log.type]) {
+            stats.byType[log.type].total++;
+            stats.overall.total++;
+            if (log.status?.status) {
+                stats.byType[log.type].success++;
+                stats.overall.success++;
+            } else {
+                stats.byType[log.type].failed++;
+                stats.overall.failed++;
+            }
+        }
+    });
+
+    // Tính toán giới hạn theo năm
+    const currentYear = new Date().getFullYear();
+    
+    // Lọc ra số tin nhắn gửi thành công trong năm hiện tại
+    const yearlyMessagesSent = history.data.filter(log => {
+        // Kiểm tra loại tin và trạng thái thành công
+        if (log.type === 'sendMessage' && log.status?.status) {
+            // Kiểm tra năm gửi
+            const logDate = new Date(log.createdAt);
+            return logDate.getFullYear() === currentYear;
+        }
+        return false;
+    }).length;
+    
+    // Cập nhật giới hạn năm
+    stats.zaloLimits.yearly.used = yearlyMessagesSent;
+    stats.zaloLimits.yearly.remaining = Math.max(0, 200000 - yearlyMessagesSent);
+
+    // Calculate success rates
+    for (const type in stats.byType) {
+        const typeStats = stats.byType[type];
+        typeStats.successRate = typeStats.total > 0 ? ((typeStats.success / typeStats.total) * 100).toFixed(1) : '0.0';
+    }
+    stats.overall.successRate = stats.overall.total > 0 ? ((stats.overall.success / stats.overall.total) * 100).toFixed(1) : '0.0';
+
+    return {
+        ...stats,
+        recentActivities: history.data.slice(0, 50) // Get latest 50 activities
+    };
+}
+
+export default async function AdminPage() {
+    const customers = await customer_data();
+    const dashboardData = processDashboardData(customers);
+    const historyResult = await fetch_history_data();
+    
+    const historyData = processHistoryData(historyResult.success ? historyResult : { data: [] });
 
     return (
-        <div>
-            <Box sx={{ mb: 1 }}>
-                <p className="text_w_600">Báo cáo & Phân tích</p>
-                <h5>Tổng quan hiệu suất kinh doanh, hiệu quả nhân viên và cài đặt hệ thống.</h5>
-            </Box>
-            <AdminDashboard dashboardData={dashboardData} />
+        <div className="flex-1 space-y-4">
+            <div className="flex items-center justify-between space-y-2">
+                <h3>Dashboard</h3>
+            </div>
+            <AdminDashboard dashboardData={dashboardData} historyData={historyData} />
         </div>
     );
 }

@@ -23,7 +23,29 @@ const FormSchema = new Schema(
         },
         zaloPhase: { type: String, enum: ['welcome', 'nurturing', 'pre_surgery', 'post_surgery', 'longterm'], default: null },
         tags: { type: [String], default: [] },
-        workflowTemplates: { type: [Schema.Types.ObjectId], ref: 'workflowtemplate', default: [] }
+        roles: {
+            type: [{ type: Schema.Types.ObjectId, ref: 'user', required: true }],
+            default: []
+        },
+        workflowTemplates: { type: [Schema.Types.ObjectId], ref: 'workflowtemplate', default: [] },
+        assignee: { 
+            type: Schema.Types.ObjectId, 
+            ref: 'user',
+            default: null 
+        },
+        assignedBy: { 
+            type: Schema.Types.ObjectId, 
+            ref: 'user',
+            default: null 
+        },
+        assignedAt: { 
+            type: Date,
+            default: null 
+        },
+        isAutoAssigned: {
+            type: Boolean,
+            default: false
+        }
     },
     { timestamps: false, versionKey: false }
 );
