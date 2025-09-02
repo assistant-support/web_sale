@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import ScheduledJob from "@/models/schedule";
-import ZaloAccount from "@/models/zalo";
+import ZaloAccount from "@/models/zalo.model";
 import Customer from "@/models/customer";
 import Variant from "@/models/variant.model";
 import Logs from "@/models/log";

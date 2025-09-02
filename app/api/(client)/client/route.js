@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import connectDB from "@/config/connectDB";
 import Customer from "@/models/customer";
-import ZaloAccount from "@/models/zalo";
+import ZaloAccount from "@/models/zalo.model";
 import Setting from "@/models/setting";
 import Form from "@/models/formclient";
 import Variant from "@/models/variant.model";
