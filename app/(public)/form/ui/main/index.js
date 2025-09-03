@@ -56,7 +56,7 @@ export default function RegistrationForm({ id, service }) {
                                 <select id={field.id} name={field.name} className={styles.input} required={field.required} defaultValue="">
                                     <option value="" disabled>-- Chọn {field.label.toLowerCase()} --</option>
                                     {field.options.map((option) => (
-                                        <option key={option._id || option} value={option.name}>{option.name}</option>
+                                        <option key={option._id || option} value={option._id}>{option.name}</option>
                                     ))}
                                 </select>
                             </div>
