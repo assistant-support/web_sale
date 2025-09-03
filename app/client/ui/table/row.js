@@ -9,7 +9,8 @@ import * as z from 'zod';
 // --- Icon Imports ---
 import {
     PenSquare, CalendarClock, History, MessageSquare, SendHorizonal, CheckCircle2,
-    CircleDot, Circle, Loader2, LayoutDashboard, Clock, User, CalendarCheck, X
+    CircleDot, Circle, Loader2, LayoutDashboard, Clock, User, CalendarCheck, X,
+    ChevronDown, ChevronUp, Plus
 } from 'lucide-react';
 
 // --- Action & Data Function Imports ---
@@ -33,6 +34,7 @@ import { TableRow, TableCell } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Form, FormControl, FormField, FormItem } from '@/components/ui/form';
+import { useRouter } from 'next/navigation'; // Add this import
 
 // =============================================================
 // == 1. CÁC COMPONENT PHỤ
@@ -112,69 +114,464 @@ function AddNoteForm({ customerId, dispatchAddNote, isNotePending, noteState, cu
 function AppointmentManager({ customer, createAction, updateAction, cancelAction }) {
     const [appointments, setAppointments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedAppointment, setSelectedAppointment] = useState(null);
+    const [showConfirmCancel, setShowConfirmCancel] = useState(null);
+    const [actionInProgress, setActionInProgress] = useState('');
+    const [showCreateForm, setShowCreateForm] = useState(false);
     const createFormRef = useRef(null);
     const actionUI = useActionUI();
+    const router = useRouter();
 
-    const [createState, dispatchCreate] = useActionState(createAction, null);
-    const [updateState, dispatchUpdate] = useActionState(updateAction, null);
-    const [cancelState, dispatchCancel] = useActionState(cancelAction, null);
+    // Extract showNoti to ensure stable reference
+    const { showNoti } = actionUI;
 
-    const fetchAppointments = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const data = await appointment_data({ customerId: customer._id });
-            setAppointments(data);
-        } catch (error) {
-            actionUI.showNoti(false, "Không thể tải danh sách lịch hẹn.");
-        } finally {
-            setIsLoading(false);
-        }
-    }, [customer._id, actionUI]);
+    // Status options for appointments with icons
+    const statusOptions = [
+        { value: 'completed', label: 'Hoàn thành', icon: CheckCircle2, color: 'bg-green-100 text-green-800 border-green-200' },
+        { value: 'missed', label: 'Vắng mặt', icon: X, color: 'bg-amber-100 text-amber-800 border-amber-200' },
+        { value: 'cancelled', label: 'Đã hủy', icon: X, color: 'bg-red-100 text-red-800 border-red-200' },
+        { value: 'pending', label: 'Đang chờ', icon: Clock, color: 'bg-blue-100 text-blue-800 border-blue-200' }
+    ];
 
+    // Get status badge color and label
+    const getStatusInfo = useCallback((status) => {
+        return statusOptions.find(opt => opt.value === status) ||
+            { value: status, label: status, icon: Circle, color: 'bg-gray-100 text-gray-800 border-gray-200' };
+    }, [statusOptions]);
+
+    // Optimized appointment loading function
     useEffect(() => {
-        if (customer._id) fetchAppointments();
-    }, [customer._id, fetchAppointments]);
-
-    useEffect(() => {
-        const state = createState || updateState || cancelState;
-        if (state) {
-            actionUI.showNoti(state.status, state.message);
-            if (state.status) {
-                fetchAppointments();
-                if (createState) createFormRef.current?.reset();
+        const fetchAppointments = async () => {
+            setIsLoading(true);
+            try {
+                const data = await appointment_data({ customerId: customer._id });
+                setAppointments(data);
+            } catch (error) {
+                showNoti(false, "Không thể tải danh sách lịch hẹn.");
+            } finally {
+                setIsLoading(false);
             }
+        };
+
+        if (customer._id) {
+            fetchAppointments();
         }
-    }, [createState, updateState, cancelState, fetchAppointments, actionUI]);
+    }, [customer._id, showNoti]);
+
+    // Handle appointment status update
+    const handleUpdateStatus = useCallback(async (appointmentId, newStatus) => {
+        setActionInProgress(`update-${appointmentId}`);
+
+        const formData = new FormData();
+        formData.append('appointmentId', appointmentId);
+        formData.append('newStatus', newStatus);
+
+        try {
+            const result = await updateAction(null, formData);
+            if (result.status) {
+                showNoti(true, result.message || 'Cập nhật trạng thái thành công');
+
+                // Update local state
+                setAppointments(prev => prev.map(app =>
+                    app._id === appointmentId ? { ...app, status: newStatus } : app
+                ));
+
+                // Refresh server data
+                router.refresh();
+            } else {
+                showNoti(false, result.message || 'Không thể cập nhật trạng thái');
+            }
+        } catch (error) {
+            showNoti(false, 'Lỗi khi cập nhật trạng thái');
+        } finally {
+            setActionInProgress('');
+            setSelectedAppointment(null);
+        }
+    }, [updateAction, showNoti, router]);
+
+    // Handle appointment cancellation
+    const handleCancelAppointment = useCallback(async (appointmentId) => {
+        setActionInProgress(`cancel-${appointmentId}`);
+
+        const formData = new FormData();
+        formData.append('appointmentId', appointmentId);
+
+        try {
+            const result = await cancelAction(null, formData);
+            if (result.status) {
+                showNoti(true, result.message || 'Đã hủy lịch hẹn thành công');
+
+                // Update local state
+                setAppointments(prev => prev.map(app =>
+                    app._id === appointmentId ? { ...app, status: 'cancelled' } : app
+                ));
+
+                // Refresh server data
+                router.refresh();
+            } else {
+                showNoti(false, result.message || 'Không thể hủy lịch hẹn');
+            }
+        } catch (error) {
+            showNoti(false, 'Lỗi khi hủy lịch hẹn');
+        } finally {
+            setActionInProgress('');
+            setShowConfirmCancel(null);
+        }
+    }, [cancelAction, showNoti, router]);
+
+    // Handle appointment creation
+    const handleCreateAppointment = useCallback(async (formData) => {
+        setActionInProgress('create');
+
+        try {
+            const result = await createAction(null, formData);
+
+            if (result.status) {
+                showNoti(true, result.message || 'Đã tạo lịch hẹn mới');
+
+                if (createFormRef.current) {
+                    createFormRef.current.reset();
+                }
+
+                // Hide the form after successful creation
+                setShowCreateForm(false);
+
+                // Refresh server data
+                router.refresh();
+            } else {
+                showNoti(false, result.message || 'Không thể tạo lịch hẹn');
+            }
+        } catch (error) {
+            showNoti(false, 'Lỗi khi tạo lịch hẹn');
+        } finally {
+            setActionInProgress('');
+        }
+    }, [createAction, showNoti, router]);
+
+    // Format date for better display and get time-related information
+    const formatAppointmentDate = useCallback((dateString) => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const appointmentDay = new Date(date);
+        appointmentDay.setHours(0, 0, 0, 0);
+        
+        // Check if appointment time has passed
+        const isPast = date < now;
+        
+        let prefix = '';
+        if (appointmentDay.getTime() === today.getTime()) {
+            prefix = 'Hôm nay';
+        } else if (appointmentDay.getTime() === tomorrow.getTime()) {
+            prefix = 'Ngày mai';
+        }
+        
+        const formattedDate = date.toLocaleDateString('vi-VN', {
+            weekday: 'long',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+        });
+        
+        const formattedTime = date.toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        return {
+            full: `${prefix ? `${prefix}, ` : ''}${formattedDate} ${formattedTime}`,
+            date: formattedDate,
+            time: formattedTime,
+            isToday: prefix === 'Hôm nay',
+            isTomorrow: prefix === 'Ngày mai',
+            isPast
+        };
+    }, []);
+
+    // Sort appointments - upcoming pending first, then by date
+    const sortedAppointments = useMemo(() => {
+        return [...appointments].sort((a, b) => {
+            // First priority: pending status
+            if (a.status === 'pending' && b.status !== 'pending') return -1;
+            if (a.status !== 'pending' && b.status === 'pending') return 1;
+            
+            // Second priority: date (newest first for non-pending, upcoming first for pending)
+            if (a.status === 'pending' && b.status === 'pending') {
+                return new Date(a.appointmentDate) - new Date(b.appointmentDate);
+            } else {
+                return new Date(b.appointmentDate) - new Date(a.appointmentDate);
+            }
+        });
+    }, [appointments]);
 
     return (
         <div className="p-4 space-y-6">
-            <div>
-                <h5 className="font-semibold mb-2">Tạo Lịch Hẹn Mới</h5>
-                <form action={dispatchCreate} ref={createFormRef} className="space-y-3">
-                    <input type="hidden" name="customerId" value={customer._id} />
-                    <Input name="title" placeholder="Mục đích cuộc hẹn..." required />
-                    <Input name="appointmentDate" type="datetime-local" required />
-                    <Textarea name="notes" placeholder="Ghi chú thêm..." rows={2} />
-                    <Button type="submit" className="w-full"><h6>Tạo Lịch Hẹn</h6></Button>
-                </form>
-            </div>
-            <div>
-                <h5 className="font-semibold mb-2">Danh Sách Lịch Hẹn</h5>
-                <div className="space-y-2 max-h-60 scroll pr-2">
-                    {isLoading ? <h6 className="text-center">Đang tải...</h6> : appointments.length > 0 ? (
-                        appointments.map(app => (
-                            <div key={app._id} className="border p-3 rounded-md">
-                                <h6 className="font-semibold">{app.title}</h6>
-                                <h6 className="text-sm text-muted-foreground">{new Date(app.appointmentDate).toLocaleString('vi-VN')}</h6>
-                                {app.status === 'pending' && (
-                                    <div className="flex gap-2 mt-2">
-                                        <form action={dispatchUpdate}><input type="hidden" name="appointmentId" value={app._id} /><input type="hidden" name="newStatus" value="completed" /><Button type="submit" variant="outline" size="sm">Hoàn thành</Button></form>
-                                        <form action={dispatchCancel}><input type="hidden" name="appointmentId" value={app._id} /><Button type="submit" variant="destructive" size="sm">Hủy</Button></form>
-                                    </div>
-                                )}
+            {/* Collapsible Create Appointment Section */}
+            <div className="border rounded-lg overflow-hidden">
+                <div
+                    className="bg-muted/30 p-3 flex justify-between items-center cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => setShowCreateForm(!showCreateForm)}
+                >
+                    <h5 className="font-semibold flex items-center gap-2">
+                        <CalendarCheck className="h-5 w-5 text-primary" />
+                        Tạo Lịch Hẹn Mới
+                    </h5>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full">
+                        {showCreateForm ? (
+                            <ChevronUp className="h-4 w-4" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4" />
+                        )}
+                        <span className="sr-only">{showCreateForm ? 'Thu gọn' : 'Mở rộng'}</span>
+                    </Button>
+                </div>
+
+                {/* Create Form - Only shown when expanded */}
+                {showCreateForm && (
+                    <div className="p-4 border-t bg-card">
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            const formData = new FormData(e.target);
+                            handleCreateAppointment(formData);
+                        }} ref={createFormRef} className="space-y-3">
+                            <input type="hidden" name="customerId" value={customer._id} />
+                            <div>
+                                <Label htmlFor="appointment-title">Mục đích cuộc hẹn</Label>
+                                <Input
+                                    id="appointment-title"
+                                    name="title"
+                                    placeholder="Ví dụ: Tư vấn chăm sóc răng miệng..."
+                                    required
+                                    className="mt-1"
+                                />
                             </div>
-                        ))
-                    ) : <h6 className="text-center text-muted-foreground">Chưa có lịch hẹn nào.</h6>}
+                            <div>
+                                <Label htmlFor="appointment-date">Thời gian hẹn</Label>
+                                <Input
+                                    id="appointment-date"
+                                    name="appointmentDate"
+                                    type="datetime-local"
+                                    required
+                                    className="mt-1"
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="appointment-notes">Ghi chú thêm</Label>
+                                <Textarea
+                                    id="appointment-notes"
+                                    name="notes"
+                                    placeholder="Thông tin thêm về cuộc hẹn..."
+                                    rows={2}
+                                    className="mt-1"
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => setShowCreateForm(false)}
+                                >
+                                    Hủy
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    className="flex-1"
+                                    disabled={actionInProgress === 'create'}
+                                >
+                                    {actionInProgress === 'create' ? (
+                                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Đang tạo...</>
+                                    ) : (
+                                        <>Tạo Lịch Hẹn</>
+                                    )}
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                )}
+            </div>
+            
+            {/* Appointment List Section */}
+            <div>
+                <div className="flex items-center justify-between mb-3">
+                    <h5 className="font-semibold flex items-center gap-2">
+                        <CalendarClock className="h-5 w-5 text-primary" /> 
+                        Danh Sách Lịch Hẹn
+                    </h5>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                            {appointments.length} lịch hẹn
+                        </span>
+                        {!showCreateForm && (
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8 px-2 flex items-center gap-1"
+                                onClick={() => setShowCreateForm(true)}
+                            >
+                                <Plus className="h-3.5 w-3.5" />
+                                <span className="text-xs">Tạo mới</span>
+                            </Button>
+                        )}
+                    </div>
+                </div>
+                
+                <div className="space-y-3 max-h-[350px] scroll custom-scrollbar" style={{ marginRight: '-6px' }}>
+                    {isLoading ? (
+                        <div className="flex justify-center items-center py-8 border rounded-lg bg-muted/20">
+                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                            <span className="ml-2 text-sm text-muted-foreground">Đang tải lịch hẹn...</span>
+                        </div>
+                    ) : appointments.length > 0 ? (
+                        sortedAppointments.map(app => {
+                            const statusInfo = getStatusInfo(app.status);
+                            const formattedDate = formatAppointmentDate(app.appointmentDate);
+                            const isPending = app.status === 'pending';
+                            const isUpdateInProgress = actionInProgress === `update-${app._id}`;
+                            const isCancelInProgress = actionInProgress === `cancel-${app._id}`;
+                            
+                            return (
+                                <div key={app._id} className={`border rounded-lg p-3 bg-card hover:shadow-sm transition-shadow ${isPending ? 'border-blue-200' : ''}`}>
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                        <h6 className="font-medium text-foreground">
+                                            {app.title}
+                                        </h6>
+                                        <div className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${statusInfo.color} border`}>
+                                            {React.createElement(statusInfo.icon, { className: "h-3 w-3" })}
+                                            {statusInfo.label}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className={`flex items-center gap-1 text-sm ${
+                                        formattedDate.isPast && isPending 
+                                            ? 'text-red-500 font-medium' 
+                                            : formattedDate.isToday 
+                                                ? 'text-primary font-medium' 
+                                                : 'text-muted-foreground'
+                                    }`}>
+                                        <CalendarClock className="h-3.5 w-3.5" />
+                                        <span>
+                                            {formattedDate.full}
+                                            {formattedDate.isPast && isPending && " (Đã qua hẹn)"}
+                                        </span>
+                                    </div>
+                                    
+                                    {app.notes && (
+                                        <div className="mt-2 text-sm text-muted-foreground border-t pt-2">
+                                            <h6>{app.notes}</h6>
+                                        </div>
+                                    )}
+                                    
+                                    {isPending && (
+                                        <div className="mt-3 pt-2 border-t">
+                                            {selectedAppointment === app._id ? (
+                                                <div className="space-y-2">
+                                                    <div className="grid grid-cols-3 gap-2">
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="bg-green-50 text-green-600 hover:bg-green-100 border-green-200"
+                                                            onClick={() => handleUpdateStatus(app._id, 'completed')}
+                                                            disabled={isUpdateInProgress}
+                                                        >
+                                                            {isUpdateInProgress ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle2 className="h-3 w-3 mr-1" />}
+                                                            Hoàn thành
+                                                        </Button>
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-200"
+                                                            onClick={() => handleUpdateStatus(app._id, 'missed')}
+                                                            disabled={isUpdateInProgress}
+                                                        >
+                                                            <X className="h-3 w-3 mr-1" />
+                                                            Vắng mặt
+                                                        </Button>
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="bg-red-50 text-red-600 hover:bg-red-100 border-red-200"
+                                                            onClick={() => setShowConfirmCancel(app._id)}
+                                                            disabled={isCancelInProgress}
+                                                        >
+                                                            {isCancelInProgress ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <X className="h-3 w-3 mr-1" />}
+                                                            Hủy
+                                                        </Button>
+                                                    </div>
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="sm" 
+                                                        className="w-full text-xs"
+                                                        onClick={() => setSelectedAppointment(null)}
+                                                    >
+                                                        Đóng
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <Button 
+                                                    variant={formattedDate.isPast ? "destructive" : "secondary"}
+                                                    size="sm" 
+                                                    className="w-full"
+                                                    onClick={() => setSelectedAppointment(app._id)}
+                                                >
+                                                    {formattedDate.isPast ? "Cập nhật (Quá hẹn)" : "Cập nhật trạng thái"}
+                                                </Button>
+                                            )}
+                                            
+                                            {/* Confirm Cancel Dialog */}
+                                            {showConfirmCancel === app._id && (
+                                                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                                                    <div className="bg-card p-4 rounded-lg shadow-lg max-w-xs w-full">
+                                                        <h6 className="font-medium mb-2">Xác nhận hủy lịch hẹn</h6>
+                                                        <p className="text-sm text-muted-foreground mb-4">
+                                                            Bạn có chắc chắn muốn hủy lịch hẹn này? Hành động này không thể hoàn tác.
+                                                        </p>
+                                                        <div className="flex justify-end gap-2">
+                                                            <Button 
+                                                                variant="outline" 
+                                                                size="sm" 
+                                                                onClick={() => setShowConfirmCancel(null)}
+                                                            >
+                                                                Không
+                                                            </Button>
+                                                            <Button 
+                                                                variant="destructive" 
+                                                                size="sm"
+                                                                onClick={() => handleCancelAppointment(app._id)}
+                                                                disabled={isCancelInProgress}
+                                                            >
+                                                                {isCancelInProgress ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                                                Xác nhận hủy
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 border rounded-lg bg-muted/20">
+                            <CalendarCheck className="h-10 w-10 text-muted-foreground mb-2" />
+                            <p className="text-muted-foreground text-sm">Chưa có lịch hẹn nào.</p>
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="mt-3"
+                                onClick={() => setShowCreateForm(true)}
+                            >
+                                <Plus className="h-3.5 w-3.5 mr-1" />
+                                Tạo lịch hẹn mới
+                            </Button>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

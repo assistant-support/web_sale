@@ -9,18 +9,44 @@ import mongoose from 'mongoose'
  * Hàm gốc để truy vấn dữ liệu lịch hẹn, chưa có cache.
  * @param {object} params - Các tham số truy vấn.
  * @param {string} [params.customerId] - ID của khách hàng để lấy lịch hẹn.
+ * @param {string} [params.createdBy] - ID của người tạo lịch hẹn.
+ * @param {string} [params.status] - Trạng thái lịch hẹn cần lọc.
+ * @param {object} [params.dateRange] - Khoảng thời gian để lọc lịch hẹn.
+ * @param {Date} [params.dateRange.start] - Ngày bắt đầu khoảng thời gian.
+ * @param {Date} [params.dateRange.end] - Ngày kết thúc khoảng thời gian.
  * @param {number} [params.year] - Năm để lấy lịch hẹn.
  * @param {number} [params.month] - Tháng để lấy lịch hẹn.
  * @returns {Promise<Array|object>}
  */
-async function dataAppointment(params = {}) {
+export async function dataAppointment(params = {}) {
     try {
         await connectDB()
         const matchStage = {};
+        
+        // Lọc theo ID khách hàng
         if (params.customerId) {
             matchStage.customer = new mongoose.Types.ObjectId(params.customerId);
         }
-        if (params.year && params.month) {
+        
+        // Lọc theo người tạo
+        if (params.createdBy) {
+            matchStage.createdBy = new mongoose.Types.ObjectId(params.createdBy);
+        }
+        
+        // Lọc theo trạng thái
+        if (params.status) {
+            matchStage.status = params.status;
+        }
+        
+        // Lọc theo khoảng thời gian
+        if (params.dateRange && params.dateRange.start && params.dateRange.end) {
+            matchStage.appointmentDate = {
+                $gte: new Date(params.dateRange.start),
+                $lte: new Date(params.dateRange.end)
+            };
+        }
+        // Nếu không có dateRange nhưng có year và month, lọc theo tháng cụ thể
+        else if (params.year && params.month) {
             // Tháng trong JS bắt đầu từ 0 (tháng 1 là 0)
             const monthIndex = params.month - 1;
             const startDate = new Date(params.year, monthIndex, 1);
@@ -32,6 +58,7 @@ async function dataAppointment(params = {}) {
                 $lte: endDate,
             };
         }
+        
         // Pipeline để lấy dữ liệu và populate thông tin liên quan
         const aggregationPipeline = [
             { $match: matchStage },
