@@ -8,8 +8,8 @@ import checkAuthToken from '@/utils/checktoken';
 import { reloadUser, reloadZalo } from '@/data/actions/reload';
 import User from '@/models/users';
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwcaXcpdsonX5eGRd0T-X_yJejKqD0krSSSV3rYDnpot23nWvXkzO3QnnvIo7UqYss1/exec';
-const SPREADSHEET_ID = '1ZQsHUyVD3vmafcm6_egWup9ErXfxIg4U-TfVDgDztb8';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw1Opsmg0IrV4OQBCMJXHzUjapEv2PGcuVgNezAOcDqbvcFeerngklkpmuN_vfyXuFbWA/exec';
+const SPREADSHEET_ID = '1QOHqG1wvV-oDoPAxSDw37hfP0AHctPYpHxyJlHenZJY';
 const TARGET_SHEET = 'Account';
 
 async function getGoogleSheetsClient() {
@@ -26,7 +26,7 @@ async function getGoogleSheetsClient() {
 export async function addZaloAccountAction(previousState, formData) {
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
+    if (!user.role.includes('Admin')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
 

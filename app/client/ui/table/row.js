@@ -795,7 +795,7 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
     return (
         <>
             <actionUI.UI />
-            {isPopupOpen && <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
+            {isPopupOpen && <tr className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
 
             <TableRow data-state={isSelected ? "selected" : "unselected"} className="cursor-pointer">
                 <TableCell onClick={(e) => e.stopPropagation()} className="w-[60px]">
