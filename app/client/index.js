@@ -11,13 +11,13 @@ import RunningActions from './ui/action';
 import SettingVariant from './ui/variant';
 import SettingZaloRoles from './ui/zalos';
 import ActionHistory from './ui/hisotry';
-import { reloadUser } from '@/data/actions/reload';
 
 function TableSkeleton() {
     return <div style={{ height: '500px', background: '#f8f9fa', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Đang tải dữ liệu...</div>;
 }
 export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
     const [selectedCustomers, setSelectedCustomers] = useState(new Map());
+  
     const [viewMode, setViewMode] = useState('manage');
     const handleActionComplete = () => {
         setSelectedCustomers(new Map());

@@ -1,4 +1,4 @@
-import { getDriveClient } from '@/function/drive/index';
+import getDriveClient from '@/function/drive/index';
 import { Readable } from 'stream'
 
 export async function uploadImageToDrive(file, folderId) {

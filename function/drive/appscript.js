@@ -1,7 +1,7 @@
 const SCRIPT_URL_SEND_MESSAGE = 'https://script.google.com/macros/s/AKfycbzhEEvakm6VzGRpNNORT9jZ3A8gYya2Bd5zjuTbpAgr8ZYaHO-0LB_DKibXyEHuo3ROfw/exec';
 const SCRIPT_URL_GET_UID = 'https://script.google.com/macros/s/AKfycbxMMwrvLEuqhsyK__QRCU0Xi6-qu-HkUBx6fDHDRAYfpqM9d4SUq4YKVxpPnZtpJ_b6wg/exec';
 const SCRIPT_URL_ACTION = 'https://script.google.com/macros/s/AKfycbzD_BSTMoywu5KaUSmOAgiYTVjgaP5I1yBirYs1Cb5wBFgNq9wTTojydB4S8vjzafX5sA/exec';
-const SCRIPT_URL_GP = 'https://script.google.com/macros/s/AKfycbwKpKQmwXQJZhAIrMEjHIOKJpi6j2PItNNVV7dAnreK_0BquBc5g1LHnN9oebCfAdcU4w/exec';
+const SCRIPT_URL_GP = 'https://script.google.com/macros/s/AKfycbxzGI_oehcqBAzWiVgauUaQaU8G6VBv0V6LTXVWj6n_4ko-GUMNeHekJauYuHGidQxOQQ/exec';
 
 export async function senMesByPhone({ message, uid, phone }) {
     const url = new URL(SCRIPT_URL_SEND_MESSAGE);
@@ -43,15 +43,17 @@ export async function getZaloUid(phone) {
 }
 
 export async function sendGP(mes) {
+    console.log('Gửi GP', mes, !mes);
     if (!mes) return false
     const encodedMessage = encodeURIComponent(mes);
     const url = `${SCRIPT_URL_GP}?mes=${encodedMessage}`;
     const response = await fetch(url);
     const result = await response.json();
+    console.log(result, 1);
     if (response.ok) {
         return true
     }
-    console.log(result);
+    
     return false
 }
 

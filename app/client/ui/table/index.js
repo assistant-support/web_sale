@@ -23,11 +23,10 @@ import CustomerRow from './row';
 // == 1. ĐỊNH NGHĨA CỘT DỮ LIỆU VÀ CÁC HẰNG SỐ
 // =============================================================
 
-// CẬP NHẬT: Thêm cột 'currentStep'
 const ALL_COLUMNS = [
     { key: 'name', header: 'Tên Khách Hàng' },
     { key: 'phone', header: 'Số Điện Thoại' },
-    { key: 'currentStep', header: 'Bước Hiện Tại' }, // Cột mới
+    { key: 'currentStep', header: 'Bước Hiện Tại' },
     { key: 'pipelineStatus', header: 'Trạng Thái' },
     { key: 'tags', header: 'Dịch Vụ Quan Tâm' },
     { key: 'assignees', header: 'Sale Phụ Trách' },
@@ -35,7 +34,6 @@ const ALL_COLUMNS = [
     { key: 'createAt', header: 'Ngày Tiếp Nhận' },
 ];
 
-// CẬP NHẬT: Thêm 'currentStep' vào danh sách hiển thị mặc định
 const INITIAL_VISIBLE_COLUMNS = ['name', 'phone', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
 const MAX_VISIBLE_COLUMNS = 6;
 
@@ -46,7 +44,6 @@ const PIPELINE_STATUS_TEXT = {
     'rejected_immediate': 'Từ chối ngay'
 };
 
-// CẬP NHẬT: Thêm map để hiển thị tên Bước
 const STEP_TEXT = {
     1: '1. Tiếp nhận',
     2: '2. Nhắn tin',
@@ -74,7 +71,9 @@ const useBreakpoint = () => {
 // =============================================================
 // == 2. COMPONENT BẢNG DỮ LIỆU CHÍNH
 // =============================================================
-export default function CustomerTable({ zalo, data = [], total = 0, user, selectedCustomers, setSelectedCustomers, viewMode, onToggleViewMode }) {
+export default function CustomerTable({ zalo, data = [], total = 0, user, selectedCustomers, setSelectedCustomers, viewMode }) {
+    console.log(data);
+
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { replace } = useRouter();
@@ -124,7 +123,7 @@ export default function CustomerTable({ zalo, data = [], total = 0, user, select
         ];
 
         switch (breakpoint) {
-            case 'sm': return userSelected.slice(0, 3); // Tăng lên 3 để hiển thị thêm
+            case 'sm': return userSelected.slice(0, 3);
             case 'md': return userSelected.slice(0, 4);
             case 'lg': default: return userSelected.slice(0, MAX_VISIBLE_COLUMNS);
         }
@@ -132,13 +131,13 @@ export default function CustomerTable({ zalo, data = [], total = 0, user, select
 
     const renderCellContent = (customer, colKey) => {
         const value = customer[colKey];
-        if (value === null || value === undefined || value === '') return <h6>-</h6>;
         switch (colKey) {
             case 'createAt': return <h6>{new Date(value).toLocaleDateString('vi-VN')}</h6>;
-            case 'tags': return <h6>{Array.isArray(value) ? value.join(', ') : value}</h6>;
+            case 'tags':
+                return <h6>{Array.isArray(value) ? value.map(tag => tag.name).join(', ') : '-'}</h6>;
+
             case 'pipelineStatus': return <h6>{PIPELINE_STATUS_TEXT[value] || value}</h6>;
             case 'assignees': return <h6>{Array.isArray(value) && value.length > 0 ? value.map(a => a.user?.name).join(', ') : '-'}</h6>;
-            // CẬP NHẬT: Logic hiển thị cho cột mới 'currentStep'
             case 'currentStep': {
                 const maxStep = customer.care.reduce((max, note) => Math.max(max, note.step || 0), 0);
                 return <h6>{STEP_TEXT[maxStep] || 'Chưa có'}</h6>;

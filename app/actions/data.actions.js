@@ -8,6 +8,11 @@ import Customer from '@/models/customer.model';
 import initAgenda from '@/config/agenda';
 import mongoose from 'mongoose';
 import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflow.model';
+import { revalidateData } from '@/app/actions/customer.actions';
+import { sendGP } from "@/function/drive/appscript";
+import { service_data } from '@/data/services/wraperdata.db'
+import { se } from "date-fns/locale";
+
 export async function createAreaAction(_previousState, formData) {
     await dbConnect();
     const name = formData.get('name');
@@ -114,8 +119,6 @@ export async function deleteAreaAction(_previousState, formData) {
         return { status: false, message: 'Đã xảy ra lỗi. Không thể xóa khu vực.' };
     }
 }
-import { revalidateData } from '@/app/actions/customer.actions';
-import { sendGP } from "@/function/drive/appscript";
 
 /**
  * Action đa năng TỐI ƯU HÓA UX: Xử lý đăng ký và thêm mới khách hàng.
@@ -129,7 +132,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
 
     try {
         const isFormData = inputData instanceof FormData;
-        const isManualEntry = !isFormData; // Nhận diện thêm thủ công nếu input là object
+        const isManualEntry = !isFormData;
 
         // --- BƯỚC 0: CHUẨN HÓA DỮ LIỆU ĐẦU VÀO ---
         const rawData = {
@@ -173,30 +176,46 @@ export async function addRegistrationToAction(_previousState, inputData) {
         await dbConnect();
         const existingCustomer = await Customer.findOne({ phone: normalizedPhone });
 
+        // TRƯỜNG HỢP 1: KHÁCH HÀNG ĐÃ TỒN TẠI -> CẬP NHẬT
         if (existingCustomer) {
-            console.log('[Action] Khách hàng đã tồn tại, gộp hồ sơ.');
+            console.log('[Action] Khách hàng đã tồn tại, gộp và cập nhật hồ sơ.');
+
+            if (rawData.name && existingCustomer.name !== rawData.name) existingCustomer.name = rawData.name;
+            if (rawData.address && existingCustomer.area !== rawData.address) existingCustomer.area = rawData.address;
+            if (rawData.email && existingCustomer.email !== rawData.email) existingCustomer.email = rawData.email;
+            if (birthDate && (!existingCustomer.bd || existingCustomer.bd.getTime() !== birthDate.getTime())) existingCustomer.bd = birthDate;
+
             existingCustomer.tags = [...new Set([...existingCustomer.tags, rawData.service].filter(Boolean))];
             existingCustomer.care.push({
-                content: `Data trùng từ ${isManualEntry ? 'nhập liệu thủ công' : `form "${rawData.sourceName}"`}. Gộp hồ sơ.`,
+                content: `Data trùng từ ${isManualEntry ? 'nhập liệu thủ công' : `form "${rawData.sourceName}"`}. Gộp và cập nhật hồ sơ.`,
                 createBy: user?.id || '68b0af5cf58b8340827174e0',
                 step: 1
             });
+
             await existingCustomer.save();
             revalidateData();
-            return { ok: true, message: 'Số điện thoại đã tồn tại. Hồ sơ đã được cập nhật.', type: 'merged' };
+
+            // Chạy ngầm tác vụ gửi thông báo
+            sendUpdateNotification(existingCustomer, rawData, 'updated', isManualEntry).catch(err => console.error('[Action] Lỗi ngầm khi gửi thông báo cập nhật:', err));
+
+            return { ok: true, message: 'Số điện thoại đã tồn tại. Hồ sơ đã được cập nhật với thông tin mới.', type: 'merged' };
         }
 
-        // --- BƯỚC 3: TẠO KHÁCH HÀNG MỚI ---
+        // TRƯỜNG HỢP 2: TẠO KHÁCH HÀNG MỚI
         console.log('[Action] Tạo khách hàng mới.');
-        let careContent = isManualEntry
-            ? `Khách hàng được thêm thủ công bởi ${user.id || user.id}.`
-            : `Tiếp nhận từ form "${rawData.sourceName}", nguồn: ${rawData.source}`;
+
+        const isMissingInfo = !rawData.service || !rawData.email || !rawData.address;
+        const pipelineStatus = isMissingInfo ? 'missing_info' : 'new_unconfirmed';
 
         const newCustomerData = {
-            name: rawData.name, phone: normalizedPhone, email: rawData.email || '',
-            area: rawData.address || '', tags: rawData.service ? [rawData.service] : [],
-            bd: birthDate, pipelineStatus: 'new_unconfirmed',
-            care: [{ content: careContent, createBy: user?.id || '68b0af5cf58b8340827174e0', step: 1 }],
+            name: rawData.name,
+            phone: normalizedPhone,
+            email: rawData.email || '',
+            area: rawData.address || '',
+            tags: rawData.service ? [rawData.service] : [],
+            bd: birthDate,
+            pipelineStatus: pipelineStatus,
+            care: [{ content: 'Khách hàng được nhận hồ sơ vào hệ thống', createBy: user?.id || '68b0af5cf58b8340827174e0', step: 1 }],
             source: rawData.source,
             sourceDetails: rawData.sourceName,
             ...(user && { createdBy: user.id }),
@@ -205,12 +224,11 @@ export async function addRegistrationToAction(_previousState, inputData) {
         const newCustomer = new Customer(newCustomerData);
         await newCustomer.save();
         revalidateData();
-        console.log('[Action] Đã lưu khách hàng mới. Bắt đầu các tác vụ nền.');
+        console.log(`[Action] Đã lưu khách hàng mới với trạng thái: ${pipelineStatus}. Bắt đầu các tác vụ nền.`);
 
-        // Chạy ngầm các tác vụ phụ mà không cần chờ (fire-and-forget)
-        runPostCreationTasks(newCustomer, rawData, isManualEntry).catch(err => {
-            console.error('[Action] Lỗi trong tác vụ nền:', err);
-        });
+        // Chạy ngầm các tác vụ phụ
+        runWorkflowTasks(newCustomer).catch(err => console.error('[Action] Lỗi trong tác vụ nền (workflow):', err));
+        sendUpdateNotification(newCustomer, rawData, 'created', isManualEntry).catch(err => console.error('[Action] Lỗi ngầm khi gửi thông báo tạo mới:', err));
 
         return { ok: true, message: 'Thêm khách hàng mới thành công!', type: 'created' };
 
@@ -220,14 +238,16 @@ export async function addRegistrationToAction(_previousState, inputData) {
     }
 }
 
+
+// --- CÁC HÀM HELPER ---
+
 /**
- * Hàm helper để xử lý các tác vụ nền sau khi tạo khách hàng thành công.
+ * Hàm helper để xử lý các tác vụ nền liên quan đến workflow.
  */
-async function runPostCreationTasks(newCustomer, rawData, isManualEntry) {
-    console.log(`[Background] Bắt đầu tác vụ nền cho khách hàng ID: ${newCustomer._id}`);
+async function runWorkflowTasks(newCustomer) {
+    console.log(`[Background] Bắt đầu tác vụ WORKFLOW cho khách hàng ID: ${newCustomer._id}`);
     const customerId = newCustomer._id;
 
-    // TÁC VỤ 1: GẮN WORKFLOW VÀ LẬP LỊCH
     try {
         const templateId = '68b25ddbacc8f270aeb1ac8e'; // ID template mặc định
         const template = await WorkflowTemplate.findById(templateId);
@@ -266,29 +286,38 @@ async function runPostCreationTasks(newCustomer, rawData, isManualEntry) {
     } catch (err) {
         console.error(`[Background] Lỗi khi gắn workflow cho KH ${customerId}:`, err);
     }
+}
 
-    // TÁC VỤ 2: GỬI THÔNG BÁO QUA APPS SCRIPT (CHỈ KHI ĐĂNG KÝ TỪ FORM)
-    if (!isManualEntry) {
-        try {
-            const createAt = new Date();
-            const formattedCreateAt = createAt.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+/**
+ * Hàm helper để gửi thông báo qua Google Apps Script.
+ */
+async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
+    let service = await service_data()
+    service = service.find(item => item._id === rawData.service);
+    try {
+        const createAt = new Date();
+        const formattedCreateAt = createAt.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
 
-            const message = `📅 Đăng ký từ Form ${rawData.sourceName}
+        const title = type === 'created'
+            ? `📅 Đăng ký mới từ ${isManualEntry ? 'nhập liệu thủ công' : `Form "${rawData.sourceName}"`}`
+            : `🔄 Cập nhật hồ sơ từ ${isManualEntry ? 'nhập liệu thủ công' : `Form "${rawData.sourceName}"`}`;
+
+        const message = `${title}
 -----------------------------------
-Họ và tên: ${rawData.name}
-Liên hệ: ${newCustomer.phone}
-Dịch vụ quan tâm: ${rawData.service || 'Không có'}
+Họ và tên: ${customer.name}
+Liên hệ: ${customer.phone}
+Dịch vụ quan tâm: ${service?.name || 'Không có'}
 Thời gian: ${formattedCreateAt}`;
-
-            await sendGP(message);
-            console.log(`[Background] Đã gửi thông báo Apps Script cho KH ${customerId}`);
-        } catch (err) {
-            console.error(`[Background] Lỗi gửi Apps Script cho KH ${customerId}:`, err);
-        }
+        await sendGP(message);
+        console.log(`[Background] Đã gửi thông báo Apps Script cho KH ${customer._id} (Loại: ${type})`);
+    } catch (err) {
+        console.error(`[Background] Lỗi gửi Apps Script cho KH ${customer._id}:`, err);
     }
 }
 
-// Hàm helper
+/**
+ * Hàm helper để chuẩn hóa số điện thoại.
+ */
 function normalizePhone(phone) {
     const t = (phone ?? '').trim().replace(/\D/g, ''); // Chỉ giữ số
     if (!t) return '';

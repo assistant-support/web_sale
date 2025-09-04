@@ -74,7 +74,7 @@ export default function RegistrationForm({ id, service }) {
                 })}
                 <SubmitButton />
                 {state.message && (
-                    <div className={`${styles.message} ${state.type === 'success' ? styles.success : styles.error}`}>
+                    <div className={`${styles.message} ${state.ok === true ? styles.success : styles.error}`}>
                         <h5 style={{ color: 'inherit' }}>{state.message}</h5>
                     </div>
                 )}

@@ -213,10 +213,9 @@ export default function Nav() {
     <>
       <div className='flex_col' style={{ justifyContent: 'space-between', height: '100%', alignItems: 'center' }}>
         <div style={{ height: 100, width: 100, minHeight: 100 }} className="flex_center">
-          <p className="text_1">
-            <span style={{ color: 'var(--main_d)' }}> AI</span>
-            <span>R</span>
-          </p>
+          <h3 className='text_w_600' style={{ color: 'var(--main_d)' }}>
+            SALE
+          </h3>
         </div>
         <div className={air.container} ref={navContainerRef}>
           {activeIndex !== -1 && (
