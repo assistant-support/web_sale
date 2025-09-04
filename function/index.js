@@ -63,3 +63,36 @@ export function formatDelay(ms) {
     if (min >= 60) return (min / 60).toFixed(1) + ' giờ'; // .toFixed(1) cho đẹp hơn
     return min.toFixed(0) + ' phút';
 }
+
+// Chuyển status code thành text
+const statusMap = {
+    // ... (nội dung giống hệt ở trên) ...
+    'new_unconfirmed_1': 'Mới, chưa xác nhận',
+    'missing_info_1': 'Thiếu thông tin',
+    'not_valid_1': 'Không hợp lệ',
+    'duplicate_merged_1': 'Trùng lặp (đã gộp)',
+    'rejected_immediate_1': 'Từ chối ngay',
+    'valid_1': 'Hợp lệ (chờ xử lý)',
+    'msg_success_2': 'Gửi tin nhắn thành công',
+    'msg_error_2': 'Gửi tin nhắn thất bại',
+    'noikhoa_3': 'Chuyên khoa Nội',
+    'ngoaikhoa_3': 'Chuyên khoa Ngoại',
+    'undetermined_3': 'Chưa phân loại',
+    'consulted_pending_4': 'Đã tư vấn, chờ quyết định',
+    'scheduled_unconfirmed_4': 'Đã lên lịch, chưa xác nhận',
+    'callback_4': 'Yêu cầu gọi lại',
+    'not_interested_4': 'Không quan tâm',
+    'no_contact_4': 'Không liên lạc được',
+    'confirmed_5': 'Lịch hẹn đã xác nhận',
+    'postponed_5': 'Lịch hẹn đã hoãn',
+    'canceled_5': 'Lịch hẹn đã hủy',
+    'serviced_completed_6': 'Dịch vụ đã hoàn thành',
+    'serviced_in_progress_6': 'Dịch vụ đang thực hiện',
+    'rejected_after_consult_6': 'Từ chối sau tư vấn'
+};
+
+export function getStatusInVietnamese(statusKey, defaultValue = 'Trạng thái không xác định') {
+    console.log(statusKey);
+    
+    return statusMap[statusKey] || defaultValue;
+}

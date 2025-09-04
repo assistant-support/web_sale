@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, SlidersHorizontal } from 'lucide-react';
 import CustomerRow from './row';
-
+import { getStatusInVietnamese } from '@/function/index'
 // =============================================================
 // == 1. ĐỊNH NGHĨA CỘT DỮ LIỆU VÀ CÁC HẰNG SỐ
 // =============================================================
@@ -136,11 +136,14 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
             case 'tags':
                 return <h6>{Array.isArray(value) ? value.map(tag => tag.name).join(', ') : '-'}</h6>;
 
-            case 'pipelineStatus': return <h6>{PIPELINE_STATUS_TEXT[value] || value}</h6>;
+            case 'pipelineStatus': {
+                const status = getStatusInVietnamese(customer.pipelineStatus[0]);
+                return <h6>{status}</h6>;
+            }
             case 'assignees': return <h6>{Array.isArray(value) && value.length > 0 ? value.map(a => a.user?.name).join(', ') : '-'}</h6>;
             case 'currentStep': {
-                const maxStep = customer.care.reduce((max, note) => Math.max(max, note.step || 0), 0);
-                return <h6>{STEP_TEXT[maxStep] || 'Chưa có'}</h6>;
+                const status = customer.pipelineStatus.length;
+                return <h6>Bước {status}</h6>;
             }
             default: return <h6 className="truncate">{String(value)}</h6>;
         }

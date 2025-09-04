@@ -1,550 +1,657 @@
-// OmicallInterface.jsx
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Script from 'next/script';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { Phone, Mic, MicOff, Video, VideoOff, PhoneOff, Pause, Play, Download, Trash2, Settings, CircleDot, AlertCircle, CheckCircle, PhoneOutgoing } from 'lucide-react';
 
-// Giả lập các component UI để code có thể chạy. 
-// Bạn hãy thay thế bằng các component từ thư viện của mình (shadcn/ui, etc.)
-const Button = ({ children, onClick, variant, className }) => <button onClick={onClick} className={`${className} ${variant}`}>{children}</button>;
-const Input = (props) => <input {...props} />;
-const Label = ({ children, ...props }) => <label {...props}>{children}</label>;
-const Progress = ({ value, ...props }) => <div {...props}><div style={{ width: `${value}%`, backgroundColor: 'blue', height: '100%' }}></div></div>;
-const Slider = ({ onValueChange, value, ...props }) => <input type="range" value={value ? value[0] : 0} onChange={(e) => onValueChange([parseInt(e.target.value)])} {...props} />;
-const Switch = ({ checked, onCheckedChange }) => <input type="checkbox" checked={checked} onChange={(e) => onCheckedChange(e.target.checked)} />;
-
-
-// === MAIN COMPONENT ===
-const OmicallInterface = () => {
-    // --- Refs for persistent instances and non-rendering data ---
-    const sdkRef = useRef(null);
-    const currentCallRef = useRef(null); // Use Ref for the call object to avoid dependency issues in callbacks
-    const mediaRecorderRef = useRef(null);
-    const recordedChunksRef = useRef([]);
-
-    // DOM element Refs
-    const localVideoRef = useRef(null);
-    const remoteVideoRef = useRef(null);
-    const remoteAudioRef = useRef(null);
-
-    // Web Audio API Refs
-    const audioContextRef = useRef(null);
-    const analyserNodeRef = useRef(null);
-    const micGainNodeRef = useRef(null);
-    const localStreamSourceRef = useRef(null); // To disconnect later
-
-    // Timer Refs
-    const callTimerRef = useRef(null);
-    const recTimerRef = useRef(null);
-    const micLevelIntervalRef = useRef(null);
-    const calibrationFrameRef = useRef(null);
-
-    // --- State for triggering UI re-renders ---
-    const [isSdkReady, setIsSdkReady] = useState(false);
-    const [connectionStatus, setConnectionStatus] = useState('Chưa kết nối');
-    const [logMessages, setLogMessages] = useState([]);
-
+const OMICallClient = () => {
+    const [connectionStatus, setConnectionStatus] = useState({ status: 'disconnected', text: 'Chưa kết nối' });
+    const [sipUser, setSipUser] = useState('100');
+    const [hotlineNumber, setHotlineNumber] = useState('842471233474');
     const [phoneNumber, setPhoneNumber] = useState('');
-    const [hotline, setHotline] = useState('842471233474');
-
-    const [callInfo, setCallInfo] = useState({
-        isCalling: false,
-        number: '',
-        state: 'Tạm dừng',
-        duration: '00:00',
-        isVideo: false,
-    });
-    const [isMuted, setIsMuted] = useState(false);
-    const [isHeld, setIsHeld] = useState(false);
-    const [isRecording, setIsRecording] = useState(false);
-    const [recTimer, setRecTimer] = useState('00:00');
-
-    const [micLevel, setMicLevel] = useState(0);
-    const [micGain, setMicGain] = useState(150); // Default to 150% as in original
+    const [logs, setLogs] = useState([]);
+    const [callInfo, setCallInfo] = useState(null);
+    const [callDuration, setCallDuration] = useState('00:00');
+    const [audioDevices, setAudioDevices] = useState({ microphones: [], speakers: [] });
+    const [selectedMic, setSelectedMic] = useState('');
+    const [selectedSpeaker, setSelectedSpeaker] = useState('');
     const [volume, setVolume] = useState(80);
+    const [micGain, setMicGain] = useState(100);
     const [audioSettings, setAudioSettings] = useState({
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
     });
-    const [audioDevices, setAudioDevices] = useState({ microphones: [], speakers: [] });
-    const [isCalibrating, setIsCalibrating] = useState(false);
+    const [micLevel, setMicLevel] = useState(0);
+    const [isMuted, setIsMuted] = useState(false);
+    const [isHeld, setIsHeld] = useState(false);
+    const [isVideoOn, setIsVideoOn] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordings, setRecordings] = useState([]);
+    const [recordingTime, setRecordingTime] = useState('00:00');
 
+    const sdkRef = useRef(null);
+    const currentCallRef = useRef(null);
+    const callDurationIntervalRef = useRef(null);
+    const audioContextRef = useRef(null);
+    const analyserRef = useRef(null);
+    const micGainNodeRef = useRef(null);
+    const audioMonitoringIntervalRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const recordedChunksRef = useRef([]);
+    const mixedStreamRef = useRef(null);
+    const localStreamRef = useRef(null);
+    const remoteStreamRef = useRef(null);
+    const recordingTimerRef = useRef(null);
 
-    // --- Core Logic ---
+    const localVideoRef = useRef(null);
+    const remoteVideoRef = useRef(null);
+    const remoteAudioRef = useRef(null);
 
-    const log = useCallback((message, type = 'info') => {
+    const log = (message, type = 'info') => {
         const timestamp = new Date().toLocaleTimeString();
-        const formattedMessage = `[${timestamp}] ${message}`;
-        // Use functional update to avoid stale state issues
-        setLogMessages(prev => [formattedMessage, ...prev].slice(0, 50));
-    }, []);
+        setLogs(prevLogs => [...prevLogs.slice(-49), { timestamp, message, type }]);
+    };
 
-    const resetCallState = useCallback(() => {
-        clearInterval(callTimerRef.current);
-        clearInterval(recTimerRef.current);
-        clearInterval(micLevelIntervalRef.current);
-        cancelAnimationFrame(calibrationFrameRef.current);
-
-        // Stop any active recording
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-            mediaRecorderRef.current.stop();
+    const handleSDKLoad = () => {
+        if (window.OMICallSDK) {
+            initializeSDK();
         }
+    };
 
-        currentCallRef.current = null;
-        setCallInfo({ isCalling: false, number: '', state: 'Tạm dừng', duration: '00:00', isVideo: false });
-        setIsMuted(false);
-        setIsHeld(false);
-        setIsRecording(false);
-        setMicLevel(0);
-
-        // Disconnect and close the audio context
-        if (localStreamSourceRef.current) localStreamSourceRef.current.disconnect();
-        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-            audioContextRef.current.close().then(() => audioContextRef.current = null);
-        }
-
-        if (localVideoRef.current) localVideoRef.current.srcObject = null;
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-
-        log('Trạng thái cuộc gọi đã được reset.');
-    }, [log]);
-
-
-    // --- SDK Initialization and Event Handling ---
-    useEffect(() => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.omicrm.com/sdk/web/3.0.0/core.min.js';
-        script.async = true;
-
-        const handleRegisterEvent = (data) => {
-            setConnectionStatus(data.name);
-            log(`Trạng thái kết nối: ${data.name}`, 'info');
-        };
-
-        const handleCallEvent = (eventType, callData) => {
-            currentCallRef.current = callData;
-            switch (eventType) {
-                case 'connecting':
-                    log(`Đang gọi tới ${callData.remoteNumber}...`, 'info');
-                    setCallInfo({ isCalling: true, number: callData.remoteNumber, state: 'Đang kết nối...', duration: '00:00', isVideo: callData.isVideo });
-                    break;
-                case 'ringing':
-                    log(`Đang đổ chuông...`, 'info');
-                    setCallInfo(prev => ({ ...prev, state: 'Đang đổ chuông...' }));
-                    break;
-                case 'accepted':
-                    log(`Cuộc gọi đã bắt đầu`, 'success');
-                    setCallInfo(prev => ({ ...prev, state: 'Đang trong cuộc gọi' }));
-                    startCallTimer();
-                    setupMediaAndAudio(callData);
-                    break;
-                case 'ended':
-                    log(`Cuộc gọi kết thúc`, 'info');
-                    resetCallState();
-                    break;
-                default:
-                    break;
-            }
-        };
-
-        const initializeSdk = async () => {
-            if (typeof window.OMICallSDK === 'undefined') {
-                log('Lỗi: OMICall SDK chưa được tải.', 'error'); return;
-            }
-
-            log('Đang khởi tạo OMICall SDK...');
-            const initSuccess = await window.OMICallSDK.init({ lng: 'vi', ui: { toggleDial: 'hide' } });
-
+    const initializeSDK = async () => {
+        try {
+            log('Đang khởi tạo OMICall SDK...', 'info');
+            const sdkConfigs = {
+                lng: 'vi',
+                ui: { toggleDial: 'hide' },
+                ringtoneVolume: 0.9,
+            };
+            const initSuccess = await window.OMICallSDK.init(sdkConfigs);
             if (!initSuccess) {
-                log('Lỗi: Không thể khởi tạo SDK', 'error'); return;
+                log('Lỗi: Không thể khởi tạo SDK', 'error');
+                return;
             }
-
             sdkRef.current = window.OMICallSDK;
-            setIsSdkReady(true);
             log('SDK đã được khởi tạo thành công', 'success');
+            setupEventListeners();
+            await connectToServer();
+            await initializeAudioDevices();
+        } catch (error) {
+            log(`Lỗi khởi tạo: ${error.message}`, 'error');
+        }
+    };
 
-            sdkRef.current.on('register', handleRegisterEvent);
-            sdkRef.current.on('connecting', (data) => handleCallEvent('connecting', data));
-            sdkRef.current.on('ringing', (data) => handleCallEvent('ringing', data));
-            sdkRef.current.on('accepted', (data) => handleCallEvent('accepted', data));
-            sdkRef.current.on('ended', (data) => handleCallEvent('ended', data));
+    const setupEventListeners = () => {
+        if (!sdkRef.current) return;
+        sdkRef.current.on('register', handleRegisterEvent);
+        sdkRef.current.on('connecting', (callData) => handleCallEvent('connecting', callData));
+        sdkRef.current.on('ringing', (callData) => handleCallEvent('ringing', callData));
+        sdkRef.current.on('accepted', (callData) => handleCallEvent('accepted', callData));
+        sdkRef.current.on('ended', (callData) => handleCallEvent('ended', callData));
+    };
 
-            connectToServer();
-            initializeAudioDevices();
-        };
-
-        script.onload = initializeSdk;
-        script.onerror = () => log('Lỗi tải script OMICall SDK.', 'error');
-        document.body.appendChild(script);
-
-        return () => { // Cleanup
-            document.body.removeChild(script);
-            if (sdkRef.current) {
-                sdkRef.current.off('register'); sdkRef.current.off('connecting');
-                sdkRef.current.off('ringing'); sdkRef.current.off('accepted');
-                sdkRef.current.off('ended');
-            }
-            resetCallState();
-            if (remoteAudioRef.current) {
-                remoteAudioRef.current.remove();
-                remoteAudioRef.current = null;
-            }
-        };
-    }, [log, resetCallState]); // Add dependencies for functions defined outside
-
-    const connectToServer = useCallback(async () => {
-        setConnectionStatus('Đang kết nối...');
-        log('Đang kết nối tới tổng đài...');
-        await sdkRef.current.register({ sipRealm: 'thanhnth', sipUser: '100', sipPassword: 'LCJw1HK8i2' });
-    }, [log]);
-
-
-    // --- Media and Audio Logic ---
-    const initializeAudioDevices = useCallback(async () => {
+    const connectToServer = async () => {
         try {
-            await navigator.mediaDevices.getUserMedia({ audio: true }); // Request permission
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            setAudioDevices({
-                microphones: devices.filter(d => d.kind === 'audioinput'),
-                speakers: devices.filter(d => d.kind === 'audiooutput'),
+            log('Đang kết nối tới tổng đài...', 'info');
+            setConnectionStatus({ status: 'connecting', text: 'Đang kết nối...' });
+            const registerStatus = await sdkRef.current.register({
+                sipRealm: 'thanhnth',
+                sipUser: '100',
+                sipPassword: 'LCJw1HK8i2',
             });
-            log(`Đã tìm thấy ${devices.filter(d => d.kind === 'audioinput').length} micro.`, 'success');
+            if (registerStatus.status) {
+                log('Kết nối tổng đài thành công!', 'success');
+                setConnectionStatus({ status: 'connected', text: 'Đã kết nối' });
+            } else {
+                log(`Lỗi kết nối: ${registerStatus.error}`, 'error');
+                setConnectionStatus({ status: 'disconnected', text: 'Kết nối thất bại' });
+            }
         } catch (error) {
-            log(`Lỗi khi lấy thiết bị âm thanh: ${error.message}`, 'error');
+            log(`Lỗi kết nối tổng đài: ${error.message}`, 'error');
+            setConnectionStatus({ status: 'disconnected', text: 'Lỗi kết nối' });
         }
-    }, [log]);
-
-    const setupMediaAndAudio = useCallback(async (callData) => {
-        // Attach streams to video/audio elements
-        if (callData.isVideo) {
-            if (localVideoRef.current) localVideoRef.current.srcObject = callData.streams.local;
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = callData.streams.remote;
-        }
-        if (!remoteAudioRef.current) {
-            remoteAudioRef.current = document.createElement('audio');
-            remoteAudioRef.current.autoplay = true;
-            document.body.appendChild(remoteAudioRef.current);
-        }
-        remoteAudioRef.current.srcObject = callData.streams.remote;
-        updateVolume([volume]); // Apply current volume
-
-        // Setup advanced audio processing pipeline
-        try {
-            if (!callData.streams.local) return;
-            const context = new (window.AudioContext || window.webkitAudioContext)();
-            const source = context.createMediaStreamSource(callData.streams.local);
-            localStreamSourceRef.current = source; // Store source for later disconnect
-
-            const highpassNode = context.createBiquadFilter();
-            highpassNode.type = 'highpass'; highpassNode.frequency.value = 120;
-
-            const compressorNode = context.createDynamicsCompressor();
-            compressorNode.threshold.value = -30; compressorNode.knee.value = 20; compressorNode.ratio.value = 6;
-
-            const gainNode = context.createGain();
-            gainNode.gain.value = micGain / 100;
-
-            const analyser = context.createAnalyser();
-            analyser.fftSize = 256;
-
-            source.connect(highpassNode).connect(compressorNode).connect(gainNode).connect(analyser);
-
-            audioContextRef.current = context;
-            analyserNodeRef.current = analyser;
-            micGainNodeRef.current = gainNode;
-
-            // Start monitoring mic level
-            micLevelIntervalRef.current = setInterval(() => {
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(dataArray);
-                const average = dataArray.reduce((acc, val) => acc + val, 0) / dataArray.length;
-                setMicLevel(Math.round((average / 255) * 100));
-            }, 100);
-            log('Chuỗi xử lý âm thanh nâng cao đã được kích hoạt.', 'success');
-        } catch (error) {
-            log(`Lỗi cài đặt pipeline âm thanh: ${error.message}`, 'error');
-        }
-    }, [micGain, log, volume]); // Added volume to dependencies
-
-
-    // --- Timers ---
-    const startCallTimer = () => {
-        clearInterval(callTimerRef.current);
-        let seconds = 0;
-        callTimerRef.current = setInterval(() => {
-            seconds++;
-            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-            const secs = (seconds % 60).toString().padStart(2, '0');
-            setCallInfo(prev => ({ ...prev, duration: `${mins}:${secs}` }));
-        }, 1000);
     };
 
-    const startRecTimer = () => {
-        clearInterval(recTimerRef.current);
-        let seconds = 0;
-        recTimerRef.current = setInterval(() => {
-            seconds++;
-            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-            const secs = (seconds % 60).toString().padStart(2, '0');
-            setRecTimer(`${mins}:${secs}`);
-        }, 1000);
+    const handleRegisterEvent = (data) => {
+        log(`Trạng thái kết nối: ${data.name}`, 'info');
+        switch (data.status) {
+            case 'connected':
+                setConnectionStatus({ status: 'connected', text: 'Đã kết nối' });
+                break;
+            case 'connecting':
+                setConnectionStatus({ status: 'connecting', text: 'Đang kết nối...' });
+                break;
+            case 'disconnect':
+                setConnectionStatus({ status: 'disconnected', text: 'Mất kết nối' });
+                break;
+        }
     };
 
-
-    // --- UI Interaction Handlers (LOGIC ONLY) ---
-
-    const makeCall = useCallback(async () => {
-        if (!isSdkReady || connectionStatus !== 'connected') {
-            return log(`SDK chưa sẵn sàng hoặc chưa kết nối tổng đài. ${connectionStatus}, ${isSdkReady}, ${JSON.stringify(callInfo)}, ${phoneNumber}`, 'error');
+    const handleCallEvent = (eventType, callData) => {
+        currentCallRef.current = callData;
+        switch (eventType) {
+            case 'connecting':
+                log(`Đang gọi tới ${callData.remoteNumber}...`, 'info');
+                setCallInfo({ number: callData.remoteNumber, state: 'Đang kết nối...' });
+                break;
+            case 'ringing':
+                log(`Đang đổ chuông tới ${callData.remoteNumber}...`, 'info');
+                setCallInfo(prev => ({ ...prev, state: 'Đang đổ chuông...' }));
+                break;
+            case 'accepted':
+                log(`Cuộc gọi đã được chấp nhận`, 'success');
+                setCallInfo(prev => ({ ...prev, state: 'Đang trong cuộc gọi' }));
+                startCallDuration();
+                setupMediaElements(callData);
+                initializeAudioContext();
+                startAudioMonitoring();
+                break;
+            case 'ended':
+                log(`Cuộc gọi đã kết thúc`, 'info');
+                stopCallDuration();
+                stopAudioMonitoring();
+                stopRecording();
+                setCallInfo(null);
+                currentCallRef.current = null;
+                localStreamRef.current = null;
+                remoteStreamRef.current = null;
+                if (localVideoRef.current) localVideoRef.current.srcObject = null;
+                if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+                if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+                break;
         }
-        if (callInfo.isCalling) {
-            return log('Đang trong cuộc gọi khác.', 'error');
+    };
+
+    const makeCall = async () => {
+        if (connectionStatus.status !== 'connected') {
+            log('Chưa kết nối tới tổng đài.', 'error');
+            return;
+        }
+        if (currentCallRef.current) {
+            log('Đang có cuộc gọi khác.', 'error');
+            return;
         }
         if (!phoneNumber) {
-            return log('Vui lòng nhập số điện thoại.', 'error');
+            log('Vui lòng nhập số điện thoại.', 'error');
+            return;
         }
-        await sdkRef.current.makeCall(phoneNumber, { sipNumber: { number: hotline } });
-    }, [isSdkReady, connectionStatus, callInfo.isCalling, phoneNumber, hotline, log]);
+        try {
+            log(`Bắt đầu gọi tới ${phoneNumber}...`, 'info');
+            await navigator.mediaDevices.getUserMedia({ audio: true });
+            const options = {
+                isVideo: false,
+                sipNumber: { number: hotlineNumber },
+            };
+            await sdkRef.current.makeCall(phoneNumber, options);
+        } catch (error) {
+            log(`Lỗi khi gọi: ${error.message}`, 'error');
+        }
+    };
 
-    const endCall = useCallback(() => {
-        if (currentCallRef.current) {
-            currentCallRef.current.end();
-            // Call state reset is handled by the 'ended' event
+    const startCallDuration = () => {
+        let seconds = 0;
+        callDurationIntervalRef.current = setInterval(() => {
+            seconds++;
+            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            setCallDuration(`${mins}:${secs}`);
+        }, 1000);
+    };
+
+    const stopCallDuration = () => {
+        clearInterval(callDurationIntervalRef.current);
+        setCallDuration('00:00');
+    };
+
+    const setupMediaElements = (callData) => {
+        if (callData.isVideo) {
+            setIsVideoOn(true);
+            if (localVideoRef.current && callData.streams.local) {
+                localVideoRef.current.srcObject = callData.streams.local;
+            }
+            if (remoteVideoRef.current && callData.streams.remote) {
+                remoteVideoRef.current.srcObject = callData.streams.remote;
+            }
+        }
+        if (remoteAudioRef.current && callData.streams.remote) {
+            remoteAudioRef.current.srcObject = callData.streams.remote;
+            remoteAudioRef.current.play().catch(e => log(`Lỗi phát audio: ${e.message}`, 'error'));
+        }
+        localStreamRef.current = callData.streams.local;
+        remoteStreamRef.current = callData.streams.remote;
+    };
+
+    const initializeAudioDevices = async () => {
+        try {
+            await navigator.mediaDevices.getUserMedia({ audio: true });
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const microphones = devices.filter(d => d.kind === 'audioinput');
+            const speakers = devices.filter(d => d.kind === 'audiooutput');
+            setAudioDevices({ microphones, speakers });
+            if (microphones.length > 0) setSelectedMic(microphones[0].deviceId);
+            if (speakers.length > 0) setSelectedSpeaker(speakers[0].deviceId);
+            log(`Đã tải ${microphones.length} mic và ${speakers.length} loa`, 'success');
+        } catch (error) {
+            log(`Lỗi tải thiết bị âm thanh: ${error.message}`, 'error');
+        }
+    };
+
+    const initializeAudioContext = () => {
+        try {
+            if (!audioContextRef.current) {
+                audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContextRef.current.state === 'suspended') {
+                audioContextRef.current.resume();
+            }
+            analyserRef.current = audioContextRef.current.createAnalyser();
+            analyserRef.current.fftSize = 256;
+            analyserRef.current.smoothingTimeConstant = 0.8;
+
+            if (localStreamRef.current) {
+                const source = audioContextRef.current.createMediaStreamSource(localStreamRef.current);
+                micGainNodeRef.current = audioContextRef.current.createGain();
+                micGainNodeRef.current.gain.value = micGain / 100;
+                source.connect(micGainNodeRef.current);
+                micGainNodeRef.current.connect(analyserRef.current);
+            }
+            log('Audio context đã được khởi tạo', 'success');
+        } catch (error) {
+            log(`Lỗi khởi tạo audio context: ${error.message}`, 'error');
+        }
+    };
+
+    const startAudioMonitoring = () => {
+        audioMonitoringIntervalRef.current = setInterval(() => {
+            if (!analyserRef.current) return;
+            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            setMicLevel(Math.round((average / 255) * 100));
+        }, 100);
+    };
+
+    const stopAudioMonitoring = () => {
+        clearInterval(audioMonitoringIntervalRef.current);
+        setMicLevel(0);
+    };
+
+    const toggleMute = () => {
+        currentCallRef.current?.mute(isMuted => {
+            setIsMuted(isMuted);
+            log(`Microphone ${isMuted ? 'đã tắt' : 'đã bật'}`, 'info');
+        });
+    };
+
+    const toggleHold = () => {
+        currentCallRef.current?.hold(isHeld => {
+            setIsHeld(isHeld);
+            log(`Cuộc gọi ${isHeld ? 'đã được giữ' : 'đã bỏ giữ'}`, 'info');
+        });
+    };
+
+    const toggleVideo = () => {
+        currentCallRef.current?.camera(isVideoOn => {
+            setIsVideoOn(isVideoOn);
+            log(`Camera ${isVideoOn ? 'đã bật' : 'đã tắt'}`, 'info');
+        });
+    };
+
+    const endCall = () => {
+        currentCallRef.current?.end();
+    };
+
+    const toggleRecording = () => {
+        if (isRecording) {
+            stopRecording();
         } else {
-            log('Không có cuộc gọi nào để kết thúc.', 'error');
+            startRecording();
         }
-    }, [log]);
+    };
 
-    const toggleMute = useCallback(() => {
-        if (currentCallRef.current) {
-            currentCallRef.current.mute(isMuted => {
-                setIsMuted(isMuted);
-                log(isMuted ? 'Đã tắt mic' : 'Đã bật mic', 'info');
-            });
-        }
-    }, [log]);
-
-    const toggleHold = useCallback(() => {
-        if (currentCallRef.current) {
-            currentCallRef.current.hold(isHeld => {
-                setIsHeld(isHeld);
-                log(isHeld ? 'Đã giữ máy' : 'Đã nối lại cuộc gọi', 'info');
-            });
-        }
-    }, [log]);
-
-    const toggleRecording = useCallback(() => {
-        if (isRecording) { // --- STOP RECORDING ---
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-                mediaRecorderRef.current.stop(); // This will trigger the 'onstop' event
+    const startRecording = () => {
+        try {
+            if (!localStreamRef.current && !remoteStreamRef.current) {
+                log('Không có stream để ghi âm', 'error');
+                return;
             }
-            clearInterval(recTimerRef.current);
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const destination = audioContext.createMediaStreamDestination();
+            if (localStreamRef.current) {
+                audioContext.createMediaStreamSource(localStreamRef.current).connect(destination);
+            }
+            if (remoteStreamRef.current) {
+                audioContext.createMediaStreamSource(remoteStreamRef.current).connect(destination);
+            }
+            mixedStreamRef.current = destination.stream;
+
+            recordedChunksRef.current = [];
+            mediaRecorderRef.current = new MediaRecorder(mixedStreamRef.current, { mimeType: 'audio/webm;codecs=opus' });
+
+            mediaRecorderRef.current.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+            };
+
+            mediaRecorderRef.current.onstop = () => {
+                const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+                const url = URL.createObjectURL(blob);
+                const name = `recording-${new Date().toISOString()}.webm`;
+                setRecordings(prev => [...prev, { name, url }]);
+                log(`Đã lưu ghi âm: ${name}`, 'success');
+            };
+
+            mediaRecorderRef.current.start();
+            setIsRecording(true);
+            log('Bắt đầu ghi âm', 'success');
+
+            let seconds = 0;
+            recordingTimerRef.current = setInterval(() => {
+                seconds++;
+                const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const secs = (seconds % 60).toString().padStart(2, '0');
+                setRecordingTime(`${mins}:${secs}`);
+            }, 1000);
+
+        } catch (error) {
+            log(`Lỗi bắt đầu ghi âm: ${error.message}`, 'error');
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
             setIsRecording(false);
-            log('Đã dừng ghi âm.');
-
-        } else { // --- START RECORDING ---
-            const call = currentCallRef.current;
-            if (!call || !call.streams.local || !call.streams.remote) {
-                return log('Không thể ghi âm, thiếu luồng âm thanh.', 'error');
-            }
-            try {
-                // Mix audio tracks for a single recording file
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const destination = audioCtx.createMediaStreamDestination();
-
-                audioCtx.createMediaStreamSource(call.streams.local).connect(destination);
-                audioCtx.createMediaStreamSource(call.streams.remote).connect(destination);
-
-                const mixedStream = destination.stream;
-
-                mediaRecorderRef.current = new MediaRecorder(mixedStream, { mimeType: 'audio/webm;codecs=opus' });
-                recordedChunksRef.current = [];
-
-                mediaRecorderRef.current.ondataavailable = (event) => {
-                    if (event.data && event.data.size > 0) {
-                        recordedChunksRef.current.push(event.data);
-                    }
-                };
-                mediaRecorderRef.current.onstop = () => {
-                    const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-                    const url = URL.createObjectURL(blob);
-                    log(`Ghi âm đã được lưu. Bạn có thể tải xuống tại: ${url}`, 'success');
-                    // In a real app, you would upload this blob or offer it for download
-                };
-
-                mediaRecorderRef.current.start();
-                setIsRecording(true);
-                setRecTimer('00:00');
-                startRecTimer();
-                log('Đã bắt đầu ghi âm.', 'success');
-
-            } catch (error) {
-                log(`Lỗi bắt đầu ghi âm: ${error.message}`, 'error');
-            }
+            clearInterval(recordingTimerRef.current);
+            setRecordingTime('00:00');
+            log('Dừng ghi âm', 'info');
         }
-    }, [isRecording, log]);
+    };
 
-    const updateMicGain = useCallback((value) => {
-        const newGain = value[0];
-        setMicGain(newGain);
-        if (micGainNodeRef.current) {
-            micGainNodeRef.current.gain.value = newGain / 100;
-        }
-    }, []);
+    const deleteRecording = (urlToDelete) => {
+        setRecordings(prev => prev.filter(rec => rec.url !== urlToDelete));
+        URL.revokeObjectURL(urlToDelete);
+    };
 
-    const updateVolume = useCallback((value) => {
-        const newVolume = value[0];
-        setVolume(newVolume);
-        if (remoteAudioRef.current) remoteAudioRef.current.volume = newVolume / 100;
-        if (remoteVideoRef.current) remoteVideoRef.current.volume = newVolume / 100;
-    }, []);
-
-    const handleCalibrate = useCallback(() => {
-        if (!analyserNodeRef.current || !micGainNodeRef.current) {
-            return log('Không thể chuẩn hóa, audio context chưa sẵn sàng', 'error');
-        }
-        setIsCalibrating(true);
-        log('Bắt đầu chuẩn hóa microphone...');
-
-        const targetLoudness = 0.61, durationMs = 3000, startTime = Date.now();
-
-        const step = () => {
-            const dataArray = new Uint8Array(analyserNodeRef.current.frequencyBinCount);
-            analyserNodeRef.current.getByteFrequencyData(dataArray);
-            const currentLoudness = dataArray.reduce((a, b) => a + b, 0) / dataArray.length / 255;
-
-            let newGain = micGainNodeRef.current.gain.value + 0.5 * (targetLoudness - currentLoudness);
-            newGain = Math.max(0.2, Math.min(3.0, newGain)); // Clamp
-
-            updateMicGain([Math.round(newGain * 100)]);
-
-            if (Date.now() - startTime < durationMs) {
-                calibrationFrameRef.current = requestAnimationFrame(step);
-            } else {
-                setIsCalibrating(false);
-                log(`Chuẩn hóa hoàn tất. Gain: ${Math.round(newGain * 100)}%`, 'success');
-            }
+    useEffect(() => {
+        return () => {
+            // Cleanup on unmount
+            sdkRef.current?.destroy();
+            clearInterval(callDurationIntervalRef.current);
+            clearInterval(audioMonitoringIntervalRef.current);
+            clearInterval(recordingTimerRef.current);
+            audioContextRef.current?.close();
         };
-        requestAnimationFrame(step);
-    }, [log, updateMicGain]);
+    }, []);
 
+    useEffect(() => {
+        if (micGainNodeRef.current) {
+            micGainNodeRef.current.gain.value = micGain / 100;
+        }
+    }, [micGain]);
 
-    // --- RENDER ---
+    useEffect(() => {
+        if (remoteAudioRef.current) {
+            remoteAudioRef.current.volume = volume / 100;
+        }
+    }, [volume]);
+
+    const getStatusIcon = () => {
+        switch (connectionStatus.status) {
+            case 'connected': return <CheckCircle className="h-5 w-5 text-green-500" />;
+            case 'connecting': return <CircleDot className="h-5 w-5 text-yellow-500 animate-pulse" />;
+            case 'disconnected': return <AlertCircle className="h-5 w-5 text-red-500" />;
+            default: return null;
+        }
+    };
+
+    const getLogIcon = (type) => {
+        switch (type) {
+            case 'success': return <CheckCircle className="h-4 w-4 text-green-500" />;
+            case 'error': return <AlertCircle className="h-4 w-4 text-red-500" />;
+            case 'info': return <PhoneOutgoing className="h-4 w-4 text-blue-500" />;
+            default: return null;
+        }
+    };
+
     return (
-        <> {/* Use Fragment to contain multiple root-level elements */}
-            <div className="main-content w-full max-w-2xl bg-gray-200 rounded-lg shadow-lg p-8">
-                {!callInfo.isCalling ? (
-                    <div className="call-panel">
-                        <h5>Gọi Điện (Trạng thái: {connectionStatus})</h5>
-                        <div className="flex space-x-2 my-2">
-                            <Input
-                                type="tel" placeholder="Nhập số điện thoại cần gọi..." maxLength="15"
-                                value={phoneNumber} style={{ backgroundColor: 'white' }}
-                                onChange={(e) => setPhoneNumber(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') makeCall(); }}
-                            />
-                            <Button onClick={makeCall}>📞 Gọi</Button>
-                        </div>
-                        <div className="flex flex-col space-y-2 my-2">
-                            <Label htmlFor="hotline-input">Số hotline gọi ra:</Label>
-                            <div className="flex space-x-2 my-2">
-                                <Input
-                                    id="hotline-input" type="tel" value={hotline}
-                                    style={{ backgroundColor: 'white' }}
-                                    onChange={(e) => setHotline(e.target.value)}
-                                    placeholder="Nhập số hotline..." maxLength="15"
-                                />
-                                <Button onClick={() => log(`Hotline đã cập nhật thành: ${hotline}`, 'success')}>Cập nhật</Button>
+        <>
+            <Script
+                src="https://cdn.omicrm.com/sdk/web/3.0.0/core.min.js"
+                onLoad={handleSDKLoad}
+            />
+            <div className="container mx-auto p-4 max-w-6xl bg-gray-50">
+                <header className="text-center mb-6">
+                    <h1 className="text-4xl font-bold text-gray-800">OMICall SDK v3 Demo</h1>
+                    <p className="text-lg text-gray-600">Ứng dụng gọi điện tích hợp OMICall SDK với Next.js & TailwindCSS</p>
+                </header>
+
+                <Card className="mb-6">
+                    <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                        <div className="flex flex-col items-center">
+                            <span className="text-sm font-medium text-gray-500">Trạng thái kết nối</span>
+                            <div className="flex items-center gap-2 mt-1">
+                                {getStatusIcon()}
+                                <span className="font-semibold text-gray-700">{connectionStatus.text}</span>
                             </div>
                         </div>
-                        <div className="mt-6">
-                            <h5 className="text-xl font-semibold text-blue-400 mb-2">Số gọi nhanh</h5>
-                            <div className="flex flex-wrap gap-2">
-                                <Button variant="secondary" onClick={() => setPhoneNumber('842471233474')}>842471233474</Button>
-                                <Button variant="secondary" onClick={() => setPhoneNumber('71308')}>71308 (Nhóm)</Button>
-                                <Button variant="secondary" onClick={() => setPhoneNumber('100')}>100 (Nội bộ)</Button>
-                            </div>
+                        <div className="flex flex-col items-center">
+                            <span className="text-sm font-medium text-gray-500">Số nội bộ</span>
+                            <span className="font-semibold text-gray-700 mt-1">{sipUser}</span>
                         </div>
-                    </div>
-                ) : (
-                    <div className="call-info text-center">
-                        <h3 className="text-2xl font-semibold text-blue-400 mb-4">Thông tin cuộc gọi</h3>
-                        <div className="space-y-1 mb-4">
-                            <p className="text-lg"><strong>Số gọi:</strong> <span>{callInfo.number}</span></p>
-                            <p className="text-lg"><strong>Trạng thái:</strong> <span>{callInfo.state}</span></p>
-                            <p className="text-lg"><strong>Thời gian:</strong> <span>{callInfo.duration}</span></p>
+                        <div className="flex flex-col items-center">
+                            <span className="text-sm font-medium text-gray-500">Số hotline</span>
+                            <span className="font-semibold text-gray-700 mt-1">{hotlineNumber}</span>
                         </div>
-                        <div className="flex justify-center gap-4 mt-6">
-                            <Button variant="secondary" onClick={toggleMute} className="rounded-full w-12 h-12 p-0 text-xl">{isMuted ? '🔊' : '🔇'}</Button>
-                            <Button variant="secondary" className="rounded-full w-12 h-12 p-0 text-xl">📹</Button>
-                            <Button variant="secondary" onClick={toggleHold} className="rounded-full w-12 h-12 p-0 text-xl">{isHeld ? '▶️' : '⏸️'}</Button>
-                            <Button variant="secondary" onClick={toggleRecording} className={`rounded-full w-12 h-12 p-0 text-xl ${isRecording ? 'bg-red-600 hover:bg-red-700' : ''}`}>
-                                {isRecording ? '⏹️' : '⏺️'}
-                            </Button>
-                            <Button variant="destructive" onClick={endCall} className="rounded-full w-12 h-12 p-0 text-xl">📴</Button>
-                        </div>
-                        {isRecording && (
-                            <div className="recording-inline flex items-center justify-center gap-2 mt-4 text-red-500 font-bold">
-                                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                                <span>Đang ghi:</span>
-                                <span>{recTimer}</span>
-                            </div>
+                    </CardContent>
+                </Card>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-6">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Gọi Điện</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="flex gap-2">
+                                    <Input
+                                        type="tel"
+                                        placeholder="Nhập số điện thoại..."
+                                        value={phoneNumber}
+                                        onChange={(e) => setPhoneNumber(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && makeCall()}
+                                        className="flex-grow"
+                                    />
+                                    <Button onClick={makeCall} disabled={!!callInfo}>
+                                        <Phone className="mr-2 h-4 w-4" /> Gọi
+                                    </Button>
+                                </div>
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium text-gray-600">Số gọi nhanh</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {['842471233474', '71308 (Nhóm)', '100 (Nội bộ)'].map(num => (
+                                            <Button key={num} variant="outline" onClick={() => {
+                                                const numberToCall = num.split(' ')[0];
+                                                setPhoneNumber(numberToCall);
+                                                makeCall();
+                                            }}>{num}</Button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {callInfo && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Thông tin cuộc gọi</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-medium">Số gọi:</span>
+                                        <span className="font-bold text-lg">{callInfo.number}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-medium">Trạng thái:</span>
+                                        <span className="text-blue-600">{callInfo.state}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-medium">Thời gian:</span>
+                                        <span className="font-mono text-lg">{callDuration}</span>
+                                    </div>
+
+                                    {isRecording && (
+                                        <div className="flex items-center gap-2 text-red-600">
+                                            <CircleDot className="h-4 w-4 animate-pulse" />
+                                            <span>Đang ghi âm: {recordingTime}</span>
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-4 border-t">
+                                        <Button variant={isMuted ? "destructive" : "outline"} onClick={toggleMute}>
+                                            {isMuted ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />} Tắt mic
+                                        </Button>
+                                        <Button variant={isHeld ? "secondary" : "outline"} onClick={toggleHold}>
+                                            {isHeld ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />} Giữ máy
+                                        </Button>
+                                        <Button variant="outline" onClick={toggleVideo} disabled={!callInfo?.isVideo}>
+                                            {isVideoOn ? <VideoOff className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />} Video
+                                        </Button>
+                                        <Button variant={isRecording ? "destructive" : "outline"} onClick={toggleRecording}>
+                                            <CircleDot className="mr-2 h-4 w-4" /> {isRecording ? 'Dừng' : 'Ghi âm'}
+                                        </Button>
+                                        <Button variant="destructive" className="col-span-2 md:col-span-3" onClick={endCall}>
+                                            <PhoneOff className="mr-2 h-4 w-4" /> Kết thúc
+                                        </Button>
+                                    </div>
+                                </CardContent>
+                            </Card>
                         )}
-                        <div className="audio-controls mt-6 p-4 border border-gray-700 rounded-lg">
-                            <h4 className="text-lg font-semibold text-blue-400 mb-3">Điều khiển âm thanh</h4>
-                            <div className="flex flex-col space-y-3">
-                                <div className="flex items-center space-x-2">
-                                    <Label className="w-32 text-left">Mic Level:</Label>
-                                    <div className="flex-1"><Progress value={micLevel} className="h-2" /></div>
-                                    <span className="w-12 text-right">{micLevel}%</span>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Label className="w-32 text-left">Mic Gain:</Label>
-                                    <Slider value={[micGain]} max={200} step={1} onValueChange={updateMicGain} className="w-full" />
-                                    <span className="w-12 text-right">{micGain}%</span>
-                                    <Button onClick={handleCalibrate}> {isCalibrating ? 'Đang chuẩn hóa...' : 'Chuẩn hóa'}</Button>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Label className="w-32 text-left">Volume:</Label>
-                                    <Slider value={[volume]} max={100} step={1} onValueChange={updateVolume} className="w-full" />
-                                    <span className="w-12 text-right">{volume}%</span>
-                                </div>
-                                <div className="flex flex-col space-y-2 mt-4">
-                                    <h5 className="font-semibold text-gray-300">Cài đặt nâng cao</h5>
-                                    {/* These are usually set on getUserMedia, so changing them mid-call has no effect. 
-                                        Logic to re-acquire media is complex and omitted for simplicity. */}
-                                    <div className="flex items-center space-x-2">
-                                        <Switch checked={audioSettings.echoCancellation} onCheckedChange={(c) => setAudioSettings(s => ({ ...s, echoCancellation: c }))} /><Label>Echo Cancellation</Label>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                        <Switch checked={audioSettings.noiseSuppression} onCheckedChange={(c) => setAudioSettings(s => ({ ...s, noiseSuppression: c }))} /><Label>Noise Suppression</Label>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                        <Switch checked={audioSettings.autoGainControl} onCheckedChange={(c) => setAudioSettings(s => ({ ...s, autoGainControl: c }))} /><Label>Auto Gain Control</Label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
-                )}
-                {callInfo.isCalling && callInfo.isVideo && (
-                    <div className="mt-8 relative w-full h-0 pb-[56.25%] bg-black rounded-lg overflow-hidden">
-                        <video ref={localVideoRef} autoPlay muted playsInline className="absolute top-0 left-0 w-full h-full object-cover"></video>
-                        <video ref={remoteVideoRef} autoPlay playsInline className="absolute bottom-4 right-4 w-36 h-24 object-cover border-2 border-white rounded-md"></video>
+
+                    <div className="flex flex-col gap-6">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Settings className="h-5 w-5" />
+                                    <span>Điều khiển âm thanh</span>
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Microphone</label>
+                                    <Select value={selectedMic} onValueChange={setSelectedMic}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Chọn microphone..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {audioDevices.microphones.map(mic => (
+                                                <SelectItem key={mic.deviceId} value={mic.deviceId}>{mic.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Loa</label>
+                                    <Select value={selectedSpeaker} onValueChange={setSelectedSpeaker}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Chọn loa..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {audioDevices.speakers.map(spk => (
+                                                <SelectItem key={spk.deviceId} value={spk.deviceId}>{spk.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Volume: {volume}%</label>
+                                    <Slider value={[volume]} onValueChange={(v) => setVolume(v[0])} max={100} step={1} />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Mic Gain: {micGain}%</label>
+                                    <Slider value={[micGain]} onValueChange={(v) => setMicGain(v[0])} max={200} step={1} />
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox id="echo-cancel" checked={audioSettings.echoCancellation} onCheckedChange={(c) => setAudioSettings(s => ({ ...s, echoCancellation: c }))} />
+                                    <label htmlFor="echo-cancel" className="text-sm font-medium">Khử vọng</label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox id="noise-reduction" checked={audioSettings.noiseSuppression} onCheckedChange={(c) => setAudioSettings(s => ({ ...s, noiseSuppression: c }))} />
+                                    <label htmlFor="noise-reduction" className="text-sm font-medium">Giảm nhiễu</label>
+                                </div>
+                                <div className="space-y-2 pt-2">
+                                    <label className="text-sm font-medium">Mic Level</label>
+                                    <Progress value={micLevel} />
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {isVideoOn && (
+                            <Card>
+                                <CardHeader><CardTitle>Video Call</CardTitle></CardHeader>
+                                <CardContent className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="text-sm text-center mb-2">Local</p>
+                                        <video ref={localVideoRef} autoPlay muted playsInline className="w-full bg-black rounded-md"></video>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-center mb-2">Remote</p>
+                                        <video ref={remoteVideoRef} autoPlay playsInline className="w-full bg-black rounded-md"></video>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
                     </div>
-                )}
-            </div>
-            <div className="logs w-full max-w-2xl mt-2">
-                <div className="log-container bg-gray-200 border rounded-lg p-4 h-52 overflow-y-auto text-sm">
-                    <h4>Nhật ký hoạt động</h4>
-                    {[...logMessages].reverse().map((msg, index) => ( // Reverse for chronological order display
-                        <div key={index} className="mb-1">{msg}</div>
-                    ))}
                 </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    <Card>
+                        <CardHeader><CardTitle>Nhật ký hoạt động</CardTitle></CardHeader>
+                        <CardContent>
+                            <div className="h-64 overflow-y-auto bg-gray-100 p-2 rounded-md text-sm font-mono">
+                                {logs.map((log, index) => (
+                                    <div key={index} className="flex items-start gap-2 mb-1">
+                                        <span className="text-gray-500">{log.timestamp}</span>
+                                        <div className="flex-shrink-0 pt-0.5">{getLogIcon(log.type)}</div>
+                                        <span className={`flex-grow ${log.type === 'error' ? 'text-red-600' : log.type === 'success' ? 'text-green-600' : 'text-gray-800'}`}>{log.message}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader><CardTitle>Ghi âm cuộc gọi</CardTitle></CardHeader>
+                        <CardContent>
+                            <div className="h-64 overflow-y-auto space-y-2">
+                                {recordings.length === 0 && <p className="text-sm text-gray-500">Chưa có bản ghi âm nào.</p>}
+                                {recordings.map((rec, index) => (
+                                    <div key={index} className="flex items-center gap-2 p-2 bg-gray-100 rounded-md">
+                                        <span className="flex-grow text-sm truncate">{rec.name}</span>
+                                        <audio controls src={rec.url} className="h-8"></audio>
+                                        <Button asChild variant="ghost" size="icon">
+                                            <a href={rec.url} download={rec.name}><Download className="h-4 w-4" /></a>
+                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => deleteRecording(rec.url)}>
+                                            <Trash2 className="h-4 w-4 text-red-500" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+                <audio ref={remoteAudioRef} playsInline style={{ display: 'none' }} />
             </div>
         </>
     );
 };
 
-export default OmicallInterface;
+export default OMICallClient;
