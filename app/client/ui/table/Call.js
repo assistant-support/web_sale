@@ -198,7 +198,7 @@ const OmicallInterface = () => {
         log('Đang kết nối tới tổng đài...');
         await sdkRef.current.register({ sipRealm: 'thanhnth', sipUser: '100', sipPassword: 'LCJw1HK8i2' });
     }, [log]);
-
+ 
 
     // --- Media and Audio Logic ---
     const initializeAudioDevices = useCallback(async () => {
