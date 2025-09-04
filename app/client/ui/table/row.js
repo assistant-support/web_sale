@@ -25,7 +25,7 @@ import CustomerHistory from './CustomerHistory';
 import CustomerAppointments from './CustomerAppointments';
 import CustomerInfo from './CustomerInfo';
 import { history_data } from '@/data/actions/get';
-import CallButton from './Call';
+import OMICallClient from './Call';
 import ZaloButton from './Zalo';
 
 
@@ -128,7 +128,7 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
             case 'appointments':
                 return <CustomerAppointments customer={customer} />;
             case 'calls':
-                return <CallButton />;
+                return <OMICallClient customer={customer} user={user} />;
             case 'zalo':
                 return <ZaloButton />;
             default:

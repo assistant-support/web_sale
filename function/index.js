@@ -92,7 +92,16 @@ const statusMap = {
 };
 
 export function getStatusInVietnamese(statusKey, defaultValue = 'Trạng thái không xác định') {
-    console.log(statusKey);
-    
     return statusMap[statusKey] || defaultValue;
+}
+
+export function maskPhoneNumber(phone) {
+    if (!phone || typeof phone !== 'string' || phone.length < 10) {
+        // Trả về số điện thoại gốc nếu nó quá ngắn để che
+        return phone || '';
+    }
+    const prefix = phone.slice(0, 2);
+    const suffix = phone.slice(-2);
+    const mask = 'xxxxxx';
+    return `${prefix}${mask}${suffix}`;
 }
