@@ -295,10 +295,8 @@ const OmicallInterface = () => {
     // --- UI Interaction Handlers (LOGIC ONLY) ---
 
     const makeCall = useCallback(async () => {
-        console.log(connectionStatus, isSdkReady, callInfo, phoneNumber, 2);
-
         if (!isSdkReady || connectionStatus !== 'connected') {
-            return log('SDK chưa sẵn sàng hoặc chưa kết nối tổng đài.', 'error');
+            return log(`SDK chưa sẵn sàng hoặc chưa kết nối tổng đài. ${connectionStatus}, ${isSdkReady}, ${JSON.stringify(callInfo)}, ${phoneNumber}`, 'error');
         }
         if (callInfo.isCalling) {
             return log('Đang trong cuộc gọi khác.', 'error');
