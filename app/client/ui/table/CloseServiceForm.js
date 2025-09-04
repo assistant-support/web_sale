@@ -123,15 +123,6 @@ export default function CloseServiceForm({ customerId, dispatchAction, actionSta
                         </div>
                     )}
 
-                    {/* --- Gắn Tag (tùy chọn) --- */}
-                    <div>
-                        <Label htmlFor="tags" className="font-semibold flex items-center gap-2">
-                            <Tag className="h-4 w-4" /> Gắn Tag (cho Upsell, Hậu phẫu)
-                        </Label>
-                        <Textarea id="tags" name="tags" placeholder="Ví dụ: hauphau_nangmui, upsell_combo,..." className="mt-2" rows={2} />
-                        <p className="text-xs text-muted-foreground mt-1">Nhập các tag cách nhau bằng dấu phẩy.</p>
-                    </div>
-
                     {/* --- Ghi chú (tùy chọn) --- */}
                     <div>
                         <Label htmlFor="notes" className="font-semibold flex items-center gap-2">

@@ -17,7 +17,7 @@ function TableSkeleton() {
 }
 export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
     const [selectedCustomers, setSelectedCustomers] = useState(new Map());
-  
+
     const [viewMode, setViewMode] = useState('manage');
     const handleActionComplete = () => {
         setSelectedCustomers(new Map());
@@ -82,6 +82,7 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                     viewMode={viewMode}
                     onToggleViewMode={toggleViewMode}
                     zalo={zaloData}
+                    service={service}
                 />
             </Suspense>
         </div>

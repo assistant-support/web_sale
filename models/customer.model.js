@@ -17,8 +17,10 @@ const FormSchema = new Schema(
         zaloname: String,
         assignees: { type: [{ user: { type: Schema.Types.ObjectId, ref: 'user' }, group: { type: String, enum: ['noi_khoa', 'ngoai_khoa'] }, assignedAt: { type: Date, default: Date.now } }], default: [] },
         pipelineStatus: {
-            type: String,
-            enum: ['new_unconfirmed', 'missing_info', 'valid_waiting_msg', 'duplicate_merged', 'rejected_immediate', 'valid', 'assigned', 'consulted', 'appointed', 'serviced', 'rejected'], // Mở rộng theo PDF
+            type: [String],
+            enum: ['new_unconfirmed_1', 'missing_info_1', 'not_valid_1', 'msg_success_2', 'msg_error_2', 'duplicate_merged_1', 'rejected_immediate_1', 'valid_1', 'noikhoa_3', 'ngoaikhoa_3', 'undetermined_3', 'consulted_pending_4', 'scheduled_unconfirmed_4', 'callback_4', 'not_interested_4',
+                'no_contact_4', 'confirmed_5', 'postponed_5', 'canceled_5', 'serviced_completed_6', 'serviced_in_progress_6', 'rejected_after_consult_6'
+            ],
             default: 'new_unconfirmed'
         },
         zaloPhase: { type: String, enum: ['welcome', 'nurturing', 'pre_surgery', 'post_surgery', 'longterm'], default: null },

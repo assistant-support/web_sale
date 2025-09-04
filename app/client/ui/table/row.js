@@ -1,11 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useActionState, useRef } from 'react';
-import Image from 'next/image';
-
 // --- Icon Imports ---
 import {
-    LayoutDashboard, Clock, User, CalendarCheck, X
+    LayoutDashboard, Clock, User, CalendarCheck, X, MessageCircle, Phone
 } from 'lucide-react';
 
 // --- Action & Data Function Imports ---
@@ -26,6 +24,9 @@ import CustomerPipeline from './CustomerPipeline';
 import CustomerHistory from './CustomerHistory';
 import CustomerAppointments from './CustomerAppointments';
 import CustomerInfo from './CustomerInfo';
+import { history_data } from '@/data/actions/get';
+import CallButton from './Call';
+import ZaloButton from './Zalo';
 
 
 // =============================================================
@@ -50,17 +51,44 @@ function CustomerDetailHeader({ customer, zalo }) {
 // =============================================================
 // == COMPONENT CHÍNH
 // =============================================================
-export default function CustomerRow({ customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, viewMode, zalo }) {
+export default function CustomerRow({ customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, zalo, service }) {
     const [isPopupOpen, setIsPopupOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('pipeline');
     const actionUI = useActionUI();
     const processedNoteState = useRef(null);
     const processedCloseState = useRef(null);
-
+    const [historyData, setHistoryData] = useState([]);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     // --- State cho các server actions ---
     const [noteState, addNoteActionFn, isNotePending] = useActionState(addCareNoteAction, null);
     const [closeState, closeServiceActionFn] = useActionState(closeServiceAction, null);
+    useEffect(() => {
+        const fetchHistoryForPopup = async () => {
+            if (!customer._id) return;
 
+            setIsHistoryLoading(true);
+            try {
+                // Sử dụng hàm history_data đã có
+                const result = await history_data(customer._id, 'customer');
+                if (result.success) {
+                    setHistoryData(result.data);
+                } else {
+                    // Bạn có thể dùng toast ở đây nếu muốn
+                    console.error("Failed to fetch history:", result.error);
+                    setHistoryData([]); // Đảm bảo dữ liệu cũ được xóa nếu có lỗi
+                }
+            } catch (error) {
+                console.error("Error fetching history:", error);
+                setHistoryData([]);
+            } finally {
+                setIsHistoryLoading(false);
+            }
+        };
+
+        if (isPopupOpen) {
+            fetchHistoryForPopup();
+        }
+    }, [isPopupOpen, customer._id])
     // Xử lý thông báo cho các actions
     useEffect(() => {
         if (noteState && noteState !== processedNoteState.current) {
@@ -93,11 +121,16 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
             case 'pipeline':
                 return <CustomerPipeline customer={customer} addNoteAction={addNoteActionFn} isNotePending={isNotePending} noteState={noteState} closeServiceAction={closeServiceActionFn} closeState={closeState} />;
             case 'history':
-                return <CustomerHistory customer={customer} showNoti={actionUI.showNoti} />;
+                return <CustomerHistory customer={customer} initialHistory={historyData}
+                    isLoading={isHistoryLoading} />;
             case 'info':
-                return <CustomerInfo customer={customer} onClose={() => setIsPopupOpen(false)} />;
+                return <CustomerInfo customer={customer} service={service} onClose={() => setIsPopupOpen(false)} />;
             case 'appointments':
                 return <CustomerAppointments customer={customer} />;
+            case 'calls':
+                return <CallButton />;
+            case 'zalo':
+                return <ZaloButton />;
             default:
                 return null;
         }
@@ -106,7 +139,7 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
     return (
         <>
             <actionUI.UI />
-            {isPopupOpen && <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
+            {isPopupOpen && <tr className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
 
             <TableRow data-state={isSelected ? "selected" : "unselected"} className="cursor-pointer">
                 <TableCell onClick={(e) => e.stopPropagation()} className="w-[60px]">
@@ -133,17 +166,20 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
                     </div>
                     <Separator orientation="vertical" className="hidden md:block h-full" />
                     <div className="w-full md:w-56 p-4 flex-shrink-0 flex md:flex-col gap-3 border-t md:border-t-0 md:border-l overflow-y-auto">
-                        <Button variant={activeTab === 'pipeline' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('pipeline')}><LayoutDashboard className="h-5 w-5" /><h6 className="text-xs">Lịch trình</h6></Button>
-                        <Button variant={activeTab === 'history' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('history')}><Clock className="h-5 w-5" /><h6 className="text-xs">Lịch sử</h6></Button>
-                        <Button variant={activeTab === 'info' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('info')}><User className="h-5 w-5" /><h6 className="text-xs">Thông tin</h6></Button>
-                        <Button variant={activeTab === 'appointments' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('appointments')}><CalendarCheck className="h-5 w-5" /><h6 className="text-xs">Lịch hẹn</h6></Button>
+                        <Button variant={activeTab === 'pipeline' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('pipeline')}><LayoutDashboard className="h-5 w-5" /><h6 style={{ color: activeTab === 'pipeline' ? 'white' : 'var(--text_primary)' }}>Lịch trình</h6></Button>
+                        <Button variant={activeTab === 'history' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('history')}><Clock className="h-5 w-5" /><h6 style={{ color: activeTab === 'history' ? 'white' : 'var(--text_primary)' }}>Lịch sử</h6></Button>
+                        <Button variant={activeTab === 'info' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('info')}><User className="h-5 w-5" /><h6 style={{ color: activeTab === 'info' ? 'white' : 'var(--text_primary)' }}>Thông tin</h6></Button>
+                        <Button variant={activeTab === 'appointments' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('appointments')}><CalendarCheck className="h-5 w-5" /><h6 style={{ color: activeTab === 'appointments' ? 'white' : 'var(--text_primary)' }}>Lịch hẹn</h6></Button>
+                        <Button variant={activeTab === 'calls' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('calls')}><Phone className="h-5 w-5" /><h6 style={{ color: activeTab === 'calls' ? 'white' : 'var(--text_primary)' }}>Cuộc gọi</h6></Button>
+                        <Button variant={activeTab === 'zalo' ? 'default' : 'outline'} className="flex-1 md:flex-none h-20 flex flex-col items-center justify-center gap-1 min-w-[100px]" onClick={() => setActiveTab('zalo')}><MessageCircle className="h-5 w-5" /><h6 style={{ color: activeTab === 'zalo' ? 'white' : 'var(--text_primary)' }}>Zalo</h6></Button>
+
                     </div>
                     <DialogClose className="absolute top-4 right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
                         <X className="h-4 w-4" />
                         <span className="sr-only">Close</span>
                     </DialogClose>
-                </DialogContent>
-            </Dialog>
+                </DialogContent >
+            </Dialog >
         </>
     );
 }

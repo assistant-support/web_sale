@@ -71,7 +71,7 @@ const useBreakpoint = () => {
 // =============================================================
 // == 2. COMPONENT BẢNG DỮ LIỆU CHÍNH
 // =============================================================
-export default function CustomerTable({ zalo, data = [], total = 0, user, selectedCustomers, setSelectedCustomers, viewMode }) {
+export default function CustomerTable({ zalo, data = [], service, total = 0, user, selectedCustomers, setSelectedCustomers, viewMode }) {
     console.log(data);
 
     const searchParams = useSearchParams();
@@ -172,7 +172,7 @@ export default function CustomerTable({ zalo, data = [], total = 0, user, select
                                     renderCellContent={renderCellContent}
                                     zalo={zalo}
                                     user={user}
-                                    viewMode={viewMode}
+                                    service={service}
                                 />
                             ))
                         ) : (

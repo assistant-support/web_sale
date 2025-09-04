@@ -178,8 +178,6 @@ export async function addRegistrationToAction(_previousState, inputData) {
 
         // TRƯỜNG HỢP 1: KHÁCH HÀNG ĐÃ TỒN TẠI -> CẬP NHẬT
         if (existingCustomer) {
-            console.log('[Action] Khách hàng đã tồn tại, gộp và cập nhật hồ sơ.');
-
             if (rawData.name && existingCustomer.name !== rawData.name) existingCustomer.name = rawData.name;
             if (rawData.address && existingCustomer.area !== rawData.address) existingCustomer.area = rawData.address;
             if (rawData.email && existingCustomer.email !== rawData.email) existingCustomer.email = rawData.email;
@@ -191,22 +189,16 @@ export async function addRegistrationToAction(_previousState, inputData) {
                 createBy: user?.id || '68b0af5cf58b8340827174e0',
                 step: 1
             });
-
+            existingCustomer.pipelineStatus[0] = 'duplicate_merged_1';
+            existingCustomer.pipelineStatus[1] = 'duplicate_merged_1';
             await existingCustomer.save();
             revalidateData();
-
-            // Chạy ngầm tác vụ gửi thông báo
             sendUpdateNotification(existingCustomer, rawData, 'updated', isManualEntry).catch(err => console.error('[Action] Lỗi ngầm khi gửi thông báo cập nhật:', err));
-
             return { ok: true, message: 'Số điện thoại đã tồn tại. Hồ sơ đã được cập nhật với thông tin mới.', type: 'merged' };
         }
 
         // TRƯỜNG HỢP 2: TẠO KHÁCH HÀNG MỚI
         console.log('[Action] Tạo khách hàng mới.');
-
-        const isMissingInfo = !rawData.service || !rawData.email || !rawData.address;
-        const pipelineStatus = isMissingInfo ? 'missing_info' : 'new_unconfirmed';
-
         const newCustomerData = {
             name: rawData.name,
             phone: normalizedPhone,
@@ -214,7 +206,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
             area: rawData.address || '',
             tags: rawData.service ? [rawData.service] : [],
             bd: birthDate,
-            pipelineStatus: pipelineStatus,
+            pipelineStatus: ['new_unconfirmed_1', 'new_unconfirmed_1'],
             care: [{ content: 'Khách hàng được nhận hồ sơ vào hệ thống', createBy: user?.id || '68b0af5cf58b8340827174e0', step: 1 }],
             source: rawData.source,
             sourceDetails: rawData.sourceName,
@@ -224,7 +216,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
         const newCustomer = new Customer(newCustomerData);
         await newCustomer.save();
         revalidateData();
-        console.log(`[Action] Đã lưu khách hàng mới với trạng thái: ${pipelineStatus}. Bắt đầu các tác vụ nền.`);
+        console.log(`[Action] Đã lưu khách hàng mới với trạng thái: new_unconfirmed_1. Bắt đầu các tác vụ nền.`);
 
         // Chạy ngầm các tác vụ phụ
         runWorkflowTasks(newCustomer).catch(err => console.error('[Action] Lỗi trong tác vụ nền (workflow):', err));
@@ -301,7 +293,6 @@ async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
         const title = type === 'created'
             ? `📅 Đăng ký mới từ ${isManualEntry ? 'nhập liệu thủ công' : `Form "${rawData.sourceName}"`}`
             : `🔄 Cập nhật hồ sơ từ ${isManualEntry ? 'nhập liệu thủ công' : `Form "${rawData.sourceName}"`}`;
-
         const message = `${title}
 -----------------------------------
 Họ và tên: ${customer.name}

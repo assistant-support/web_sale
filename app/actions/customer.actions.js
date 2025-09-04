@@ -142,9 +142,6 @@ export async function revalidateData() {
 }
 
 export async function updateCustomerInfo(previousState, formData) {
-    console.log(formData);
-
-    // Thêm bước kiểm tra để đảm bảo formData tồn tại
     if (!formData) {
         return { success: false, error: 'Không nhận được dữ liệu từ form.' };
     }
@@ -153,22 +150,30 @@ export async function updateCustomerInfo(previousState, formData) {
     if (!id) return { success: false, error: 'Thiếu ID khách hàng.' };
 
     try {
-        await connectDB(); // Giả định hàm kết nối DB của bạn
+        await connectDB();
 
-        // Chỉ lấy những trường được phép chỉnh sửa từ form
+        // Lấy các trường cơ bản từ form
         const payload = {
             name: formData.get('name'),
             email: formData.get('email'),
             area: formData.get('area'),
             bd: formData.get('bd') ? new Date(formData.get('bd')) : null,
+            // --- MỚI: Xử lý trường tags ---
+            // formData.getAll() sẽ lấy tất cả giá trị có key là 'tags' thành một mảng
+            tags: formData.getAll('tags'),
         };
 
-        // Lọc ra các giá trị null hoặc undefined để không ghi đè dữ liệu cũ không cần thiết
-        Object.keys(payload).forEach(key => (payload[key] === null || payload[key] === undefined) && delete payload[key]);
+        // Lọc ra các giá trị null hoặc undefined
+        Object.keys(payload).forEach(key => {
+            const value = payload[key];
+            if (value === null || value === undefined || value === '') {
+                delete payload[key];
+            }
+        });
 
         await Customer.findByIdAndUpdate(id, payload);
 
-        revalidateData(); // Giả định hàm revalidate của bạn
+        revalidateData();
         return { success: true, message: 'Cập nhật thông tin thành công!' };
     } catch (error) {
         console.error("Lỗi khi cập nhật khách hàng:", error);

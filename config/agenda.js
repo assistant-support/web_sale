@@ -172,7 +172,13 @@ async function genericJobProcessor(job) {
                 }
                 break;
             case 'message':
-                await Customer.updateOne({ _id: customerId }, { $set: { pipelineStatus: 'consulted' } });
+                const newStatus = response?.status ? 'msg_success_2' : 'msg_error_2';
+                await Customer.updateOne({ _id: customerId }, {
+                    $set: {
+                        'pipelineStatus.0': newStatus,
+                        'pipelineStatus.2': newStatus
+                    }
+                });
                 triggerRevalidation();
                 break;
             case 'findUid':
@@ -182,12 +188,17 @@ async function genericJobProcessor(job) {
                     customer.uid = [{ zalo: zaloId, uid: normalizeUid(foundUid), isFriend: 0, isReques: 0 }];
                     customer.zaloavt = response.content?.data?.avatar || null;
                     customer.zaloname = response.content?.data?.zalo_name || null;
-                    customer.pipelineStatus = 'valid';
+                    customer.pipelineStatus[0] = 'valid_1';
+                    customer.pipelineStatus[1] = 'valid_1';
                     await customer.save();
                     triggerRevalidation();
-                    console.log(`[Job findUid] Thành công. Kích hoạt workflow gửi tin nhắn (WF2): ${MESSAGE_WORKFLOW_ID}`);
-                    setImmediate(() => { attachWorkflow(customerId, MESSAGE_WORKFLOW_ID).catch(console.error); });
+                } else {
+                    customer.pipelineStatus[0] = 'valid_1';
+                    customer.pipelineStatus[1] = 'valid_1';
+                    await customer.save();
+                    triggerRevalidation();
                 }
+                setImmediate(() => { attachWorkflow(customerId, MESSAGE_WORKFLOW_ID).catch(console.error); });
                 break;
         }
         await logCareHistory(customerId, jobName, 'success');
@@ -211,6 +222,7 @@ async function allocationJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'allocation';
     console.log(`[Job ${jobName}] Bắt đầu xử lý cho KH: ${customerId}`);
+    let newStatus = 'undetermined_3'
     try {
         const customer = await Customer.findById(customerId);
         if (!customer) throw new Error(`Không tìm thấy KH ID: ${customerId}`);
@@ -226,7 +238,6 @@ async function allocationJobProcessor(job) {
 
         const zaloAccountId = customer.uid[0].zalo;
         let assignmentsMade = 0;
-
         for (const group of requiredGroups) {
             const isAlreadyAssigned = customer.assignees.some(a => a.group === group);
             if (isAlreadyAssigned) {
@@ -238,6 +249,16 @@ async function allocationJobProcessor(job) {
                 customer.assignees.push({ user: nextSale._id, group: group, assignedAt: new Date() });
                 assignmentsMade++;
                 console.log(`[Job ${jobName}] Đã gán KH ${customerId} cho Sale ${nextSale._id} nhóm ${group}.`);
+
+                // ==========================================================
+                // == THÊM LOGIC CẬP NHẬT newStatus TẠI ĐÂY ==
+                if (group === 'noi_khoa') {
+                    newStatus = 'noikhoa_3';
+                } else if (group === 'ngoai_khoa') {
+                    newStatus = 'ngoaikhoa_3';
+                }
+                // ==========================================================
+
             } else {
                 console.log(`[Job ${jobName}] Không tìm thấy Sale phù hợp cho nhóm ${group}.`);
             }
@@ -248,7 +269,12 @@ async function allocationJobProcessor(job) {
             await customer.save();
             triggerRevalidation();
         }
-
+        await Customer.updateOne({ _id: customerId }, {
+            $set: {
+                'pipelineStatus.0': newStatus,
+                'pipelineStatus.2': newStatus
+            }
+        });
         await logCareHistory(customerId, jobName, 'success');
         await updateStepStatus(cwId, jobName, 'completed', customerId);
     } catch (error) {
@@ -266,7 +292,7 @@ async function bellJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'bell';
     console.log(`[Job ${jobName}] Bắt đầu gửi thông báo cho KH: ${customerId}`);
-   try {
+    try {
         const customer = await Customer.findById(customerId).populate('care.createBy', 'name').lean();
         if (!customer) throw new Error(`Không tìm thấy KH ID: ${customerId}`);
 
@@ -291,15 +317,15 @@ async function bellJobProcessor(job) {
 
         // BƯỚC 3: Gọi hàm format với map chứa tên đã tra cứu
         const careHistoryMessage = formatCareHistoryForNotification(customer.care, idToNameMap);
-        
+
         const assignedUsers = await User.find({ _id: { $in: customer.assignees.map(a => a.user) } }).select('name').lean();
         const assignedNames = assignedUsers.map(u => u.name).join(', ');
         const finalMessage = `🔔 KHÁCH HÀNG MỚI\n` + `--------------------\n` + `👤 Tên: ${customer.name}\n` + `📞 SĐT: ${customer.phone}\n` + `👨‍💼 NV được gán: ${assignedNames || 'Chưa có'}\n` + `--------------------\n` + `LỊCH SỬ CHĂM SÓC:\n${careHistoryMessage}`;
-        
+
         const success = await sendGP(finalMessage);
 
         if (!success) throw new Error('Gửi thông báo qua Google Apps Script thất bại');
-        
+
         console.log(`[Job ${jobName}] Đã gửi thông báo thành công cho KH ${customerId}.`);
         await logCareHistory(customerId, jobName, 'success');
         await updateStepStatus(cwId, jobName, 'completed', customerId);
@@ -531,12 +557,12 @@ function formatCareHistoryForNotification(careArray, idToNameMap = new Map()) {
 
         groupedByStep[step].forEach(entry => {
             const match = entry.content.match(manualAddRegex);
-            
+
             // Trường hợp 1: Content khớp với mẫu "thêm thủ công"
             if (match && match[1]) {
                 const userId = match[1];
                 const creatorName = idToNameMap.get(userId);
-                
+
                 if (creatorName) {
                     // Nếu tìm thấy tên, thay thế ID bằng tên và không thêm "(bởi...)"
                     message += `+ Khách hàng được thêm thủ công bởi ${creatorName}.\n`;
@@ -548,7 +574,7 @@ function formatCareHistoryForNotification(careArray, idToNameMap = new Map()) {
                     }
                     message += `+ ${entry.content} (bởi ${userName})\n`;
                 }
-            } 
+            }
             // Trường hợp 2: Content thông thường
             else {
                 let userName = 'Hệ thống';
