@@ -145,8 +145,6 @@ export default function CustomerAppointments({ customer }) {
     const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const router = useRouter();
-    console.log(appointments);
-
     const getStatusInfo = useCallback((status) => {
         switch (status) {
             case 'completed':

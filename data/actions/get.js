@@ -43,19 +43,7 @@ export async function history_data(id, type) {
     try {
         await connectDB();
         const filter = {};
-        if (id && type) {
-            if (type === 'student') {
-                filter.student = id;
-            } else {
-                filter.customer = id;
-            }
-        } else if (id || type) {
-            // Nếu chỉ có 1 trong 2, trả về lỗi hoặc mảng rỗng
-            return { success: false, error: "Thiếu ID hoặc loại đối tượng." };
-        }
-        // Nếu không có id và type, sẽ lấy tất cả logs
 
-        // Lấy thông tin giới hạn Zalo
         const zaloAccounts = await Zalo.find({}).lean();
         const zaloLimits = {
             hourly: zaloAccounts.reduce((sum, account) => sum + (account.rateLimit?.hourly || account.rateLimitPerHour || 0), 0),

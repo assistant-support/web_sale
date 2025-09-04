@@ -7,7 +7,7 @@ export default async function connectGsheet() {
             client_email: process.env.GOOGLE_CLIENT_EMAIL,
             private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
         },
-        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+        scopes: ['https://www.googleapis.com/auth/drive'],
     });
-    return google.sheets({ version: 'v4', auth });
+    return google.drive({ version: 'v3', auth });
 }

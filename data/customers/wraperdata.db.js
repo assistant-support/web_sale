@@ -1,38 +1,40 @@
 'use server'
 
-import { getCustomersAll } from './handledata.db';
 import { revalidateTag } from 'next/cache';
 import Customer from '@/models/customer.model';
-import { uploadImageToDrive } from '@/function/drive/image';
+// THAY ĐỔI: Import hàm upload file chung từ file action trên Canvas
+import { uploadFileToDrive } from '@/function/drive/image';
 import checkAuthToken from '@/utils/checktoken';
+import connectDB from '@/config/connectDB';
+import { revalidateData } from '@/app/actions/customer.actions';
 
 
 export async function customer_data(params = {}) {
+    // Giữ nguyên hàm này
     return await getCustomersAll();
 }
 
 export async function reloadCustomers() {
+    // Giữ nguyên hàm này
     revalidateTag('customers');
 }
 
 // =============================================================
-// == ACTION CHO BƯỚC 6 - PHIÊN BẢN CHUẨN THEO SCHEMA
+// == ACTION CHO BƯỚC 6 - CHỐT DỊCH VỤ (Đã cập nhật)
 // =============================================================
 export async function closeServiceAction(prevState, formData) {
     const session = await checkAuthToken();
-    if (!session) {
+    if (!session?.id) {
         return { success: false, error: "Yêu cầu đăng nhập." };
     }
 
-    // 1. Lấy dữ liệu từ FormData
     const customerId = formData.get('customerId');
-    const subStatus = formData.get('status'); // 'completed', 'in_progress', 'rejected'
+    const subStatus = formData.get('status');
     const revenue = formData.get('revenue');
     const tagsInput = formData.get('tags');
     const notes = formData.get('notes');
     const invoiceImage = formData.get('invoiceImage');
 
-    // 2. Validate dữ liệu
     if (!customerId || !subStatus) {
         return { success: false, error: "Trạng thái và ID khách hàng là bắt buộc." };
     }
@@ -41,53 +43,55 @@ export async function closeServiceAction(prevState, formData) {
     }
 
     try {
-        let invoiceDriveId = null;
+        await connectDB();
+        let uploadedFile = null;
 
-        // 3. Tải ảnh lên Google Drive
         if (invoiceImage && invoiceImage.size > 0) {
-            invoiceDriveId = await uploadImageToDrive(invoiceImage, process.env.GOOGLE_DRIVE_INVOICE_FOLDER_ID);
-            if (!invoiceDriveId) {
+            const folderId = process.env.GOOGLE_DRIVE_INVOICE_FOLDER_ID; // Lấy ID thư mục từ .env
+            // SỬ DỤNG HÀM MỚI: Tải file lên và nhận về object { id, webViewLink }
+            uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
+            if (!uploadedFile?.id) {
                 return { success: false, error: "Tải ảnh lên không thành công. Vui lòng thử lại." };
             }
         }
 
-        // 4. Ánh xạ sang pipelineStatus chính từ schema
-        const pipelineStatus = subStatus === 'rejected' ? 'rejected' : 'serviced';
+        const statusMap = {
+            completed: 'serviced_completed_6',
+            in_progress: 'serviced_in_progress_6',
+            rejected: 'rejected_after_consult_6'
+        };
+        const newPipelineStatus = statusMap[subStatus];
 
-        // Chuẩn bị object serviceDetails để lưu thông tin chi tiết
+        if (!newPipelineStatus) {
+            return { success: false, error: "Trạng thái chốt dịch vụ không hợp lệ." };
+        }
+
         const serviceDetails = {
-            status: subStatus, // 'completed', 'in_progress', hoặc 'rejected'
+            status: subStatus,
             revenue: revenue ? parseFloat(revenue) : 0,
-            invoiceDriveId: invoiceDriveId,
+            // CẬP NHẬT: Lưu trữ ID của file từ object trả về
+            invoiceDriveId: uploadedFile ? uploadedFile.id : null,
             notes: notes,
             closedAt: new Date(),
-            closedBy: session.user._id,
-            // Lưu các tag tùy chỉnh vào đây để không ảnh hưởng đến trường tags ObjectId
+            closedBy: session.id,
             customTags: tagsInput ? tagsInput.split(',').map(tag => tag.trim()).filter(Boolean) : [],
         };
 
-        // Tạo care note để ghi log
         const logContent = `[Chốt dịch vụ] Trạng thái: ${subStatus}. Ghi chú: ${notes || 'Không có'}`;
         const careNote = {
-            content: logContent,
-            createBy: session.user._id,
-            createAt: new Date(),
-            step: 6
+            content: logContent, createBy: session.id, createAt: new Date(), step: 6
         };
 
-        // 5. Cập nhật vào cơ sở dữ liệu
         await Customer.findByIdAndUpdate(customerId, {
             $set: {
-                pipelineStatus: pipelineStatus,
-                serviceDetails: serviceDetails // Thêm object mới này vào document
+                'pipelineStatus.0': newPipelineStatus,
+                'pipelineStatus.6': newPipelineStatus,
+                serviceDetails: serviceDetails
             },
-            $push: {
-                care: careNote // Thêm log vào mảng care
-            }
+            $push: { care: careNote }
         });
 
-        // 6. Revalidate và trả về kết quả
-        revalidateTag('customers');
+        revalidateData();
         return { success: true, message: "Chốt dịch vụ thành công!" };
 
     } catch (error) {
@@ -96,87 +100,60 @@ export async function closeServiceAction(prevState, formData) {
     }
 }
 
+// =============================================================
+// == ACTION CHO BƯỚC 4 - LƯU KẾT QUẢ CUỘC GỌI (Đã cập nhật)
+// =============================================================
 export async function saveCallResultAction(prevState, formData) {
     const session = await checkAuthToken();
-    if (!session?.user?._id) {
+    if (!session?.id) {
         return { success: false, error: "Yêu cầu đăng nhập." };
     }
 
-    // 1. Lấy dữ liệu từ FormData
     const customerId = formData.get('customerId');
-    const newStatus = formData.get('status'); // e.g., 'consulted_pending_4'
+    const newStatus = formData.get('status');
     const callDuration = formData.get('callDuration');
     const callStartTime = formData.get('callStartTime');
     const recordingFile = formData.get('recordingFile');
-    const recordingFileName = formData.get('recordingFileName');
+    const recordingFileName = formData.get('recordingFileName'); // Giữ lại để trả về cho UI nếu cần
 
-    // 2. Validate dữ liệu
     if (!customerId || !newStatus || !recordingFile || recordingFile.size === 0) {
         return { success: false, error: "Thiếu thông tin khách hàng, trạng thái hoặc file ghi âm." };
     }
 
     try {
-        // 3. Tải file ghi âm lên Google Drive
-        // Sử dụng một tên chung cho thư mục chứa ghi âm của case
-        const requirementNameForRecordings = "Ghi âm cuộc gọi";
+        await connectDB();
 
-        console.log(`Bắt đầu tải file ghi âm: ${recordingFileName} cho khách hàng ID: ${customerId}`);
-
-        const uploadedFile = await uploadCaseAny({
-            caseId: customerId,
-            requirementName: requirementNameForRecordings,
-            name: recordingFileName,
-            file: recordingFile,
-        });
+        // SỬ DỤNG HÀM MỚI: Tải file ghi âm lên
+        const folderId = process.env.GOOGLE_DRIVE_RECORDING_FOLDER_ID; // Cần thêm biến này
+        const uploadedFile = await uploadFileToDrive(recordingFile, folderId);
 
         if (!uploadedFile?.id) {
             throw new Error("Tải file ghi âm lên Drive thất bại.");
         }
 
-        // (Tùy chọn) Mở quyền xem file để dễ dàng truy cập
-        const permissions = await setFilePermissionAnyReader(uploadedFile.id);
-        const driveWebViewLink = permissions.webViewLink;
-
-        // 4. Chuẩn bị dữ liệu để cập nhật DB
+        // CẬP NHẬT: Lấy link trực tiếp từ kết quả trả về của hàm upload
         const callStartFormatted = new Date(callStartTime).toLocaleTimeString('vi-VN');
-        const logContent = `Đã gọi ${callDuration} lúc ${callStartFormatted}. Trạng thái: ${newStatus}. Ghi âm: ${driveWebViewLink || 'đã lưu'}`;
+        const logContent = `Đã gọi ${callDuration} lúc ${callStartFormatted}. Trạng thái: ${newStatus}. Ghi âm: ${uploadedFile.webViewLink || 'đã lưu'}`;
 
         const careNote = {
-            content: logContent,
-            createBy: session.user._id,
-            createAt: new Date(),
-            step: 4 // Theo yêu cầu
+            content: logContent, createBy: session.id, createAt: new Date(), step: 4
         };
 
-        // 5. Cập nhật Customer trong MongoDB
-        // Theo yêu cầu: cập nhật pipelineStatus[0] và pipelineStatus[3] (index 3 cho step 4)
-        // Lưu ý: Cập nhật 2 index có thể là logic đặc thù. Nếu chỉ cần cập nhật trạng thái của bước 4, 
-        // bạn chỉ cần $set cho "pipelineStatus.3". Tôi sẽ làm theo yêu cầu là cập nhật 2 index.
-        const updateResult = await Customer.findByIdAndUpdate(customerId, {
+        await Customer.findByIdAndUpdate(customerId, {
             $set: {
-                // Giả định pipelineStatus là một mảng có ít nhất 4 phần tử
-                // Cập nhật trạng thái cho bước 4 (tại index 3)
-                "pipelineStatus.3": newStatus,
+                'pipelineStatus.0': newStatus,
+                'pipelineStatus.3': newStatus,
             },
-            $push: {
-                care: careNote
-            }
-        }, { new: true });
+            $push: { care: careNote }
+        });
 
-        if (!updateResult) {
-            return { success: false, error: "Không tìm thấy khách hàng để cập nhật." };
-        }
-
-        // 6. Revalidate và trả về kết quả
-        revalidateTag('customers');
-        revalidateTag(`customer_${customerId}`); // Revalidate cho trang chi tiết khách hàng
-
+        revalidateData();
         return {
             success: true,
             message: "Đã lưu kết quả cuộc gọi thành công!",
             newRecording: {
                 name: recordingFileName,
-                driveLink: driveWebViewLink,
+                driveLink: uploadedFile.webViewLink,
                 status: 'uploaded'
             }
         };
@@ -186,3 +163,4 @@ export async function saveCallResultAction(prevState, formData) {
         return { success: false, error: `Đã xảy ra lỗi phía máy chủ: ${error.message}` };
     }
 }
+

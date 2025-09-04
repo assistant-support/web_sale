@@ -72,8 +72,6 @@ const useBreakpoint = () => {
 // == 2. COMPONENT BẢNG DỮ LIỆU CHÍNH
 // =============================================================
 export default function CustomerTable({ zalo, data = [], service, total = 0, user, selectedCustomers, setSelectedCustomers, viewMode }) {
-    console.log(data);
-
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { replace } = useRouter();

@@ -264,18 +264,11 @@ async function allocationJobProcessor(job) {
             }
         }
 
-        if (assignmentsMade > 0) {
-            customer.pipelineStatus = 'assigned';
-            await customer.save();
-            triggerRevalidation();
-        }
-        await Customer.updateOne({ _id: customerId }, {
-            $set: {
-                'pipelineStatus.0': newStatus,
-                'pipelineStatus.2': newStatus
-            }
-        });
-        await logCareHistory(customerId, jobName, 'success');
+        customer.pipelineStatus[0] = newStatus;
+        customer.pipelineStatus[3] = newStatus;
+        await customer.save();
+        triggerRevalidation();
+        await logCareHistory(customerId, jobName, newStatus == 'undetermined_3' ? 'failed' : 'success');
         await updateStepStatus(cwId, jobName, 'completed', customerId);
     } catch (error) {
         console.error(`[Job ${jobName}] Lỗi nghiêm trọng: "${error.message}"`);
@@ -516,7 +509,6 @@ async function findNextSaleForGroup(group, zaloAccountId) {
         return null;
     }
     const candidateSales = await User.find({
-        _id: { $in: zaloAccount.roles },
         role: 'Sale',
         group: group
     }).sort({ _id: 1 }).lean();

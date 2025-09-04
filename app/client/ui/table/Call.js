@@ -181,12 +181,22 @@ export default function OMICallClient({ customer, user }) {
 
     useEffect(() => {
         return () => {
-            sdkRef.current?.destroy();
+            if (sdkRef.current && typeof sdkRef.current.destroy === 'function') {
+                console.log("OMICall SDK is being destroyed.");
+                sdkRef.current.destroy();
+            }
             clearInterval(callDurationIntervalRef.current);
             clearInterval(audioMonitoringIntervalRef.current);
-            clearInterval(recordingTimerRef.current);
-            if (audioContextRef.current?.state !== 'closed') {
-                audioContextRef.current?.close();
+
+            // Đóng audio context nếu nó tồn tại và chưa đóng
+            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                audioContextRef.current.close();
+            }
+
+            // Gỡ script khỏi body (nếu cần)
+            const scriptElement = document.getElementById('omicall-sdk-script');
+            if (scriptElement) {
+                document.body.removeChild(scriptElement);
             }
         };
     }, []);

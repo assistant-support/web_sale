@@ -19,7 +19,7 @@ function SubmitButton({ text = 'Xác nhận', disabled = false }) {
     const { pending } = useFormStatus();
     return (
         <button type="submit" disabled={pending || disabled} className='btn_s_b'>
-            <h5>{text}</h5>
+            <h5 style={{ color: 'white' }}>{text}</h5>
         </button>
     );
 }

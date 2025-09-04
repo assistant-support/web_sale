@@ -147,6 +147,12 @@ export default function CustomerPipeline({
                     const color = status === 'completed' ? 'text-green-500' : (isCurrent ? 'text-blue-500' : 'text-slate-400');
                     const notesForStage = customer.care.filter(note => note.step === stage.id);
                     const statusChip = stage.getStatus(customer);
+                    console.log(notesForStage);
+                    
+                    if (stage.id === 6) {
+                        console.log(notesForStage);
+                    }
+
 
                     return (
                         <AccordionItem key={stage.id} value={`item-${index}`}>
@@ -172,19 +178,16 @@ export default function CustomerPipeline({
                                         : <h6 className='text-center text-muted-foreground p-4'>Chưa có hoạt động.</h6>
                                     }
                                     {stage.id === 6 ? (
-                                        !customer.serviceDetails?.status ? (
+                                        <>
+                                            {notesForStage.map(note => <CareNoteItem key={note._id} note={note} />)}
                                             <div className="border-t mt-3 pt-3">
                                                 <CloseServiceForm
-                                                    customerId={customer._id}
+                                                    customer={customer}
                                                     dispatchAction={closeServiceAction}
                                                     actionState={closeState}
                                                 />
                                             </div>
-                                        ) : (
-                                            <div className="text-center p-4 border-t mt-3 text-sm text-green-700 bg-green-50 rounded-md">
-                                                Khách hàng đã được chốt dịch vụ.
-                                            </div>
-                                        )
+                                        </>
                                     ) : (
                                         <AddNoteForm
                                             customerId={customer._id}

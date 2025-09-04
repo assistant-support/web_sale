@@ -22,8 +22,6 @@ import { Separator } from "@/components/ui/separator";
 // =============================================================
 
 export default function CustomerHistory({ initialHistory = [], isLoading = true }) {
-    console.log(initialHistory);
-
     const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'success', 'error'
     const [dateRange, setDateRange] = useState(undefined);
 
@@ -52,7 +50,7 @@ export default function CustomerHistory({ initialHistory = [], isLoading = true 
     }, [initialHistory, statusFilter, dateRange]);
 
     return (
-        <div className="p-4 h-full flex flex-col">
+        <div className="p-4 h-full flex flex-col flex-1 scroll">
             {/* --- PHẦN HEADER CỐ ĐỊNH --- */}
             <div className="flex-shrink-0">
                 <h4 className="text_w_600">Lịch sử tương tác</h4>

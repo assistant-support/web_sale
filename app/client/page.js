@@ -38,8 +38,7 @@ export default async function Page({ searchParams }) {
         )
     }
     const reversedLabel = [...label].reverse();
-    console.log(initialResult);
-    
+
     return (
         <Suspense fallback={<PageSkeleton />}>
             <CustomerView
