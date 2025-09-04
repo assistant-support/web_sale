@@ -4,7 +4,6 @@ import { Navbar } from "../nav";
 
 export default async function AdminPage() {
     const data = await customer_data();
-
     return (
         <>
             <Navbar />

@@ -9,8 +9,7 @@ const navLinks = [
     { name: 'Nguồn data', href: '/admin/data-reception', icon: Share2 },
     { name: 'Hành dộng', href: '/admin/action', icon: BarChart3 },
     { name: 'Phân bổ', href: '/admin/allocation', icon: GitBranch },
-    { name: 'Phân tích nguồn', href: '/admin/source-analysis', icon: LayoutDashboard },
-    { name: 'KPI Nhân viên', href: '/admin/staff-kpi', icon: Users },
+    { name: 'Chăm sóc', href: '/admin/call', icon: Users },
     { name: 'Thống kê Lịch hẹn', href: '/admin/appointment-stats', icon: CalendarClock },
     { name: 'Doanh thu', href: '/admin/revenue', icon: DollarSign },
 ];

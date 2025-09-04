@@ -47,6 +47,14 @@ const FormSchema = new Schema(
         isAutoAssigned: {
             type: Boolean,
             default: false
+        },
+        serviceDetails: {
+            status: { type: String, enum: ['new', 'in_progress', 'completed'], default: 'new' },
+            notes: { type: String, trim: true },
+            closedAt: { type: Date },
+            closedBy: { type: Schema.Types.ObjectId, ref: 'user' },
+            invoiceDriveId: { type: String },
+            revenue: { type: Number, default: 0 },
         }
     },
     { timestamps: false, versionKey: false }

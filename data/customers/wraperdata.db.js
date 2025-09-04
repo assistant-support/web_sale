@@ -7,6 +7,7 @@ import { uploadFileToDrive } from '@/function/drive/image';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
 import { revalidateData } from '@/app/actions/customer.actions';
+import { getCustomersAll } from '@/data/customers/handledata.db';
 
 
 export async function customer_data(params = {}) {
