@@ -58,6 +58,7 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                                         variants={variant}
                                         users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
                                         workflows={workflow}
+                                        auth={user[0]}
                                     />
                                 )}
                                 <ActionHistory history={historySchedules} />

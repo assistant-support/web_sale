@@ -119,7 +119,7 @@ function MessageEditor({ value, onChange, variants }) {
 }
 
 // Form để chọn và thực hiện hành động hàng loạt.
-function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, labels, variants, users, workflows }) {
+function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentType, labels, variants, users, workflows }) {
     const [actionType, setActionType] = useState('findUid');
     const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
     const [isLabelMenuOpen, setIsLabelMenuOpen] = useState(false);
@@ -137,16 +137,18 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
 
     const actionOptions = useMemo(() => {
         const baseActions = [
-            { value: 'findUid', name: 'Tìm kiếm UID' },
             { value: 'sendMessage', name: 'Gửi tin nhắn Zalo' },
-            { value: 'assignRole', name: 'Gán người phụ trách' },
             { value: 'checkFriend', name: 'Kiểm tra bạn bè' },
             { value: 'addFriend', name: 'Gửi kết bạn' },
             { value: 'workflow', name: 'Chạy theo Workflow' }
         ];
+        if (!auth.role.includes('Sale')) {
+            baseActions.push({ value: 'assignRole', name: 'Gán người phụ trách' });
+            baseActions.push({ value: 'assignRole', name: 'Gán người phụ trách' });
+        }
         const customerActions = [];
         return !currentType ? [...baseActions, ...customerActions] : baseActions;
-    }, [currentType]);
+    }, [currentType, auth]);
 
     const isScheduleAction = useMemo(() => ['findUid', 'sendMessage', 'checkFriend', 'addFriend'].includes(actionType), [actionType]);
     const isAssignAction = useMemo(() => actionType === 'assignRole', [actionType]);
@@ -294,7 +296,7 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
 }
 
 // Component chính để xử lý hành động hàng loạt cho khách hàng.
-export default function BulkActions({ selectedCustomers, onActionComplete, labels = [], variants = [], users = [], workflows = [] }) {
+export default function BulkActions({ auth, selectedCustomers, onActionComplete, labels = [], variants = [], users = [], workflows = [] }) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentType = searchParams.get('type');
@@ -420,6 +422,7 @@ export default function BulkActions({ selectedCustomers, onActionComplete, label
                         variants={variants}
                         users={users}
                         workflows={workflows}
+                        auth={auth}
                     />
                 )}
             />
