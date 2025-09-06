@@ -39,7 +39,6 @@ export default function CustomerView({ c, running, initialResult, user, sources,
         }, { runningSchedules: [], historySchedules: [] });
 
     }, [running]);
-
     return (
         <div className={styles.container}>
             {viewMode === 'manage' && (
@@ -62,14 +61,18 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                                     />
                                 )}
                                 <ActionHistory history={historySchedules} />
-                                <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
-                                <SettingVariant data={variant} />
-                                <SettingLabel data={labelData} />
+                                {!user[0].role.includes('Sale') && (
+                                    <>
+                                        <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
+                                        <SettingVariant data={variant} />
+                                        <SettingLabel data={labelData} />
+                                    </>
+                                )}
                                 <SettingData data={formData} service={service} />
                             </div>
                         </div>
                     </div>
-                    <FilterControls zaloAccounts={zaloData} users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} labels={labelData} sources={sources} areas={['Biên Hòa', 'Long Khánh', 'Long Thành', 'TP HCM', 'Khác']} />
+                    <FilterControls auth={user[0]} zaloAccounts={zaloData} users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} labels={labelData} sources={sources} />
                 </>
             )}
             <Suspense fallback={<TableSkeleton />}>

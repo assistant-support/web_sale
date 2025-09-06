@@ -22,8 +22,6 @@ export async function zalo_data(_id) {
 }
 // lấy thông tin user
 export async function user_data({ _id = null }) {
-    console.log(_id);
-
     if (_id) {
         return await getUserOne(_id)
     } else {

@@ -144,11 +144,7 @@ function ActionForm({ onSubmitAction, selectedCustomers, onClose, currentType, l
             { value: 'addFriend', name: 'Gửi kết bạn' },
             { value: 'workflow', name: 'Chạy theo Workflow' }
         ];
-        const customerActions = [
-            { value: 4, name: 'Chuyển trạng thái: Đang chăm sóc' },
-            { value: 2, name: 'Chuyển trạng thái: Không quan tâm' },
-            { value: 3, name: 'Chuyển trạng thái: Chăm sóc sau' }
-        ];
+        const customerActions = [];
         return !currentType ? [...baseActions, ...customerActions] : baseActions;
     }, [currentType]);
 

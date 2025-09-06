@@ -10,8 +10,8 @@ import '@/styles/font.css';
 import air from '@/app/layout.module.css'
 
 export const metadata = {
-    title: "Chăm sóc",
-    description: "Chăm sóc khách hàng"
+    title: "Nhân sự",
+    description: "Quản lý nhân sự"
 };
 
 export default async function RootLayout({ children }) {

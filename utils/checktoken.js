@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
+import { de } from 'zod/v4/locales';
 
 export default async function checkAuthToken() {
     const cookieStore = await cookies();
@@ -9,7 +10,6 @@ export default async function checkAuthToken() {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         return decoded;
     } catch (error) {
-        console.error('Lỗi xác thực token:', error);
         return null;
     }
 }

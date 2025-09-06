@@ -98,9 +98,9 @@ export default function CloseServiceCard({ customer }) {
     return (
         <Card className="shadow-lg">
             <CardHeader>
-                <CardTitle className="flex items-center text-xl">
-                    <ShieldCheck className="mr-2 h-6 w-6 text-green-600" />
-                    Chốt Dịch Vụ & Lưu Trữ
+                <CardTitle className="flex items-center">
+                    <ShieldCheck className="mr-2 h-5 w-5 text-green-600" />
+                    <h4>Chốt Dịch Vụ & Lưu Trữ</h4>
                 </CardTitle>
                 <CardDescription>
                     Xác nhận trạng thái cuối, doanh thu và tải lên hóa đơn/hợp đồng để hoàn tất.

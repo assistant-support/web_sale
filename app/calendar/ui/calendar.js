@@ -160,11 +160,6 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
                                 </TabsTrigger>
                             </TabsList>
                         </Tabs>
-
-                        <Button onClick={() => setIsCreateModalOpen(true)}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            <h6 style={{ color: 'white' }}>Tạo lịch hẹn</h6>
-                        </Button>
                     </div>
                 </div>
 
@@ -312,16 +307,6 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
                     day={selectedDay}
                     onClose={() => setSelectedDay(null)}
                     onAppointmentClick={handleAppointmentClick}
-                />
-            )}
-
-            {/* Create appointment modal */}
-            {isCreateModalOpen && (
-                <CreateAppointment
-                    isOpen={isCreateModalOpen}
-                    onClose={() => setIsCreateModalOpen(false)}
-                    onCreated={handleAppointmentCreated}
-                    currentUser={currentUser}
                 />
             )}
         </div>

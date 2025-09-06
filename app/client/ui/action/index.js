@@ -130,8 +130,6 @@ function TaskItem({ task }) {
 }
 
 export default function RunningActions({ user, running = [] }) {
-    console.log(running);
-
     useEffect(() => {
         let intervalId = null;
         if (running.length > 0) {

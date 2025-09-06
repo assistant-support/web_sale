@@ -7,7 +7,8 @@ import Menu from '@/components/(ui)/(button)/menu';
 export default function FilterControls({
     sources = [], // Dữ liệu cho bộ lọc "Nguồn"
     users = [],   // Dữ liệu cho bộ lọc "Người phụ trách"
-    tags = []     // Dữ liệu cho bộ lọc "Dịch vụ quan tâm"
+    tags = [],    // Dữ liệu cho bộ lọc "Dịch vụ quan tâm"
+    auth
 }) {
     const searchParams = useSearchParams();
     const pathname = usePathname();
@@ -19,8 +20,6 @@ export default function FilterControls({
     const [isPipelineStatusMenuOpen, setIsPipelineStatusMenuOpen] = useState(false);
     const [isTagsMenuOpen, setIsTagsMenuOpen] = useState(false);
     const [isAssigneeMenuOpen, setIsAssigneeMenuOpen] = useState(false);
-    const [isZaloPhaseMenuOpen, setIsZaloPhaseMenuOpen] = useState(false);
-
     // Hàm tạo URL mới với các tham số đã cập nhật
     const createURL = useCallback((paramsToUpdate) => {
         const params = new URLSearchParams(searchParams);
@@ -100,18 +99,20 @@ export default function FilterControls({
                     />
                 </div>
                 {/* Lọc theo Người phụ trách */}
-                <div style={{ flex: 1 }}>
-                    <Menu
-                        isOpen={isAssigneeMenuOpen} onOpenChange={setIsAssigneeMenuOpen}
-                        customButton={<div className='input text_6_400'>{getSelectedName('assignee', users, 'Người phụ trách')}</div>}
-                        menuItems={
-                            <div className={styles.menulist}>
-                                <p className='text_6_400' onClick={() => { createURL({ assignee: '' }); setIsAssigneeMenuOpen(false); }}>Tất cả</p>
-                                {users.map(u => <p key={u._id} className='text_6_400' onClick={() => { createURL({ assignee: u._id }); setIsAssigneeMenuOpen(false); }}>{u.name}</p>)}
-                            </div>
-                        } menuPosition="bottom"
-                    />
-                </div>
+                {!auth.role.includes('Sale') && (
+                    <div style={{ flex: 1 }}>
+                        <Menu
+                            isOpen={isAssigneeMenuOpen} onOpenChange={setIsAssigneeMenuOpen}
+                            customButton={<div className='input text_6_400'>{getSelectedName('assignee', users, 'Người phụ trách')}</div>}
+                            menuItems={
+                                <div className={styles.menulist}>
+                                    <p className='text_6_400' onClick={() => { createURL({ assignee: '' }); setIsAssigneeMenuOpen(false); }}>Tất cả</p>
+                                    {users.map(u => <p key={u._id} className='text_6_400' onClick={() => { createURL({ assignee: u._id }); setIsAssigneeMenuOpen(false); }}>{u.name}</p>)}
+                                </div>
+                            } menuPosition="bottom"
+                        />
+                    </div>
+                )}
             </div>
 
             {/* Hàng 2: Các bộ lọc phụ */}

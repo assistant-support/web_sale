@@ -15,14 +15,15 @@
     overflow-y: auto;
 }
 
-.nav {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100%;
-    width: 100px;
-    border-right: thin solid var(--border-color);
-    background-color: var(--bg-primary);
-    z-index: 1;
+@media (max-width: 768px) {
+    .main {
+        margin-left: 0px;
+        width: calc(100%);
+        margin-top: 60px;
+        height: calc(100% - 60px);
+        background-color: var(--bg-secondary);
+        padding: 16px;
+        overflow: hidden;
+        overflow-y: auto;
+    }
 }
-

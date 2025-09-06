@@ -8,6 +8,7 @@ import { variant_data } from '../actions/variant.actions';
 import { getRunningSchedulesAction } from '../actions/schedule.actions';
 import { workflow_data } from '@/data/workflow/wraperdata.db';
 import { service_data } from '@/data/services/wraperdata.db';
+import { maskPhoneNumber } from '@/function';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -29,15 +30,21 @@ export default async function Page({ searchParams }) {
         workflow_data(),
         service_data()
     ]);
-
-    if (!userAuth[0].role.includes('Admin') && !userAuth[0].role.includes('Sale')) {
-        return (
-            <div className="flex items-center justify-center h-full w-full">
-                <h4 className="italic">Bạn không có quyền truy cập trang này</h4>
-            </div>
-        )
-    }
     const reversedLabel = [...label].reverse();
+    if (userAuth[0].role.includes('Sale')) {
+        const filteredData = initialResult.data.filter(item => {
+            if (Array.isArray(item.assignees) && item.assignees.length > 0) {
+                return item.assignees.some(assignee => assignee.user && assignee.user._id === userAuth[0]._id);
+            }
+            return false;
+        }).map(item => {
+            return { ...item, phone: maskPhoneNumber(item.phone) };
+        });
+        console.log(filteredData);
+
+        initialResult.data = filteredData;
+        initialResult.total = filteredData.length;
+    }
 
     return (
         <Suspense fallback={<PageSkeleton />}>

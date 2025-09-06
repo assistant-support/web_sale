@@ -256,22 +256,24 @@ export async function updateCustomerStatusAction(previousState, formData) {
     }
 }
 
-// Hàm convertToStudentAction đã bị loại bỏ hoàn toàn.
-// export async function convertToStudentAction(previousState, formData) { ... }
-
-
+/**
+ * Gán một hoặc nhiều khách hàng cho một nhân viên Sale.
+ * Đồng thời cập nhật trạng thái pipeline và ghi log chăm sóc (care).
+ */
 export async function assignRoleToCustomersAction(prevState, formData) {
+    // 1. Xác thực và phân quyền người dùng
     const user = await checkAuthToken();
-    if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
-        return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
+    if (!user || !user.id) return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
+    if (!user.role.includes('Admin') && !user.role.includes('Admin Sale')) {
+        return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
     }
-    const customersJSON = formData.get('selectedCustomersJSON');
-    const userId = formData.get('userId');
 
-    // --- Validation ---
-    if (!userId || !customersJSON) {
-        return { success: false, error: 'Dữ liệu không hợp lệ. Vui lòng chọn người phụ trách và danh sách khách hàng.' };
+    // 2. Lấy và kiểm tra dữ liệu đầu vào
+    const customersJSON = formData.get('selectedCustomersJSON');
+    const userIdToAssign = formData.get('userId');
+
+    if (!userIdToAssign || !customersJSON) {
+        return { success: false, error: 'Dữ liệu không hợp lệ. Vui lòng chọn người phụ trách và khách hàng.' };
     }
 
     let customerIds;
@@ -281,25 +283,68 @@ export async function assignRoleToCustomersAction(prevState, formData) {
             return { success: false, error: 'Không có khách hàng nào được chọn.' };
         }
     } catch (e) {
-        console.error("Lỗi parsing JSON khách hàng:", e);
         return { success: false, error: 'Định dạng danh sách khách hàng không đúng.' };
     }
 
     try {
         await connectDB();
+
+        // 3. Lấy thông tin của nhân viên được gán để xác định group
+        const assignedUser = await User.findById(userIdToAssign).lean();
+        if (!assignedUser) {
+            return { success: false, error: 'Không tìm thấy thông tin nhân viên được gán.' };
+        }
+
+        // 4. Xác định trạng thái pipeline mới dựa trên group của nhân viên
+        const userGroup = assignedUser.group; // 'noi_khoa' or 'ngoai_khoa'
+        let newPipelineStatus;
+        if (userGroup === 'noi_khoa') {
+            newPipelineStatus = 'noikhoa_3';
+        } else if (userGroup === 'ngoai_khoa') {
+            newPipelineStatus = 'ngoaikhoa_3';
+        } else {
+            newPipelineStatus = 'undetermined_3'; // Mặc định nếu không có group
+        }
+
+        // 5. Chuẩn bị các object để cập nhật
+        const assigneeObject = {
+            user: new mongoose.Types.ObjectId(userIdToAssign),
+            group: userGroup,
+            assignedAt: new Date()
+        };
+
+        const careNote = {
+            content: `Hồ sơ được phân bổ cho Sale: ${assignedUser.name || 'N/A'}`,
+            createBy: new mongoose.Types.ObjectId(user.id),
+            step: 3, // Ghi log cho Bước 3
+            createAt: new Date()
+        };
+
+        // 6. Cập nhật hàng loạt khách hàng
         const result = await Customer.updateMany(
             { _id: { $in: customerIds } },
-            { $addToSet: { roles: new mongoose.Types.ObjectId(userId) } }
+            {
+                // Thêm nhân viên vào danh sách phụ trách (tránh trùng lặp)
+                $addToSet: { assignees: assigneeObject },
+                // Ghi log hành động
+                $push: { care: careNote },
+                // Cập nhật trạng thái pipeline
+                $set: {
+                    'pipelineStatus.0': newPipelineStatus, // Trạng thái tổng quan gần nhất
+                    'pipelineStatus.3': newPipelineStatus, // Trạng thái cho Bước 3: Phân bổ
+                }
+            }
         );
 
-        if (result.modifiedCount === 0 && result.matchedCount > 0) {
-            return { success: true, message: `Các khách hàng này đã được gán cho người dùng được chọn từ trước. Không có gì thay đổi.` };
-        }
         revalidateData();
-        return { success: true, message: `Đã gán thành công ${result.modifiedCount} khách hàng.` };
+        if (result.modifiedCount > 0) {
+            return { success: true, message: `Đã phân bổ thành công ${result.modifiedCount} khách hàng cho ${assignedUser.name}.` };
+        } else {
+            return { success: true, message: `Không có khách hàng nào được cập nhật. Có thể họ đã được phân bổ từ trước.` };
+        }
 
     } catch (error) {
-        console.error("Lỗi gán người phụ trách hàng loạt:", error);
+        console.error("Lỗi khi gán người phụ trách hàng loạt:", error);
         return { success: false, error: 'Đã xảy ra lỗi phía máy chủ. Vui lòng thử lại.' };
     }
 }
