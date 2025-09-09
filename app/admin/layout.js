@@ -22,7 +22,7 @@ export default async function RootLayout({ children }) {
                 <Nav data={user} />
             </div>
             <div className={air.main}>
-                {user.role.includes('Admin') ? <>{children}</> :
+                {user.role.includes('Admin') || user.role.includes('Manager') ? <>{children}</> :
                     <div className="flex_center" style={{ height: '100%', width: '100%' }}>
                         <h4 style={{ fontStyle: 'italic' }}>Bạn không có quyền truy cập trang này</h4>
                     </div>

@@ -134,7 +134,6 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
     const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
     const [selectedWorkflowName, setSelectedWorkflowName] = useState('Chọn Workflow');
     const totalCustomers = selectedCustomers.size;
-
     const actionOptions = useMemo(() => {
         const baseActions = [
             { value: 'sendMessage', name: 'Gửi tin nhắn Zalo' },
@@ -220,7 +219,7 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
             {isAssignAction && <input type="hidden" name="userId" value={selectedUserId} />}
             {isWorkflowAction && <input type="hidden" name="workflowId" value={selectedWorkflowId} />}
 
-            <div className={styles.inputGroup}><label>Hành động</label><Menu isOpen={isActionMenuOpen} onOpenChange={setIsActionMenuOpen} customButton={<div className='input text_6_400'>{selectedActionName}</div>} menuItems={<div className={`${styles.menulist} scroll`}>{actionOptions.map(opt => <p key={opt.value} className='text_6_400' onClick={() => { setActionType(opt.value); setIsActionMenuOpen(false); }}>{opt.name}</p>)}</div>} menuPosition="bottom" /></div>
+            <div className={styles.inputGroup}><label>Hành động</label><Menu isOpen={isActionMenuOpen} onOpenChange={setIsActionMenuOpen} customButton={<div className='input text_6_400'>{selectedActionName}</div>} menuItems={<div className={`${styles.menulist} scroll`}>{actionOptions.map((opt, index) => <p key={index} className='text_6_400' onClick={() => { setActionType(opt.value); setIsActionMenuOpen(false); }}>{opt.name}</p>)}</div>} menuPosition="bottom" /></div>
 
             {isAssignAction && (
                 <div className={styles.inputGroup}>
@@ -282,7 +281,12 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
                     <div className={styles.inputGroup}><label>Số lượng gửi / giờ</label>
                         <div className={styles.estimationBox}>
                             <div className={styles.estimationInfo}><h5 className='text_w_500'>Ước tính</h5><h6>Sẽ thực hiện cho <b>{totalCustomers}</b> người, hoàn thành trong <b>{estimatedTime}</b>.</h6></div>
-                            <div className={styles.numberInput}><button type="button" onClick={() => setActionsPerHour(p => Math.max(1, p - 5))}><h5>-</h5></button><input type="number" className='input' name="actionsPerHour" value={actionsPerHour} onChange={(e) => setActionsPerHour(Number(e.target.value))} /><button type="button" onClick={() => setActionsPerHour(p => p + 5)}><h5>+</h5></button></div>
+                            <div className={styles.numberInput}><button type="button" onClick={() => setActionsPerHour(p => Math.max(1, p - 5))}><h5>-</h5></button><input type="number" className='input' name="actionsPerHour" value={actionsPerHour.toString()}
+                                onChange={(e) => {
+                                    let val = e.target.value;
+                                    val = val.replace(/^0+(?=\d)/, '');
+                                    setActionsPerHour(val === '' ? '' : Number(val))
+                                }} /><button type="button" onClick={() => setActionsPerHour(p => p + 5)}><h5>+</h5></button></div>
                         </div>
                     </div>
                 </>

@@ -48,7 +48,7 @@ export async function closeServiceAction(prevState, formData) {
         let uploadedFile = null;
 
         if (invoiceImage && invoiceImage.size > 0) {
-            const folderId = process.env.GOOGLE_DRIVE_INVOICE_FOLDER_ID; // Lấy ID thư mục từ .env
+            const folderId = '1epl-LSIM-ZgrcOCk2PglkCRZwXOFnprb'; // Lấy ID thư mục từ .env
             // SỬ DỤNG HÀM MỚI: Tải file lên và nhận về object { id, webViewLink }
             uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
             if (!uploadedFile?.id) {

@@ -1,7 +1,7 @@
 import Customer from '@/models/customer.model'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache' // Giả sử bạn có một hàm cacheData tương tự
-
+import '@/models/formclient'
 /**
  * Hàm gốc để truy vấn tất cả dữ liệu khách hàng, chưa có cache.
  * Hàm này không được export ra ngoài.

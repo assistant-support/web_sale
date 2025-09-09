@@ -274,7 +274,7 @@ export default function CustomerAppointments({ customer }) {
                                             <CardTitle><h5 className='text_w_600'>{app.title}</h5></CardTitle>
                                             <h5 className="flex items-center gap-2">
                                                 <CalendarIcon className="h-4 w-4" />
-                                                {format(appointmentDate, "HH:mm, EEEE, dd/MM/yyyy")}
+                                                {format(appointmentDate, "HH:mm, dd/MM/yyyy")}
                                             </h5>
                                         </div>
                                         <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>

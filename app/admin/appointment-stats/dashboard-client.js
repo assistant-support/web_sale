@@ -46,11 +46,11 @@ const AppointmentLogTable = ({ appointments }) => {
                 return <Badge className="bg-blue-500 hover:bg-blue-600">Đã xác nhận</Badge>;
             case 'pending':
                 return <Badge className="bg-yellow-500 hover:bg-yellow-600">Chờ xử lý</Badge>;
-            case 'canceled':
+            case 'cancelled':
                 return <Badge variant="destructive">Đã hủy</Badge>;
             case 'postponed':
                 return <Badge className="bg-orange-500 hover:bg-orange-600">Hoãn</Badge>;
-            case 'no-show':
+            case 'missed':
                 return <Badge className="bg-gray-500 hover:bg-gray-600">Không đến</Badge>;
             default:
                 return <Badge variant="secondary">Không xác định</Badge>;
@@ -95,35 +95,36 @@ const AppointmentLogTable = ({ appointments }) => {
 export default function AppointmentStatsClient({ initialData }) {
 
     const { stats, chartData } = useMemo(() => {
-        let confirmed = 0, completed = 0, canceled = 0, postponed = 0, noShow = 0, pending = 0;
-
+        let confirmed = 0, completed = 0, cancelled = 0, postponed = 0, noShow = 0, pending = 0, missed = 0
         initialData.forEach(appt => {
             switch (appt.status) {
                 case 'confirmed': confirmed++; break;
                 case 'completed': completed++; break;
-                case 'canceled': canceled++; break;
                 case 'postponed': postponed++; break;
-                case 'no-show': noShow++; break;
+                case 'missed': missed++; break;
                 case 'pending': pending++; break;
+                case 'cancelled': cancelled++; break;
             }
         });
 
         const totalAttended = completed;
         const totalShouldAttend = completed + noShow;
-        const showRate = totalShouldAttend > 0 ? (totalAttended / totalShouldAttend) * 100 : 0;
-
+        const showRate = totalShouldAttend > 0 ? (totalAttended / initialData.length) * 100 : 0;
+        console.log(totalAttended ,totalShouldAttend);
+        console.log(showRate);
+        
         return {
             stats: {
                 total: initialData.length,
                 attended: totalAttended,
-                canceledOrPostponed: canceled + postponed,
+                canceledOrPostponed: missed + cancelled,
                 showRate: `${showRate.toFixed(1)}%`
             },
             chartData: {
                 labels: ['Hoàn thành', 'Đã xác nhận', 'Chờ xử lý', 'Hủy/Hoãn', 'Không đến'],
                 datasets: [{
                     label: 'Số lượng',
-                    data: [completed, confirmed, pending, canceled + postponed, noShow],
+                    data: [completed, confirmed, pending, cancelled + postponed, missed],
                     backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#6b7280'],
                 }]
             }
