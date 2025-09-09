@@ -10,6 +10,7 @@ import Call from '@/models/call.model';
 import Customer from '@/models/customer.model';
 
 import { getCallsAll, getCallsByCustomer } from './handledata.db';
+import { revalidateData } from '@/app/actions/customer.actions';
 
 /**
  * API lấy dữ liệu (dùng file data đã cache)
@@ -123,7 +124,7 @@ export async function saveCallAction(prevState, formData) {
     // 5) Revalidate
     revalidateTag('calls');
     revalidateTag(`calls:${customerId}`);
-
+    revalidateData()
     return {
       success: true,
       message: 'Lưu cuộc gọi thành công!',
