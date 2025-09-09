@@ -147,8 +147,10 @@ export default function OMICallClient({ customer, user }) {
     // chuẩn hoá user
     const currentUser = Array.isArray(user) ? user[0] : user;
     const isAdmin = !!currentUser?.role?.includes('Admin');
-
+    const playbackReadyRef = useRef(false);           // tránh retry vô hạn
+    const playbackCtxRef = useRef(null);              // optional: dùng để resume
     // Kết nối / Call state
+
     const [connectionStatus, setConnectionStatus] = useState({ status: 'disconnected', text: 'Chưa kết nối' });
     const [callStage, setCallStage] = useState('idle'); // idle | connecting | ringing | in_call
     const [statusText, setStatusText] = useState('Sẵn sàng để gọi');
@@ -192,6 +194,55 @@ export default function OMICallClient({ customer, user }) {
 
     // ====== console log gọn ======
     const clog = (...args) => null;
+    const ensureRemotePlayback = async (stream) => {
+        const el = remoteAudioRef.current;
+        if (!el || !stream) return;
+
+        // Gán stream và cấu hình âm lượng tối đa
+        if (el.srcObject !== stream) el.srcObject = stream;
+        el.autoplay = true;
+        el.playsInline = true;
+        el.muted = false;
+        el.volume = 1.0;
+
+        // Nếu trình duyệt hỗ trợ chọn ngõ ra, đảm bảo dùng output mặc định
+        try {
+            if (typeof el.setSinkId === 'function') {
+                await el.setSinkId('default');
+            }
+        } catch { /* bỏ qua nếu không hỗ trợ */ }
+
+        // Thử play() với 4 lần retry, cách nhau 300ms
+        for (let i = 0; i < 4; i++) {
+            try {
+                // 1) Một số trình duyệt cần AudioContext resume (nếu bạn dùng AudioContext ở nơi khác)
+                if (playbackCtxRef.current && playbackCtxRef.current.state === 'suspended') {
+                    await playbackCtxRef.current.resume().catch(() => { });
+                }
+                // 2) Nếu audio element chưa có metadata, chờ một nhịp
+                if (el.readyState < 2) {
+                    await new Promise(r => setTimeout(r, 120));
+                }
+                await el.play();
+                playbackReadyRef.current = true;
+                break;
+            } catch {
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        // Nếu vẫn chưa phát được (autoplay policy), chờ 1 lần click tiếp theo rồi play
+        if (!playbackReadyRef.current) {
+            const onFirstUserGesture = async () => {
+                try { await el.play(); } catch { }
+                playbackReadyRef.current = true;
+                document.removeEventListener('click', onFirstUserGesture, true);
+                window.removeEventListener('keydown', onFirstUserGesture, true);
+            };
+            document.addEventListener('click', onFirstUserGesture, true);
+            window.addEventListener('keydown', onFirstUserGesture, true);
+        }
+    };
 
     // ====== SDK ======
     const handleSDKLoad = () => {
@@ -321,18 +372,23 @@ export default function OMICallClient({ customer, user }) {
         setStatusText('Đang trong cuộc gọi');
         acceptedAtRef.current = Date.now();
 
-        // Streams
         localStreamRef.current = callData?.streams?.local || null;
         remoteStreamRef.current = callData?.streams?.remote || null;
 
-        // Phát audio remote
-        if (remoteAudioRef.current && remoteStreamRef.current) {
-            remoteAudioRef.current.srcObject = remoteStreamRef.current;
-        }
+        // PHÁT remote cho sale nghe — gọi ngay khi có stream
+        ensureRemotePlayback(remoteStreamRef.current);
 
-        // Ghi âm (mix local + remote)
+        // Nếu remote track tới MUỘN, gắn listener để phát lại
+        try {
+            remoteStreamRef.current?.addEventListener?.('addtrack', () => {
+                ensureRemotePlayback(remoteStreamRef.current);
+            });
+        } catch { }
+
+        // ✅ Recorder vẫn như cũ
         startRecording();
     };
+
 
     const onEnded = (info) => {
         if (endedOnceRef.current) {
