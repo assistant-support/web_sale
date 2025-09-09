@@ -46,50 +46,50 @@ export default function CustomerView({ c, running, initialResult, user, sources,
     }, [running]);
 
     // ===== Auto refresh mỗi 5s với router.refresh() =====
-    useEffect(() => {
-        // Chỉ refresh khi có job đang chạy; nếu muốn luôn refresh thì bỏ điều kiện này
-        const shouldPoll = true; // hoặc: runningSchedules.length > 0
+    // useEffect(() => {
+    //     // Chỉ refresh khi có job đang chạy; nếu muốn luôn refresh thì bỏ điều kiện này
+    //     const shouldPoll = true; // hoặc: runningSchedules.length > 0
 
-        const startPolling = () => {
-            if (intervalRef.current || !shouldPoll) return;
-            intervalRef.current = setInterval(() => {
-                // Tránh refresh khi tab ẩn để tiết kiệm tài nguyên
-                if (typeof document !== 'undefined' && document.hidden) return;
-                router.refresh();
-            }, 5000);
-        };
+    //     const startPolling = () => {
+    //         if (intervalRef.current || !shouldPoll) return;
+    //         intervalRef.current = setInterval(() => {
+    //             // Tránh refresh khi tab ẩn để tiết kiệm tài nguyên
+    //             if (typeof document !== 'undefined' && document.hidden) return;
+    //             router.refresh();
+    //         }, 5000);
+    //     };
 
-        const stopPolling = () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                intervalRef.current = null;
-            }
-        };
+    //     const stopPolling = () => {
+    //         if (intervalRef.current) {
+    //             clearInterval(intervalRef.current);
+    //             intervalRef.current = null;
+    //         }
+    //     };
 
-        // Bật/tắt theo visibility
-        const onVisibilityChange = () => {
-            if (document.hidden) {
-                stopPolling();
-            } else {
-                router.refresh(); // refresh ngay khi quay lại tab
-                startPolling();
-            }
-        };
+    //     // Bật/tắt theo visibility
+    //     const onVisibilityChange = () => {
+    //         if (document.hidden) {
+    //             stopPolling();
+    //         } else {
+    //             router.refresh(); // refresh ngay khi quay lại tab
+    //             startPolling();
+    //         }
+    //     };
 
-        // Bật lần đầu
-        startPolling();
+    //     // Bật lần đầu
+    //     startPolling();
 
-        // Lắng nghe thay đổi visibility + focus
-        document.addEventListener('visibilitychange', onVisibilityChange);
-        window.addEventListener('focus', onVisibilityChange);
+    //     // Lắng nghe thay đổi visibility + focus
+    //     document.addEventListener('visibilitychange', onVisibilityChange);
+    //     window.addEventListener('focus', onVisibilityChange);
 
-        // Dọn dẹp
-        return () => {
-            stopPolling();
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-            window.removeEventListener('focus', onVisibilityChange);
-        };
-    }, [router /* , runningSchedules.length */]);
+    //     // Dọn dẹp
+    //     return () => {
+    //         stopPolling();
+    //         document.removeEventListener('visibilitychange', onVisibilityChange);
+    //         window.removeEventListener('focus', onVisibilityChange);
+    //     };
+    // }, [router /* , runningSchedules.length */]);
     // =====================================================
 
     return (

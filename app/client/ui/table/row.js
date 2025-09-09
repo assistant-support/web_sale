@@ -44,7 +44,7 @@ function CustomerDetailHeader({ customer, zalo }) {
                 </Avatar>
                 <div>
                     <DialogTitle asChild><h4>{customer.zaloname || customer.name}</h4></DialogTitle>
-                    <DialogDescription asChild><h6>{customer.phone}</h6></DialogDescription>
+                    <DialogDescription asChild><h6>{customer.phonex}</h6></DialogDescription>
                     {zaloAccount && <h6 className='text-muted-foreground'>CSKH: {zaloAccount.name}</h6>}
                 </div>
             </div>

@@ -31,15 +31,22 @@ export default async function Page({ searchParams }) {
         service_data()
     ]);
     const reversedLabel = [...label].reverse();
+    console.log('User Auth:', userAuth);
     if (userAuth[0].role.includes('Sale')) {
         const filteredData = initialResult.data.filter(item => {
             if (Array.isArray(item.assignees) && item.assignees.length > 0) {
-                return item.assignees.some(assignee => assignee.user && assignee.user._id === userAuth[0]._id);
+                return item.assignees.some(
+                    assignee => assignee.user && assignee.user._id === userAuth[0]._id
+                );
             }
             return false;
         }).map(item => {
-            return { ...item, phone: maskPhoneNumber(item.phone) };
+            return {
+                ...item,
+                phonex: maskPhoneNumber(item.phone) // tạo field mới phonex
+            };
         });
+
         console.log(filteredData);
 
         initialResult.data = filteredData;
