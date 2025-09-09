@@ -147,13 +147,6 @@ export default function CustomerPipeline({
                     const color = status === 'completed' ? 'text-green-500' : (isCurrent ? 'text-blue-500' : 'text-slate-400');
                     const notesForStage = customer.care.filter(note => note.step === stage.id);
                     const statusChip = stage.getStatus(customer);
-                    console.log(notesForStage);
-                    
-                    if (stage.id === 6) {
-                        console.log(notesForStage);
-                    }
-
-
                     return (
                         <AccordionItem key={stage.id} value={`item-${index}`}>
                             <AccordionTrigger className={`hover:no-underline ${status === 'current' ? 'bg-muted/50' : ''}`}>

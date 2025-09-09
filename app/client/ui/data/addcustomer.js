@@ -113,42 +113,22 @@ export default function Customer_add({ service }) {
                                 <FormItem><FormLabel><h5>Địa chỉ</h5></FormLabel><FormControl><Input placeholder="123 Đường ABC, Phường X, Quận Y" {...field} /></FormControl></FormItem>
                             )} />
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <FormField control={form.control} name="service" render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel><h5>Dịch vụ quan tâm *</h5></FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl><SelectTrigger><SelectValue placeholder="Chọn một dịch vụ" /></SelectTrigger></FormControl>
-                                            <SelectContent>
-                                                {/* THAY ĐỔI 3: Gán `value` của mỗi `SelectItem` là `item._id` */}
-                                                {service?.map((item) => (
-                                                    <SelectItem key={item._id} value={item._id}>
-                                                        {item.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </FormItem>
-                                )} />
-                                <FormField control={form.control} name="dob" render={({ field }) => (
-                                    <FormItem className="flex flex-col">
-                                        <FormLabel><h5>Ngày sinh</h5></FormLabel>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <FormControl>
-                                                    <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                        {field.value ? (<h6>{format(field.value, "dd/MM/yyyy")}</h6>) : (<h6>Chọn ngày sinh</h6>)}
-                                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </FormControl>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date() || date < new Date("1900-01-01")} initialFocus />
-                                            </PopoverContent>
-                                        </Popover>
-                                    </FormItem>
-                                )} />
-                            </div>
+                            <FormField control={form.control} name="service" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel><h5>Dịch vụ quan tâm *</h5></FormLabel>
+                                    <Select className={'flex-1'} onValueChange={field.onChange} defaultValue={field.value}>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Chọn một dịch vụ" /></SelectTrigger></FormControl>
+                                        <SelectContent>
+                                            {/* THAY ĐỔI 3: Gán `value` của mỗi `SelectItem` là `item._id` */}
+                                            {service?.map((item) => (
+                                                <SelectItem key={item._id} value={item._id}>
+                                                    {item.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FormItem>
+                            )} />
 
                             {errorMessages.length > 0 && (
                                 <Alert variant="destructive" className="mt-4">

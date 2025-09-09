@@ -141,7 +141,7 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="name" render={({ field }) => (<FormItem><Label><h6>Tên khách hàng *</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                     <FormField control={form.control} name="email" render={({ field }) => (<FormItem><Label><h6>Email</h6></Label><FormControl><Input type="email" {...field} /></FormControl></FormItem>)} />
-                    <FormField control={form.control} name="bd" render={({ field }) => (<FormItem><Label><h6>Ngày sinh</h6></Label><FormControl><Input type="date" {...field} /></FormControl></FormItem>)} />
+                    <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
                     <FormField control={form.control} name="area" render={({ field }) => (<FormItem><Label><h6>Khu vực</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                 </div>
                 <Separator className="my-4" />
@@ -150,7 +150,7 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                     <div className="grid gap-2"><Label><h6>Số điện thoại</h6></Label><Input defaultValue={customer.phone} disabled /></div>
                     <div className="grid gap-2"><Label><h6>Tên Zalo</h6></Label><Input defaultValue={customer.zaloname} disabled /></div>
                 </div>
-                <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
+
                 <FormField
                     control={form.control}
                     name="tags"

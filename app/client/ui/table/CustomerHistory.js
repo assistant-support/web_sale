@@ -24,7 +24,6 @@ import { Separator } from "@/components/ui/separator";
 export default function CustomerHistory({ initialHistory = [], isLoading = true }) {
     const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'success', 'error'
     const [dateRange, setDateRange] = useState(undefined);
-
     const filteredHistory = useMemo(() => {
         return initialHistory
             .filter(item => {

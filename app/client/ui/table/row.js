@@ -69,13 +69,14 @@ export default function CustomerRow({ customer, index, isSelected, onSelect, vis
             setIsHistoryLoading(true);
             try {
                 // Sử dụng hàm history_data đã có
-                const result = await history_data(customer._id, 'customer');
+                const result = await history_data(customer._id);
+                console.log(result,1);
+                
                 if (result.success) {
                     setHistoryData(result.data);
                 } else {
-                    // Bạn có thể dùng toast ở đây nếu muốn
                     console.error("Failed to fetch history:", result.error);
-                    setHistoryData([]); // Đảm bảo dữ liệu cũ được xóa nếu có lỗi
+                    setHistoryData([]); 
                 }
             } catch (error) {
                 console.error("Error fetching history:", error);

@@ -2,8 +2,8 @@
 
 // ✅ SỬA LỖI: Thay đổi import từ 'react-dom' sang 'react' và đổi tên hook
 import { useState, useEffect, useRef, useActionState } from 'react';
-// import { useFormState, useFormStatus } from 'react-dom'; // Dòng cũ
-import { useFormStatus } from 'react-dom'; // useFormStatus vẫn ở trong react-dom
+// useFormStatus vẫn ở trong react-dom
+import { useFormStatus } from 'react-dom';
 import Script from 'next/script';
 
 // ShadCN UI & Lucide Icons
@@ -19,11 +19,11 @@ import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Loader2, Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Pause, Play, Download, Trash2, Settings, CircleDot, AlertCircle, CheckCircle, PhoneOutgoing } from 'lucide-react';
+
 import { maskPhoneNumber } from '@/function/index';
 import { saveCallResultAction } from '@/data/customers/wraperdata.db';
 
 // --- Constants & Helper Components ---
-
 const CALL_STATUS_OPTIONS = [
     { value: 'consulted_pending_4', label: 'Đã tư vấn, chờ quyết định' },
     { value: 'callback_4', label: 'Yêu cầu gọi lại' },
@@ -42,15 +42,14 @@ function SubmitButton() {
 }
 
 // --- Post Call Form Dialog Component ---
-
 function PostCallFormDialog({ isOpen, onOpenChange, lastCallInfo, customer }) {
     const initialState = { success: false, error: null, message: null };
-
-    // ✅ SỬA LỖI: Đổi tên useFormState thành useActionState
+    // ✅ Đổi useFormState → useActionState
     const [state, formAction] = useActionState(saveCallResultAction, initialState);
 
     useEffect(() => {
         if (state.success) {
+            console.info('[POST-CALL] Lưu kết quả thành công, đóng modal sau 1.5s');
             setTimeout(() => {
                 onOpenChange(false);
             }, 1500);
@@ -65,6 +64,12 @@ function PostCallFormDialog({ isOpen, onOpenChange, lastCallInfo, customer }) {
         if (lastCallInfo.file) {
             formData.append('recordingFile', lastCallInfo.file, lastCallInfo.name);
         }
+        console.groupCollapsed('[POST-CALL] Submit form');
+        console.info('[POST-CALL] customerId:', customer?._id);
+        console.info('[POST-CALL] duration:', lastCallInfo.duration);
+        console.info('[POST-CALL] startTime:', lastCallInfo.startTime);
+        console.info('[POST-CALL] recordingFileName:', lastCallInfo.name);
+        console.groupEnd();
         formAction(formData);
     };
 
@@ -111,9 +116,20 @@ function PostCallFormDialog({ isOpen, onOpenChange, lastCallInfo, customer }) {
     );
 }
 
+// === Helper: Map SIP status → lý do dễ đọc ===
+const mapEndReason = (code) => {
+    if (!code) return 'completed';
+    if (code === 486) return 'busy';         // Busy Here
+    if (code === 603) return 'declined';     // Decline
+    if (code === 480) return 'unavailable';  // Temporarily Unavailable
+    if (code === 408) return 'timeout';      // Request Timeout
+    if (code === 487) return 'cancelled';    // Request Terminated
+    if (code >= 500 && code < 600) return 'server_error';
+    if (code >= 400 && code < 500) return 'client_error';
+    return 'completed';
+};
 
 // --- Main OMICall Client Component ---
-// ... (Phần còn lại của component không thay đổi)
 export default function OMICallClient({ customer, user }) {
     const isSale = user?.role?.includes('Sale');
 
@@ -144,6 +160,11 @@ export default function OMICallClient({ customer, user }) {
     const [recordings, setRecordings] = useState([]);
     const [recordingTime, setRecordingTime] = useState('00:00');
 
+    // --- Call history (Sale only) ---
+    const [callHistory, setCallHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState(null);
+
     // --- Common Refs ---
     const sdkRef = useRef(null);
     const currentCallRef = useRef(null);
@@ -153,6 +174,10 @@ export default function OMICallClient({ customer, user }) {
     const localStreamRef = useRef(null);
     const remoteStreamRef = useRef(null);
     const remoteAudioRef = useRef(null);
+
+    // --- Flags/Payload để xác định ai gác máy & lý do ---
+    const endedByRef = useRef(null);      // 'local' | 'remote' | 'system' | null
+    const lastEndInfoRef = useRef(null);  // lưu payload 'ended' gần nhất (debug)
 
     // --- Full UI Specific Refs ---
     const audioContextRef = useRef(null);
@@ -171,68 +196,73 @@ export default function OMICallClient({ customer, user }) {
         }
     };
 
+    // ====== SDK load & cleanup ======
     const handleSDKLoad = () => {
+        console.info('[OMI] SDK script loaded');
         if (window.OMICallSDK) {
             initializeSDK();
         } else {
-            console.error("OMICall SDK not found on window object.");
+            console.error('[OMI] OMICall SDK not found on window object.');
         }
     };
 
     useEffect(() => {
         return () => {
+            console.info('[OMI] Unmount cleanup');
             if (sdkRef.current && typeof sdkRef.current.destroy === 'function') {
-                console.log("OMICall SDK is being destroyed.");
+                console.log('[OMI] Destroying SDK instance');
                 sdkRef.current.destroy();
             }
             clearInterval(callDurationIntervalRef.current);
             clearInterval(audioMonitoringIntervalRef.current);
-
-            // Đóng audio context nếu nó tồn tại và chưa đóng
             if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
                 audioContextRef.current.close();
             }
-
-            // Gỡ script khỏi body (nếu cần)
             const scriptElement = document.getElementById('omicall-sdk-script');
-            if (scriptElement) {
-                document.body.removeChild(scriptElement);
-            }
+            if (scriptElement) document.body.removeChild(scriptElement);
         };
     }, []);
 
     const initializeSDK = async () => {
+        console.groupCollapsed('[OMI] initializeSDK');
         try {
-            log('Đang khởi tạo OMICall SDK...', 'info');
+            console.info('[OMI] init() start');
             const initSuccess = await window.OMICallSDK.init({ lng: 'vi', ui: { toggleDial: 'hide' } });
+            console.info('[OMI] init() result:', initSuccess);
             if (!initSuccess) throw new Error('SDK initialization failed');
+
             sdkRef.current = window.OMICallSDK;
-            log('SDK đã được khởi tạo thành công', 'success');
             setupEventListeners();
             await connectToServer();
             if (!isSale) await initializeAudioDevices();
+            console.info('[OMI] SDK initialized & connected');
         } catch (error) {
-            console.error("SDK Error:", error);
+            console.error('[OMI] initializeSDK ERROR:', error);
             log(`Lỗi khởi tạo: ${error.message}`, 'error');
             setConnectionStatus({ status: 'disconnected', text: 'Lỗi khởi tạo' });
+        } finally {
+            console.groupEnd();
         }
     };
 
     const connectToServer = async () => {
+        console.groupCollapsed('[OMI] connectToServer');
         try {
             setConnectionStatus({ status: 'connecting', text: 'Đang kết nối...' });
             log('Đang kết nối tới tổng đài...', 'info');
-            // THAY THÔNG TIN SIP CỦA BẠN VÀO ĐÂY
             const registerStatus = await sdkRef.current.register({
                 sipRealm: 'thanhnth',
-                sipUser: '100', // Thay bằng SIP User
-                sipPassword: 'LCJw1HK8i2', // Thay bằng mật khẩu
+                sipUser: '100',            // Thay bằng SIP User của bạn
+                sipPassword: 'LCJw1HK8i2', // Thay bằng mật khẩu của bạn
             });
-            if (!registerStatus.status) throw new Error(registerStatus.error);
+            console.info('[OMI] register() result:', registerStatus);
+            if (!registerStatus.status) throw new Error(registerStatus.error || 'register failed');
         } catch (error) {
-            console.error("Connection Error:", error);
+            console.error('[OMI] connectToServer ERROR:', error);
             log(`Lỗi kết nối: ${error.message}`, 'error');
             setConnectionStatus({ status: 'disconnected', text: 'Kết nối thất bại' });
+        } finally {
+            console.groupEnd();
         }
     };
 
@@ -240,8 +270,10 @@ export default function OMICallClient({ customer, user }) {
         const sdk = sdkRef.current;
         if (!sdk) return;
 
+        console.info('[OMI] setupEventListeners');
+
         sdk.on('register', (data) => {
-            log(`Trạng thái kết nối: ${data.name}`, 'info');
+            console.info('[OMI] event: register', data);
             const statusMap = {
                 connected: { status: 'connected', text: 'Đã kết nối' },
                 connecting: { status: 'connecting', text: 'Đang kết nối...' },
@@ -251,25 +283,42 @@ export default function OMICallClient({ customer, user }) {
         });
 
         sdk.on('connecting', (data) => {
-            log(`Đang gọi tới ${data.remoteNumber}...`, 'info');
-            setCallInfo({ number: data.remoteNumber, state: 'Đang kết nối...' })
+            console.info('[OMI] event: connecting', data);
+            endedByRef.current = null; // reset
+            setCallInfo({ number: data.remoteNumber, state: 'Đang kết nối...' });
         });
+
         sdk.on('ringing', (data) => {
-            log(`Đang đổ chuông tới ${data.remoteNumber}...`, 'info');
-            setCallInfo(prev => ({ ...prev, state: 'Đang đổ chuông...' }))
+            console.info('[OMI] event: ringing', data);
+            setCallInfo(prev => ({ ...prev, state: 'Đang đổ chuông...' }));
         });
-        sdk.on('accepted', handleAcceptedEvent);
-        sdk.on('ended', handleEndedEvent);
+
+        sdk.on('accepted', (callData) => {
+            console.info('[OMI] event: accepted', callData);
+            handleAcceptedEvent(callData);
+        });
+
+        // 🔴 Quan trọng: truyền payload vào handler để xác định lý do kết thúc
+        sdk.on('ended', (info) => {
+            console.info('[OMI] event: ended', info);
+            handleEndedEvent(info);
+        });
     };
 
+    // ==== CALL FLOW ====
     const handleAcceptedEvent = (callData) => {
-        log(`Cuộc gọi đã được chấp nhận`, 'success');
+        console.groupCollapsed('[OMI] CALL ACCEPTED');
+        console.info('[OMI] callData:', callData);
+
         currentCallRef.current = callData;
         setCallInfo(prev => ({ ...prev, state: 'Đang trong cuộc gọi' }));
 
-        localStreamRef.current = callData.streams.local;
-        remoteStreamRef.current = callData.streams.remote;
-        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = callData.streams.remote;
+        localStreamRef.current = callData.streams?.local || null;
+        remoteStreamRef.current = callData.streams?.remote || null;
+
+        if (remoteAudioRef.current && remoteStreamRef.current) {
+            remoteAudioRef.current.srcObject = remoteStreamRef.current;
+        }
 
         setupMediaElements(callData);
         startCallDuration();
@@ -280,55 +329,93 @@ export default function OMICallClient({ customer, user }) {
             initializeAudioContext();
             startAudioMonitoring();
         }
+        console.groupEnd();
     };
 
-    const handleEndedEvent = () => {
-        log(`Cuộc gọi đã kết thúc`, 'info');
-        stopCallDuration();
-        stopRecording();
-        stopAudioMonitoring();
+    const handleEndedEvent = (info) => {
+        console.groupCollapsed('[OMI] CALL ENDED');
+        try {
+            lastEndInfoRef.current = info;
 
-        currentCallRef.current = null;
-        setCallInfo(null);
-        setIsMuted(false);
-        setIsHeld(false);
-        setIsVideoOn(false);
-        localStreamRef.current = null;
-        remoteStreamRef.current = null;
-        if (localVideoRef.current) localVideoRef.current.srcObject = null;
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+            const code = info?.statusCode ?? info?.code ?? info?.reasonCode ?? null;
+            const reason = mapEndReason(code);
+            const endedBy = info?.by || endedByRef.current || 'remote_or_system';
+
+            console.info('[OMI] end details:', {
+                statusCode: code,
+                mappedReason: reason,
+                endedBy,
+                remoteNumber: callInfo?.number ?? info?.remoteNumber,
+                durationUI: callDuration,
+                raw: info
+            });
+
+            // --- Reset UI/cleanup ---
+            stopCallDuration();
+            stopRecording();
+            stopAudioMonitoring();
+
+            currentCallRef.current = null;
+            setCallInfo(null);
+            setIsMuted(false);
+            setIsHeld(false);
+            setIsVideoOn(false);
+
+            localStreamRef.current = null;
+            remoteStreamRef.current = null;
+            if (localVideoRef.current) localVideoRef.current.srcObject = null;
+            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+            if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+
+            // Nếu muốn tự refetch lịch sử ngay (ngoài quy trình PostCallDialog), có thể bật:
+            // if (isSale) fetchCallHistory();
+        } catch (e) {
+            console.error('[OMI] handleEndedEvent ERROR:', e);
+        } finally {
+            endedByRef.current = null;
+            console.groupEnd();
+        }
     };
 
     const makeCall = async (number) => {
-        if (connectionStatus.status !== 'connected') {
-            log('Chưa kết nối tới tổng đài.', 'error');
-            return;
-        }
-        if (currentCallRef.current) {
-            log('Đang có cuộc gọi khác.', 'error');
-            return;
-        }
-        if (!number) {
-            log('Vui lòng nhập số điện thoại.', 'error');
-            return;
-        }
+        console.groupCollapsed('[OMI] makeCall');
         try {
-            log(`Bắt đầu gọi tới ${number}...`, 'info');
+            if (connectionStatus.status !== 'connected') {
+                console.warn('[OMI] not connected, abort calling');
+                log('Chưa kết nối tới tổng đài.', 'error');
+                return;
+            }
+            if (currentCallRef.current) {
+                console.warn('[OMI] already in call');
+                log('Đang có cuộc gọi khác.', 'error');
+                return;
+            }
+            if (!number) {
+                console.warn('[OMI] empty number');
+                log('Vui lòng nhập số điện thoại.', 'error');
+                return;
+            }
+            console.info('[OMI] dialing:', number);
             await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             await sdkRef.current.makeCall(number, { isVideo: false, sipNumber: { number: hotlineNumber } });
         } catch (error) {
-            console.error("Make Call Error:", error);
+            console.error('[OMI] makeCall ERROR:', error);
             log(`Lỗi khi gọi: ${error.message}`, 'error');
+        } finally {
+            console.groupEnd();
         }
     };
 
     const endCall = () => {
+        console.info('[OMI] endCall() pressed');
+        endedByRef.current = 'local';
         currentCallRef.current?.end();
     };
 
     const startCallDuration = () => {
+        console.info('[OMI] startCallDuration');
         let seconds = 0;
+        clearInterval(callDurationIntervalRef.current);
         callDurationIntervalRef.current = setInterval(() => {
             seconds++;
             const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
@@ -338,16 +425,19 @@ export default function OMICallClient({ customer, user }) {
     };
 
     const stopCallDuration = () => {
+        console.info('[OMI] stopCallDuration');
         clearInterval(callDurationIntervalRef.current);
-        if (!isSale) {
-            setCallDuration("00:00");
-        }
+        if (!isSale) setCallDuration("00:00");
     };
 
+    // ==== Recording ====
     const startRecording = () => {
+        console.groupCollapsed('[OMI] startRecording');
         try {
             if (!localStreamRef.current && !remoteStreamRef.current) {
+                console.error('[OMI] No stream to record');
                 log('Không có stream để ghi âm', 'error');
+                console.groupEnd();
                 return;
             }
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -361,10 +451,12 @@ export default function OMICallClient({ customer, user }) {
 
             mediaRecorderRef.current.start();
             setIsRecording(true);
+            console.info('[OMI] Recording started');
             log('Bắt đầu ghi âm', 'success');
 
             if (!isSale) {
                 let seconds = 0;
+                clearInterval(recordingTimerRef.current);
                 recordingTimerRef.current = setInterval(() => {
                     seconds++;
                     const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -373,45 +465,60 @@ export default function OMICallClient({ customer, user }) {
                 }, 1000);
             }
         } catch (error) {
-            console.error("Recording Start Error:", error);
+            console.error('[OMI] Recording Start ERROR:', error);
             log(`Lỗi bắt đầu ghi âm: ${error.message}`, 'error');
+        } finally {
+            console.groupEnd();
         }
     };
 
     const stopRecording = () => {
-        if (mediaRecorderRef.current?.state === 'recording') {
-            mediaRecorderRef.current.onstop = () => {
-                if (recordedChunksRef.current.length > 0) {
-                    const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-                    const targetPhone = customer?.phone || phoneNumber || 'unknown';
-                    const fileName = `rec-${targetPhone}-${new Date().toISOString().replace(/:/g, '-')}.webm`;
+        console.groupCollapsed('[OMI] stopRecording');
+        try {
+            if (mediaRecorderRef.current?.state === 'recording') {
+                mediaRecorderRef.current.onstop = () => {
+                    console.info('[OMI] MediaRecorder stopped, chunks:', recordedChunksRef.current.length);
+                    if (recordedChunksRef.current.length > 0) {
+                        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+                        const targetPhone = customer?.phone || phoneNumber || 'unknown';
+                        const fileName = `rec-${targetPhone}-${new Date().toISOString().replace(/:/g, '-')}.webm`;
 
-                    if (isSale) {
-                        const file = new File([blob], fileName, { type: 'audio/webm' });
-                        const callStartTime = new Date(Date.now() - (callDuration.split(':').reduce((acc, time) => (60 * acc) + +time) * 1000));
-                        setLastCallInfo({ file, name: fileName, duration: callDuration, startTime: callStartTime });
-                        setIsPostCallModalOpen(true);
-                        setCallDuration("00:00");
-                    } else {
-                        const url = URL.createObjectURL(blob);
-                        setRecordings(prev => [...prev, { name: fileName, url }]);
-                        log(`Đã lưu ghi âm: ${fileName}`, 'success');
+                        if (isSale) {
+                            const file = new File([blob], fileName, { type: 'audio/webm' });
+                            // Tính startTime từ UI callDuration
+                            const totalSecs = callDuration.split(':').reduce((acc, t) => (60 * acc) + +t, 0);
+                            const callStartTime = new Date(Date.now() - (totalSecs * 1000));
+                            setLastCallInfo({ file, name: fileName, duration: callDuration, startTime: callStartTime });
+                            setIsPostCallModalOpen(true);
+                            setCallDuration("00:00");
+                            console.info('[OMI] Prepared Sale post-call info:', { fileName, callDuration, callStartTime });
+                        } else {
+                            const url = URL.createObjectURL(blob);
+                            setRecordings(prev => [...prev, { name: fileName, url }]);
+                            log(`Đã lưu ghi âm: ${fileName}`, 'success');
+                        }
                     }
+                    recordedChunksRef.current = [];
+                };
+                mediaRecorderRef.current.stop();
+                setIsRecording(false);
+                if (!isSale) {
+                    clearInterval(recordingTimerRef.current);
+                    setRecordingTime('00:00');
+                    log('Dừng ghi âm', 'info');
                 }
-                recordedChunksRef.current = [];
-            };
-
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
-            if (!isSale) {
-                clearInterval(recordingTimerRef.current);
-                setRecordingTime('00:00');
-                log('Dừng ghi âm', 'info');
+                console.info('[OMI] Recording stopped');
             }
+        } catch (e) {
+            console.error('[OMI] stopRecording ERROR:', e);
+        } finally {
+            console.groupEnd();
         }
     };
 
+    // ==== Audio devices & monitoring ====
     const initializeAudioDevices = async () => {
+        console.groupCollapsed('[OMI] initializeAudioDevices');
         try {
             await navigator.mediaDevices.getUserMedia({ audio: true });
             const devices = await navigator.mediaDevices.enumerateDevices();
@@ -420,9 +527,13 @@ export default function OMICallClient({ customer, user }) {
             setAudioDevices({ microphones, speakers });
             if (microphones.length > 0) setSelectedMic(microphones[0].deviceId);
             if (speakers.length > 0) setSelectedSpeaker(speakers[0].deviceId);
+            console.info('[OMI] mics:', microphones.length, 'speakers:', speakers.length);
             log(`Đã tải ${microphones.length} mic và ${speakers.length} loa`, 'success');
         } catch (error) {
+            console.error('[OMI] initializeAudioDevices ERROR:', error);
             log(`Lỗi tải thiết bị âm thanh: ${error.message}`, 'error');
+        } finally {
+            console.groupEnd();
         }
     };
 
@@ -432,10 +543,12 @@ export default function OMICallClient({ customer, user }) {
             setIsVideoOn(true);
             if (localVideoRef.current && callData.streams.local) localVideoRef.current.srcObject = callData.streams.local;
             if (remoteVideoRef.current && callData.streams.remote) remoteVideoRef.current.srcObject = callData.streams.remote;
+            console.info('[OMI] setupMediaElements video ON');
         }
     };
 
     const initializeAudioContext = () => {
+        console.groupCollapsed('[OMI] initializeAudioContext');
         try {
             if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
             if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
@@ -450,13 +563,19 @@ export default function OMICallClient({ customer, user }) {
                 source.connect(micGainNodeRef.current);
                 micGainNodeRef.current.connect(analyserRef.current);
             }
+            console.info('[OMI] AudioContext initialized');
         } catch (error) {
+            console.error('[OMI] initializeAudioContext ERROR:', error);
             log(`Lỗi khởi tạo audio context: ${error.message}`, 'error');
+        } finally {
+            console.groupEnd();
         }
     };
 
     const startAudioMonitoring = () => {
         if (isSale) return;
+        console.info('[OMI] startAudioMonitoring');
+        clearInterval(audioMonitoringIntervalRef.current);
         audioMonitoringIntervalRef.current = setInterval(() => {
             if (!analyserRef.current) return;
             const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
@@ -468,26 +587,85 @@ export default function OMICallClient({ customer, user }) {
 
     const stopAudioMonitoring = () => {
         if (isSale) return;
+        console.info('[OMI] stopAudioMonitoring');
         clearInterval(audioMonitoringIntervalRef.current);
         setMicLevel(0);
     };
 
-    const toggleMute = () => currentCallRef.current?.mute(isMuted => setIsMuted(isMuted));
-    const toggleHold = () => currentCallRef.current?.hold(isHeld => setIsHeld(isHeld));
-    const toggleVideo = () => currentCallRef.current?.camera(isVideoOn => setIsVideoOn(isVideoOn));
-    const toggleRecording = () => isRecording ? stopRecording() : startRecording();
+    // ==== Toggles ====
+    const toggleMute = () => {
+        console.info('[OMI] toggleMute pressed');
+        currentCallRef.current?.mute(isMuted => setIsMuted(isMuted));
+    };
+    const toggleHold = () => {
+        console.info('[OMI] toggleHold pressed');
+        currentCallRef.current?.hold(isHeld => setIsHeld(isHeld));
+    };
+    const toggleVideo = () => {
+        console.info('[OMI] toggleVideo pressed');
+        currentCallRef.current?.camera(isVideoOn => setIsVideoOn(isVideoOn));
+    };
+    const toggleRecording = () => {
+        console.info('[OMI] toggleRecording pressed');
+        isRecording ? stopRecording() : startRecording();
+    };
     const deleteRecording = (urlToDelete) => {
+        console.info('[OMI] deleteRecording:', urlToDelete);
         setRecordings(prev => prev.filter(rec => rec.url !== urlToDelete));
         URL.revokeObjectURL(urlToDelete);
     };
 
     useEffect(() => {
-        if (micGainNodeRef.current) micGainNodeRef.current.gain.value = micGain / 100;
+        if (micGainNodeRef.current) {
+            micGainNodeRef.current.gain.value = micGain / 100;
+            console.info('[OMI] micGain changed:', micGain);
+        }
     }, [micGain]);
     useEffect(() => {
-        if (remoteAudioRef.current) remoteAudioRef.current.volume = volume / 100;
+        if (remoteAudioRef.current) {
+            remoteAudioRef.current.volume = volume / 100;
+            console.info('[OMI] volume changed:', volume);
+        }
     }, [volume]);
 
+    // ==== Call History (Sale only) ====
+    const fetchCallHistory = async () => {
+        if (!isSale) return;
+        console.groupCollapsed('[OMI] fetchCallHistory');
+        setHistoryLoading(true);
+        setHistoryError(null);
+        try {
+            const q = customer?._id ? `?customerId=${customer._id}` : '';
+            const res = await fetch(`/api/omicall/history${q}`, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const rows = json?.data || json || [];
+            console.info('[OMI] history fetched:', { count: rows.length });
+            setCallHistory(rows);
+        } catch (e) {
+            console.error('[OMI] fetchCallHistory ERROR:', e);
+            setHistoryError(e.message);
+        } finally {
+            setHistoryLoading(false);
+            console.groupEnd();
+        }
+    };
+
+    // mount + đổi customer → refetch
+    useEffect(() => {
+        if (isSale) fetchCallHistory();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSale, customer?._id]);
+
+    // Sau khi đóng modal post-call (Sale) → refetch để cập nhật record mới
+    useEffect(() => {
+        if (isSale && !isPostCallModalOpen && lastCallInfo) {
+            fetchCallHistory();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isSale, isPostCallModalOpen, lastCallInfo]);
+
+    // ==== UI ====
     const renderSaleUI = () => (
         <>
             <Card className="shadow-lg w-full max-w-sm" style={{ height: 'max-content' }}>
@@ -568,6 +746,7 @@ export default function OMICallClient({ customer, user }) {
                 default: return null;
             }
         };
+
         return (
             <div className="container mx-auto p-4 max-w-6xl">
                 <header className="text-center mb-6">
@@ -602,8 +781,10 @@ export default function OMICallClient({ customer, user }) {
                             <CardContent>
                                 <div className="flex gap-2">
                                     <Input
-                                        type="tel" placeholder="Nhập số điện thoại..."
-                                        value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)}
+                                        type="tel"
+                                        placeholder="Nhập số điện thoại..."
+                                        value={phoneNumber}
+                                        onChange={(e) => setPhoneNumber(e.target.value)}
                                         onKeyPress={(e) => e.key === 'Enter' && makeCall(phoneNumber)}
                                     />
                                     <Button onClick={() => makeCall(phoneNumber)} disabled={!!callInfo || connectionStatus.status !== 'connected'}>
@@ -612,6 +793,7 @@ export default function OMICallClient({ customer, user }) {
                                 </div>
                             </CardContent>
                         </Card>
+
                         {callInfo && (
                             <Card>
                                 <CardHeader><CardTitle>Thông tin cuộc gọi</CardTitle></CardHeader>
@@ -633,12 +815,29 @@ export default function OMICallClient({ customer, user }) {
                             </Card>
                         )}
                     </div>
+
                     <div className="flex flex-col gap-6">
                         <Card>
                             <CardHeader><CardTitle className="flex items-center gap-2"><Settings className="h-5 w-5" />Cài đặt âm thanh</CardTitle></CardHeader>
                             <CardContent className="space-y-4">
-                                <div><Label>Microphone</Label><Select value={selectedMic} onValueChange={setSelectedMic}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{audioDevices.microphones.map(mic => (<SelectItem key={mic.deviceId} value={mic.deviceId}>{mic.label}</SelectItem>))}</SelectContent></Select></div>
-                                <div><Label>Loa</Label><Select value={selectedSpeaker} onValueChange={setSelectedSpeaker}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{audioDevices.speakers.map(spk => (<SelectItem key={spk.deviceId} value={spk.deviceId}>{spk.label}</SelectItem>))}</SelectContent></Select></div>
+                                <div>
+                                    <Label>Microphone</Label>
+                                    <Select value={selectedMic} onValueChange={setSelectedMic}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {audioDevices.microphones.map(mic => (<SelectItem key={mic.deviceId} value={mic.deviceId}>{mic.label}</SelectItem>))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label>Loa</Label>
+                                    <Select value={selectedSpeaker} onValueChange={setSelectedSpeaker}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {audioDevices.speakers.map(spk => (<SelectItem key={spk.deviceId} value={spk.deviceId}>{spk.label}</SelectItem>))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 <div><Label>Volume: {volume}%</Label><Slider value={[volume]} onValueChange={v => setVolume(v[0])} /></div>
                                 <div><Label>Mic Level</Label><Progress value={micLevel} /></div>
                             </CardContent>
@@ -654,13 +853,23 @@ export default function OMICallClient({ customer, user }) {
                                 {logs.map((log, index) => (
                                     <div key={index} className="flex items-start gap-2 mb-1">
                                         <span className="text-gray-500">{log.timestamp}</span>
-                                        <div className="flex-shrink-0 pt-0.5">{getLogIcon(log.type)}</div>
+                                        <div className="flex-shrink-0 pt-0.5">
+                                            {(() => {
+                                                switch (log.type) {
+                                                    case 'success': return <CheckCircle className="h-4 w-4 text-green-500" />;
+                                                    case 'error': return <AlertCircle className="h-4 w-4 text-red-500" />;
+                                                    case 'info': return <PhoneOutgoing className="h-4 w-4 text-blue-500" />;
+                                                    default: return null;
+                                                }
+                                            })()}
+                                        </div>
                                         <span className={`flex-grow ${log.type === 'error' ? 'text-red-600' : log.type === 'success' ? 'text-green-600' : 'text-gray-800'}`}>{log.message}</span>
                                     </div>
                                 ))}
                             </div>
                         </CardContent>
                     </Card>
+
                     <Card>
                         <CardHeader><CardTitle>File Ghi âm</CardTitle></CardHeader>
                         <CardContent>
@@ -678,19 +887,60 @@ export default function OMICallClient({ customer, user }) {
                         </CardContent>
                     </Card>
                 </div>
+
+                {/* 📞 Lịch sử gọi (Sale) */}
+                <Card className="mt-6">
+                    <CardHeader>
+                        <CardTitle>Lịch sử gọi</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {historyLoading && <p className="text-sm text-gray-500">Đang tải lịch sử…</p>}
+                        {historyError && <p className="text-sm text-red-500">Lỗi tải lịch sử: {historyError}</p>}
+                        {!historyLoading && !historyError && callHistory.length === 0 && (
+                            <p className="text-sm text-gray-500">Chưa có lịch sử cuộc gọi.</p>
+                        )}
+
+                        <div className="divide-y rounded-md border bg-white max-h-80 overflow-auto">
+                            {callHistory.map((h) => (
+                                <div key={h._id || `${h.startedAt}-${h.number}`} className="p-3 flex items-center gap-3">
+                                    <div className="w-48 text-xs text-gray-500">
+                                        {new Date(h.startedAt || h.createdAt).toLocaleString()}
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="font-medium">
+                                            {h.direction === 'in' ? '⬅️ In' : '➡️ Out'} • {h.number || h.remoteNumber || h.to}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                            Trạng thái: <span className="font-medium">{h.status || h.reason || 'completed'}</span>
+                                            {' • '}Thời lượng: <span className="font-mono">{h.duration || '-'}</span>
+                                            {h.endedBy ? <> {' • '}Kết thúc bởi: <span className="font-medium">{h.endedBy}</span></> : null}
+                                        </div>
+                                    </div>
+                                    {h.recordingUrl && (
+                                        <Button asChild variant="outline" size="sm">
+                                            <a href={h.recordingUrl} download> <Download className="h-4 w-4 mr-1" />Tải ghi âm</a>
+                                        </Button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
-        )
+        );
     };
 
     return (
         <>
             <Script
+                id="omicall-sdk-script"
                 src="https://cdn.omicrm.com/sdk/web/3.0.0/core.min.js"
                 onLoad={handleSDKLoad}
                 strategy="lazyOnload"
             />
             <div className="flex-1 scroll p-4 bg-gray-50 flex items-center justify-center">
-                {!isSale ? renderSaleUI() : renderFullUI()}
+                {/* Lưu ý: logic hiện tại là Sale → renderFullUI; Non-Sale → renderSaleUI */}
+                {isSale ? renderSaleUI() : renderFullUI()}
             </div>
             <audio ref={remoteAudioRef} playsInline style={{ display: 'none' }} />
         </>

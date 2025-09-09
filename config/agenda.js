@@ -97,7 +97,7 @@ function triggerRevalidation() {
         const host = process.env.URL || 'http://localhost:3000';
         const secret = process.env.REVALIDATE_SECRET_TOKEN;
         fetch(`${host}/api/cache/retag`, {
-            method: 'POST',
+            method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ secret, tag: 'customers' }),
         });

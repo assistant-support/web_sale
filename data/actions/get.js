@@ -9,6 +9,7 @@ import Logs from '@/models/log.model'
 import Customer from '@/models/customer.model'
 import Zalo from '@/models/zalo.model'
 import connectDB from '@/config/connectDB'
+import mongoose from "mongoose";
 
 export async function area_data(_id) {
     let data = _id ? await getAreaOne(_id) : await getAreaAll()
@@ -37,30 +38,57 @@ export async function form_data() {
     return await getFormAll()
 }
 // Lịch sử chăm sóc
+
 export async function history_data(id, type) {
+    console.log(id);
+
     try {
         await connectDB();
+
+        // Tạo filter
         const filter = {};
 
+        // Nếu có id thì lọc theo customer
+        if (id) {
+            if (!mongoose.isValidObjectId(id)) {
+                return { success: false, error: "customer id không hợp lệ." };
+            }
+            filter.customer = new mongoose.Types.ObjectId(id);
+        }
+
+        // Nếu có type thì lọc thêm
+        if (type) {
+            filter.type = type;
+        }
+
+        // Tính hạn mức từ tất cả tài khoản Zalo
         const zaloAccounts = await Zalo.find({}).lean();
         const zaloLimits = {
-            hourly: zaloAccounts.reduce((sum, account) => sum + (account.rateLimit?.hourly || account.rateLimitPerHour || 0), 0),
-            daily: zaloAccounts.reduce((sum, account) => sum + (account.rateLimit?.daily || account.rateLimitPerDay || 0), 0)
+            hourly: zaloAccounts.reduce(
+                (sum, acc) => sum + (acc.rateLimit?.hourly ?? acc.rateLimitPerHour ?? 0),
+                0
+            ),
+            daily: zaloAccounts.reduce(
+                (sum, acc) => sum + (acc.rateLimit?.daily ?? acc.rateLimitPerDay ?? 0),
+                0
+            ),
         };
+        console.log(filter);
 
-        // Lấy toàn bộ lịch sử log
+        // Lấy lịch sử log theo filter
         const history = await Logs.find(filter)
-            .populate('zalo', 'name avt')
-            .populate('createBy', 'name')
+            .populate("zalo", "name avt")
+            .populate("createBy", "name")
             .sort({ createdAt: -1 })
             .lean();
-            
-        const plainHistory = JSON.parse(JSON.stringify(history));
+        console.log(history);
         
-        return { 
-            success: true, 
+        const plainHistory = JSON.parse(JSON.stringify(history));
+
+        return {
+            success: true,
             data: plainHistory,
-            zaloLimits 
+            zaloLimits,
         };
     } catch (err) {
         console.error("Error getting history:", err);

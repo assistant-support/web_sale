@@ -1,6 +1,8 @@
 'use client';
 import styles from './index.module.css';
-import { useState, Suspense, useMemo } from 'react';
+import { useState, Suspense, useMemo, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+
 import CustomerTable from './ui/table';
 import FilterControls from "./ui/filter";
 import SettingLabel from "./ui/label";
@@ -13,18 +15,22 @@ import SettingZaloRoles from './ui/zalos';
 import ActionHistory from './ui/hisotry';
 
 function TableSkeleton() {
-    return <div style={{ height: '500px', background: '#f8f9fa', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Đang tải dữ liệu...</div>;
+    return (
+        <div style={{ height: '500px', background: '#f8f9fa', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            Đang tải dữ liệu...
+        </div>
+    );
 }
-export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
-    const [selectedCustomers, setSelectedCustomers] = useState(new Map());
 
+export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
+    const router = useRouter();
+    const intervalRef = useRef(null);
+
+    const [selectedCustomers, setSelectedCustomers] = useState(new Map());
     const [viewMode, setViewMode] = useState('manage');
-    const handleActionComplete = () => {
-        setSelectedCustomers(new Map());
-    };
-    const toggleViewMode = () => {
-        setViewMode(prev => prev === 'manage' ? 'view' : 'manage');
-    };
+
+    const handleActionComplete = () => setSelectedCustomers(new Map());
+    const toggleViewMode = () => setViewMode(prev => prev === 'manage' ? 'view' : 'manage');
 
     // Chia lịch thành 2 trường hợp là đang chạy và đã hoàn thành
     const { runningSchedules, historySchedules } = useMemo(() => {
@@ -37,8 +43,55 @@ export default function CustomerView({ c, running, initialResult, user, sources,
             }
             return acc;
         }, { runningSchedules: [], historySchedules: [] });
-
     }, [running]);
+
+    // ===== Auto refresh mỗi 5s với router.refresh() =====
+    useEffect(() => {
+        // Chỉ refresh khi có job đang chạy; nếu muốn luôn refresh thì bỏ điều kiện này
+        const shouldPoll = true; // hoặc: runningSchedules.length > 0
+
+        const startPolling = () => {
+            if (intervalRef.current || !shouldPoll) return;
+            intervalRef.current = setInterval(() => {
+                // Tránh refresh khi tab ẩn để tiết kiệm tài nguyên
+                if (typeof document !== 'undefined' && document.hidden) return;
+                router.refresh();
+            }, 5000);
+        };
+
+        const stopPolling = () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
+
+        // Bật/tắt theo visibility
+        const onVisibilityChange = () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                router.refresh(); // refresh ngay khi quay lại tab
+                startPolling();
+            }
+        };
+
+        // Bật lần đầu
+        startPolling();
+
+        // Lắng nghe thay đổi visibility + focus
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        window.addEventListener('focus', onVisibilityChange);
+
+        // Dọn dẹp
+        return () => {
+            stopPolling();
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            window.removeEventListener('focus', onVisibilityChange);
+        };
+    }, [router /* , runningSchedules.length */]);
+    // =====================================================
+
     return (
         <div className={styles.container}>
             {viewMode === 'manage' && (
@@ -73,7 +126,13 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                             </div>
                         </div>
                     </div>
-                    <FilterControls auth={user[0]} zaloAccounts={zaloData} users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} labels={labelData} sources={sources} />
+                    <FilterControls
+                        auth={user[0]}
+                        zaloAccounts={zaloData}
+                        users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
+                        labels={labelData}
+                        sources={sources}
+                    />
                 </>
             )}
             <Suspense fallback={<TableSkeleton />}>
