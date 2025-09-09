@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useActionState, useTransit
 import { useFormStatus } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createScheduleAction } from '@/app/actions/schedule.actions';
-import { updateCustomerStatusAction, assignRoleToCustomersAction } from '@/app/actions/customer.actions';
+import { updateCustomerStatusAction, assignRoleToCustomersAction, unassignRoleFromCustomersAction } from '@/app/actions/customer.actions';
 import { createWorkflowScheduleAction } from '@/data/workflow/wraperdata.db';
 import FlexiblePopup from '@/components/(features)/(popup)/popup_right';
 import Noti from '@/components/(features)/(noti)/noti';
@@ -35,7 +35,10 @@ function ProgressPopup({ open, progress, onBackdropClick }) {
                 <h5>Đang xử lý hàng loạt...</h5>
                 <div className={styles.progressInfo}>
                     <h6>Hoàn thành: {progress.success + progress.failed}/{progress.total}</h6>
-                    <h6>Thành công: <span style={{ color: 'var(--green)' }}>{progress.success}</span> - Thất bại: <span style={{ color: 'var(--red)' }}>{progress.failed}</span></h6>
+                    <h6>
+                        Thành công: <span style={{ color: 'var(--green)' }}>{progress.success}</span> - Thất bại:{' '}
+                        <span style={{ color: 'var(--red)' }}>{progress.failed}</span>
+                    </h6>
                 </div>
                 <div className={styles.progressBar}>
                     <div className={styles.success} style={{ width: `${successPercent}%` }}></div>
@@ -76,9 +79,13 @@ function MessageEditor({ value, onChange, variants }) {
         onChange(text);
         const cursorPosition = e.target.selectionStart;
         const lastBraceIndex = text.lastIndexOf('{', cursorPosition - 1);
-        if (lastBraceIndex !== -1 && !text.substring(lastBraceIndex + 1, cursorPosition).includes('}') && !text.substring(lastBraceIndex + 1, cursorPosition).includes(' ')) {
+        if (
+            lastBraceIndex !== -1 &&
+            !text.substring(lastBraceIndex + 1, cursorPosition).includes('}') &&
+            !text.substring(lastBraceIndex + 1, cursorPosition).includes(' ')
+        ) {
             const query = text.substring(lastBraceIndex + 1, cursorPosition);
-            setSuggestions(allVariants.filter(v => v.name.toLowerCase().startsWith(query.toLowerCase())));
+            setSuggestions(allVariants.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())));
             setShowSuggestions(true);
             triggerIndexRef.current = lastBraceIndex;
         } else {
@@ -103,11 +110,25 @@ function MessageEditor({ value, onChange, variants }) {
 
     return (
         <div className={styles.editorContainer}>
-            <textarea name="messageTemplate" className='input scroll' rows="8" placeholder="Nhập nội dung tin nhắn..." value={value} style={{ width: 'calc(100% - 24px)' }} onChange={handleTextChange} ref={textareaRef} />
+            <textarea
+                name="messageTemplate"
+                className="input scroll"
+                rows="8"
+                placeholder="Nhập nội dung tin nhắn..."
+                value={value}
+                style={{ width: 'calc(100% - 24px)' }}
+                onChange={handleTextChange}
+                ref={textareaRef}
+            />
             {showSuggestions && suggestions.length > 0 && (
                 <div className={styles.suggestionsList}>
-                    {suggestions.map(variant => (
-                        <div key={variant._id} className={styles.suggestionItem} onMouseDown={(e) => e.preventDefault()} onClick={() => handleSuggestionClick(variant.name)}>
+                    {suggestions.map((variant) => (
+                        <div
+                            key={variant._id}
+                            className={styles.suggestionItem}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => handleSuggestionClick(variant.name)}
+                        >
                             <h6>{variant.name}</h6>
                             <p>{variant.description}</p>
                         </div>
@@ -130,10 +151,12 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
     const [messageContent, setMessageContent] = useState('');
     const [selectedLabelTitle, setSelectedLabelTitle] = useState('Chọn chiến dịch có sẵn');
     const [selectedUserId, setSelectedUserId] = useState('');
-    const [selectedUserName, setSelectedUserName] = useState('Chọn người phụ trách');
+    const [selectedUserName, setSelectedUserName] = useState('');
     const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
     const [selectedWorkflowName, setSelectedWorkflowName] = useState('Chọn Workflow');
+
     const totalCustomers = selectedCustomers.size;
+
     const actionOptions = useMemo(() => {
         const baseActions = [
             { value: 'sendMessage', name: 'Gửi tin nhắn Zalo' },
@@ -143,7 +166,7 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
         ];
         if (!auth.role.includes('Sale')) {
             baseActions.push({ value: 'assignRole', name: 'Gán người phụ trách' });
-            baseActions.push({ value: 'assignRole', name: 'Gán người phụ trách' });
+            baseActions.push({ value: 'unassignRole', name: 'Bỏ gán người phụ trách' });
         }
         const customerActions = [];
         return !currentType ? [...baseActions, ...customerActions] : baseActions;
@@ -151,9 +174,67 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
 
     const isScheduleAction = useMemo(() => ['findUid', 'sendMessage', 'checkFriend', 'addFriend'].includes(actionType), [actionType]);
     const isAssignAction = useMemo(() => actionType === 'assignRole', [actionType]);
+    const isUnassignAction = useMemo(() => actionType === 'unassignRole', [actionType]);
     const isWorkflowAction = useMemo(() => actionType === 'workflow', [actionType]);
-    const selectedActionName = useMemo(() => actionOptions.find(opt => opt.value === actionType)?.name, [actionType, actionOptions]);
-    const customersArray = useMemo(() => Array.from(selectedCustomers.values()).map(c => ({ _id: c._id, name: c.name, phone: c.phone, uid: c.uid })), [selectedCustomers]);
+    const needsUserPicker = isAssignAction || isUnassignAction;
+
+    const selectedActionName = useMemo(() => actionOptions.find((opt) => opt.value === actionType)?.name, [actionType, actionOptions]);
+
+    // Tạo mảng customers từ Map
+    const customersArray = useMemo(
+        () => Array.from(selectedCustomers.values()).map((c) => ({ _id: c._id, name: c.name, phone: c.phone, uid: c.uid, assignees: c.assignees })),
+        [selectedCustomers]
+    );
+
+    // Danh sách user hiển thị cho menu chọn user:
+    // - Nếu assign: dùng toàn bộ `users`
+    // - Nếu unassign: chỉ hiển thị những user đang được gán trong các khách hàng đã chọn (hợp nhất & match sang `users` để có đủ email/name chuẩn)
+    const unassignUserIds = useMemo(() => {
+        if (!isUnassignAction) return new Set();
+        const set = new Set();
+        for (const c of customersArray) {
+            if (Array.isArray(c.assignees)) {
+                c.assignees.forEach((a) => {
+                    const uid = a?.user?._id || a?.user;
+                    if (uid) set.add(String(uid));
+                });
+            }
+        }
+        return set;
+    }, [isUnassignAction, customersArray]);
+
+    const visibleUsers = useMemo(() => {
+        if (isUnassignAction) {
+            // Lấy từ props users, lọc theo unassignUserIds để hiển thị tên/email thống nhất
+            const list = users.filter((u) => unassignUserIds.has(String(u._id)));
+            // Nếu có assignees mà user đó không có trong `users`, fallback từ assignees (đảm bảo không thiếu)
+            const knownIds = new Set(list.map((u) => String(u._id)));
+            for (const c of customersArray) {
+                if (Array.isArray(c.assignees)) {
+                    c.assignees.forEach((a) => {
+                        const uid = String(a?.user?._id || a?.user || '');
+                        if (uid && unassignUserIds.has(uid) && !knownIds.has(uid)) {
+                            list.push({
+                                _id: uid,
+                                name: a?.user?.name || 'Người dùng',
+                                email: a?.user?.email || '',
+                            });
+                            knownIds.add(uid);
+                        }
+                    });
+                }
+            }
+            return list;
+        }
+        // assign
+        return users;
+    }, [isUnassignAction, users, unassignUserIds, customersArray]);
+
+    // Placeholder cho nút chọn user
+    const userPickerPlaceholder = useMemo(() => {
+        if (selectedUserName) return selectedUserName;
+        return isUnassignAction ? 'Chọn người cần bỏ gán' : 'Chọn người phụ trách';
+    }, [isUnassignAction, selectedUserName]);
 
     // Định dạng thời gian ước tính.
     function formatDuration(ms) {
@@ -181,7 +262,7 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
         setIsLabelMenuOpen(false);
     };
 
-    // Xử lý chọn user để gán.
+    // Xử lý chọn user.
     const handleSelectUser = (user) => {
         setSelectedUserId(user._id);
         setSelectedUserName(user.name);
@@ -198,8 +279,8 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
     // Xử lý submit form.
     const handleSubmit = (event) => {
         event.preventDefault();
-        if (isAssignAction && !selectedUserId) {
-            alert('Vui lòng chọn một người để gán.');
+        if (needsUserPicker && !selectedUserId) {
+            alert(isUnassignAction ? 'Vui lòng chọn người cần bỏ gán.' : 'Vui lòng chọn một người để gán.');
             return;
         }
         if (isWorkflowAction && !selectedWorkflowId) {
@@ -210,31 +291,52 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
         onSubmitAction(formData);
     };
 
-    const isSubmitDisabled = (isAssignAction && !selectedUserId) || (isWorkflowAction && !selectedWorkflowId);
+    const isSubmitDisabled = (needsUserPicker && !selectedUserId) || (isWorkflowAction && !selectedWorkflowId);
 
     return (
         <form onSubmit={handleSubmit} className={styles.formContainer}>
             <input type="hidden" name="actionType" value={actionType} />
-            <input type="hidden" name="selectedCustomersJSON" value={JSON.stringify(customersArray)} />
-            {isAssignAction && <input type="hidden" name="userId" value={selectedUserId} />}
+            <input type="hidden" name="selectedCustomersJSON" value={JSON.stringify(customersArray.map(({ assignees, ...rest }) => rest))} />
+            {needsUserPicker && <input type="hidden" name="userId" value={selectedUserId} />}
             {isWorkflowAction && <input type="hidden" name="workflowId" value={selectedWorkflowId} />}
 
-            <div className={styles.inputGroup}><label>Hành động</label><Menu isOpen={isActionMenuOpen} onOpenChange={setIsActionMenuOpen} customButton={<div className='input text_6_400'>{selectedActionName}</div>} menuItems={<div className={`${styles.menulist} scroll`}>{actionOptions.map((opt, index) => <p key={index} className='text_6_400' onClick={() => { setActionType(opt.value); setIsActionMenuOpen(false); }}>{opt.name}</p>)}</div>} menuPosition="bottom" /></div>
+            <div className={styles.inputGroup}>
+                <label>Hành động</label>
+                <Menu
+                    isOpen={isActionMenuOpen}
+                    onOpenChange={setIsActionMenuOpen}
+                    customButton={<div className='input text_6_400'>{selectedActionName}</div>}
+                    menuItems={
+                        <div className={`${styles.menulist} scroll`}>
+                            {actionOptions.map((opt, index) => (
+                                <p key={index} className='text_6_400' onClick={() => { setActionType(opt.value); setSelectedUserId(''); setSelectedUserName(''); setIsActionMenuOpen(false); }}>
+                                    {opt.name}
+                                </p>
+                            ))}
+                        </div>
+                    }
+                    menuPosition="bottom"
+                />
+            </div>
 
-            {isAssignAction && (
+            {needsUserPicker && (
                 <div className={styles.inputGroup}>
-                    <label>Chọn người phụ trách</label>
+                    <label>{isUnassignAction ? 'Chọn người cần bỏ gán' : 'Chọn người phụ trách'}</label>
                     <Menu
                         isOpen={isUserMenuOpen}
                         onOpenChange={setIsUserMenuOpen}
-                        customButton={<div className='input text_6_400'>{selectedUserName}</div>}
+                        customButton={<div className='input text_6_400'>{userPickerPlaceholder || (isUnassignAction ? 'Chọn người cần bỏ gán' : 'Chọn người phụ trách')}</div>}
                         menuItems={
                             <div className={`${styles.menulist} scroll`}>
-                                {users.map(user => (
-                                    <p key={user._id} className='text_6_400' onClick={() => handleSelectUser(user)}>
-                                        {user.name} ({user.email})
-                                    </p>
-                                ))}
+                                {visibleUsers.length === 0 ? (
+                                    <p className='text_6_400' style={{ opacity: 0.7 }}>Không có người phù hợp</p>
+                                ) : (
+                                    visibleUsers.map((user) => (
+                                        <p key={user._id} className='text_6_400' onClick={() => handleSelectUser(user)}>
+                                            {user.name} {user.email ? `(${user.email})` : ''}
+                                        </p>
+                                    ))
+                                )}
                             </div>
                         }
                         menuPosition="bottom"
@@ -252,7 +354,7 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
                             customButton={<div className='input text_6_400'>{selectedWorkflowName}</div>}
                             menuItems={
                                 <div className={`${styles.menulist} scroll`}>
-                                    {workflows.map(workflow => (
+                                    {workflows.map((workflow) => (
                                         <p key={workflow._id} className='text_6_400' onClick={() => handleSelectWorkflow(workflow)}>
                                             {workflow.name}
                                         </p>
@@ -271,28 +373,73 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
 
             {isScheduleAction && (
                 <>
-                    <div className={styles.inputGroup}><label>Tên lịch trình</label><input name="jobName" className='input' placeholder={`Ví dụ: Gửi tin tháng ${new Date().getMonth() + 1}`} required /></div>
+                    <div className={styles.inputGroup}>
+                        <label>Tên lịch trình</label>
+                        <input name="jobName" className='input' placeholder={`Ví dụ: Gửi tin tháng ${new Date().getMonth() + 1}`} required />
+                    </div>
                     {['sendMessage', 'addFriend'].includes(actionType) && (
                         <>
-                            <div className={styles.inputGroup}><label>Chọn chiến dịch (Tùy chọn)</label><Menu isOpen={isLabelMenuOpen} onOpenChange={setIsLabelMenuOpen} customButton={<div className='input text_6_400'>{selectedLabelTitle}</div>} menuItems={<div className={`${styles.menulist} scroll`}>{labels.map(l => <p key={l._id} className='text_6_400' onClick={() => handleSelectLabel(l)}>{l.title}</p>)}</div>} menuPosition="bottom" /></div>
-                            <div className={styles.inputGroup}><label>Nội dung tin nhắn</label><MessageEditor value={messageContent} onChange={setMessageContent} variants={variants} /></div>
+                            <div className={styles.inputGroup}>
+                                <label>Chọn chiến dịch (Tùy chọn)</label>
+                                <Menu
+                                    isOpen={isLabelMenuOpen}
+                                    onOpenChange={setIsLabelMenuOpen}
+                                    customButton={<div className='input text_6_400'>{selectedLabelTitle}</div>}
+                                    menuItems={
+                                        <div className={`${styles.menulist} scroll`}>
+                                            {labels.map((l) => (
+                                                <p key={l._id} className='text_6_400' onClick={() => handleSelectLabel(l)}>
+                                                    {l.title}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    }
+                                    menuPosition="bottom"
+                                />
+                            </div>
+                            <div className={styles.inputGroup}>
+                                <label>Nội dung tin nhắn</label>
+                                <MessageEditor value={messageContent} onChange={setMessageContent} variants={variants} />
+                            </div>
                         </>
                     )}
-                    <div className={styles.inputGroup}><label>Số lượng gửi / giờ</label>
+                    <div className={styles.inputGroup}>
+                        <label>Số lượng gửi / giờ</label>
                         <div className={styles.estimationBox}>
-                            <div className={styles.estimationInfo}><h5 className='text_w_500'>Ước tính</h5><h6>Sẽ thực hiện cho <b>{totalCustomers}</b> người, hoàn thành trong <b>{estimatedTime}</b>.</h6></div>
-                            <div className={styles.numberInput}><button type="button" onClick={() => setActionsPerHour(p => Math.max(1, p - 5))}><h5>-</h5></button><input type="number" className='input' name="actionsPerHour" value={actionsPerHour.toString()}
-                                onChange={(e) => {
-                                    let val = e.target.value;
-                                    val = val.replace(/^0+(?=\d)/, '');
-                                    setActionsPerHour(val === '' ? '' : Number(val))
-                                }} /><button type="button" onClick={() => setActionsPerHour(p => p + 5)}><h5>+</h5></button></div>
+                            <div className={styles.estimationInfo}>
+                                <h5 className='text_w_500'>Ước tính</h5>
+                                <h6>
+                                    Sẽ thực hiện cho <b>{totalCustomers}</b> người, hoàn thành trong <b>{estimatedTime}</b>.
+                                </h6>
+                            </div>
+                            <div className={styles.numberInput}>
+                                <button type="button" onClick={() => setActionsPerHour((p) => Math.max(1, (p || 0) - 5))}>
+                                    <h5>-</h5>
+                                </button>
+                                <input
+                                    type="number"
+                                    className="input"
+                                    name="actionsPerHour"
+                                    value={actionsPerHour.toString()}
+                                    onChange={(e) => {
+                                        let val = e.target.value;
+                                        val = val.replace(/^0+(?=\d)/, '');
+                                        setActionsPerHour(val === '' ? '' : Number(val));
+                                    }}
+                                />
+                                <button type="button" onClick={() => setActionsPerHour((p) => (p || 0) + 5)}>
+                                    <h5>+</h5>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </>
             )}
+
             <div className={styles.formActions}>
-                <button type="button" className='btn_s' onClick={onClose}><h5>Hủy</h5></button>
+                <button type="button" className="btn_s" onClick={onClose}>
+                    <h5>Hủy</h5>
+                </button>
                 <SubmitButton disabled={isSubmitDisabled} />
             </div>
         </form>
@@ -315,10 +462,15 @@ export default function BulkActions({ auth, selectedCustomers, onActionComplete,
 
     const [scheduleState, scheduleAction] = useActionState(createScheduleAction, { success: null, message: null, error: null });
     const [assignState, assignAction] = useActionState(assignRoleToCustomersAction, { success: null, message: null, error: null });
+    const [unassignState, unassignAction] = useActionState(unassignRoleFromCustomersAction, { success: null, message: null, error: null });
     const [workflowState, workflowAction] = useActionState(createWorkflowScheduleAction, { success: null, message: null, error: null });
 
-    const isAnyActionPending = isTransitionPending || (scheduleState.success === null && isTransitionPending) || (assignState.success === null && isTransitionPending) || (workflowState.success === null && isTransitionPending);
-
+    const isAnyActionPending =
+        isTransitionPending ||
+        (scheduleState.success === null && isTransitionPending) ||
+        (assignState.success === null && isTransitionPending) ||
+        (unassignState.success === null && isTransitionPending) ||
+        (workflowState.success === null && isTransitionPending);
 
     const onActionCompleteRef = useRef(onActionComplete);
     useEffect(() => {
@@ -346,6 +498,17 @@ export default function BulkActions({ auth, selectedCustomers, onActionComplete,
             }
         }
     }, [assignState, router]);
+
+    useEffect(() => {
+        if (unassignState.success !== null) {
+            setNotification({ open: true, status: unassignState.success, mes: unassignState.message || unassignState.error });
+            if (unassignState.success) {
+                onActionCompleteRef.current();
+                setIsPopupOpen(false);
+                router.refresh();
+            }
+        }
+    }, [unassignState, router]);
 
     useEffect(() => {
         if (workflowState.success !== null) {
@@ -391,6 +554,8 @@ export default function BulkActions({ auth, selectedCustomers, onActionComplete,
                 scheduleAction(formData);
             } else if (actionType === 'assignRole') {
                 assignAction(formData);
+            } else if (actionType === 'unassignRole') {
+                unassignAction(formData);
             } else if (actionType === 'workflow') {
                 workflowAction(formData);
             } else {
@@ -449,7 +614,7 @@ export default function BulkActions({ auth, selectedCustomers, onActionComplete,
                     <Loading content={<h5>Đang gửi yêu cầu...</h5>} />
                 </div>
             )}
-            <Noti open={notification.open} onClose={() => setNotification(p => ({ ...p, open: false }))} status={notification.status} mes={notification.mes} />
+            <Noti open={notification.open} onClose={() => setNotification((p) => ({ ...p, open: false }))} status={notification.status} mes={notification.mes} />
         </>
     );
 }

@@ -348,3 +348,85 @@ export async function assignRoleToCustomersAction(prevState, formData) {
         return { success: false, error: 'Đã xảy ra lỗi phía máy chủ. Vui lòng thử lại.' };
     }
 }
+
+/**
+ * Bỏ gán một hoặc nhiều khách hàng khỏi một nhân viên Sale.
+ * Đồng thời cập nhật trạng thái pipeline (nếu không còn ai phụ trách) và ghi log chăm sóc (care).
+ */
+export async function unassignRoleFromCustomersAction(prevState, formData) {
+    // 1) Xác thực & phân quyền
+    const user = await checkAuthToken();
+    if (!user || !user.id) {
+        return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
+    }
+    if (!user.role.includes('Admin') && !user.role.includes('Admin Sale')) {
+        return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
+    }
+
+    // 2) Dữ liệu đầu vào
+    const customersJSON = formData.get('selectedCustomersJSON');
+    const userIdToUnassign = formData.get('userId');
+
+    if (!userIdToUnassign || !customersJSON) {
+        return { success: false, error: 'Dữ liệu không hợp lệ. Vui lòng chọn người cần bỏ gán và khách hàng.' };
+    }
+
+    let customerIds;
+    try {
+        customerIds = JSON.parse(customersJSON).map((c) => c._id);
+        if (!Array.isArray(customerIds) || customerIds.length === 0) {
+            return { success: false, error: 'Không có khách hàng nào được chọn.' };
+        }
+    } catch {
+        return { success: false, error: 'Định dạng danh sách khách hàng không đúng.' };
+    }
+
+    try {
+        await connectDB();
+
+        // 3) Lấy thông tin nhân viên để ghi log
+        const assignedUser = await User.findById(userIdToUnassign).lean();
+        if (!assignedUser) {
+            return { success: false, error: 'Không tìm thấy thông tin nhân viên cần bỏ gán.' };
+        }
+
+        // 4) Care note (yêu cầu)
+        const careNote = {
+            content: `Hồ sơ được bỏ phân bổ cho: ${assignedUser.name || 'N/A'}`,
+            createBy: new mongoose.Types.ObjectId(user.id),
+            step: 3, // Ghi log cho Bước 3
+            createAt: new Date()
+        };
+
+        // 5) Bỏ gán khỏi mảng assignees + ghi care
+        const pullResult = await Customer.updateMany(
+            { _id: { $in: customerIds } },
+            {
+                $pull: { assignees: { user: new mongoose.Types.ObjectId(userIdToUnassign) } },
+                $push: { care: careNote }
+            }
+        );
+
+        // 6) Nếu hồ sơ không còn ai phụ trách => set pipeline về trạng thái unassigned
+        const UNASSIGNED_STATUS = 'unassigned_3';
+
+        const affectedCustomers = await Customer.find(
+            { _id: { $in: customerIds } },
+            { _id: 1, assignees: 1 }
+        ).lean();
+
+        const idsNoAssignee = affectedCustomers
+            .filter((c) => !c.assignees || c.assignees.length === 0)
+            .map((c) => c._id);
+
+        revalidateData();
+
+        return {
+            success: true,
+            message: `Đã bỏ gán khỏi ${pullResult.modifiedCount} khách hàng${idsNoAssignee.length ? `; ${idsNoAssignee.length} hồ sơ không còn ai phụ trách.` : '.'}`
+        };
+    } catch (error) {
+        console.error('Lỗi khi bỏ gán người phụ trách hàng loạt:', error);
+        return { success: false, error: 'Đã xảy ra lỗi phía máy chủ. Vui lòng thử lại.' };
+    }
+}
