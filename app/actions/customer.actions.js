@@ -291,11 +291,6 @@ export async function updateCustomerStatusAction(previousState, formData) {
 export async function assignRoleToCustomersAction(prevState, formData) {
     // 1. Xác thực và phân quyền người dùng
     const user = await checkAuthToken();
-    if (!user || !user.id) return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
-    if (!user.role.includes('Admin') && !user.role.includes('Admin Sale')) {
-        return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
-    }
-
     // 2. Lấy và kiểm tra dữ liệu đầu vào
     const customersJSON = formData.get('selectedCustomersJSON');
     const userIdToAssign = formData.get('userId');
