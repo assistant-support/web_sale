@@ -3,10 +3,14 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
+import Popup from '@/components/ui/popup';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Users, CheckCircle, AlertTriangle, Clock, History, ChevronDown, Check } from 'lucide-react';
+import {
+    Users, CheckCircle, AlertTriangle, Clock, History, ChevronDown, Check,
+    Phone, Mail, MapPin, User, Tag, Calendar, Link as LinkIcon
+} from 'lucide-react';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
@@ -46,16 +50,8 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
         if (!open) return;
 
         if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setActive(prev => (prev + 1) % options.length);
-            return;
-        }
-        if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setActive(prev => (prev - 1 + options.length) % options.length);
-            return;
-        }
+        if (e.key === 'ArrowDown') { e.preventDefault(); setActive(prev => (prev + 1) % options.length); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); setActive(prev => (prev - 1 + options.length) % options.length); return; }
         if (e.key === 'Enter') {
             e.preventDefault();
             const opt = options[active] || options.find(o => o.value === value);
@@ -66,22 +62,19 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
 
     return (
         <div className="w-full">
-            {label && <label className="block mb-5 text-sm text-muted-foreground">{label}</label>}
-            <div className="relative mt-2" onKeyDown={handleKeyDown}>
+            {label && <label className="block mb-2 text-xs text-muted-foreground">{label}</label>}
+            <div className="relative" onKeyDown={handleKeyDown}>
                 <button
                     ref={btnRef}
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={open}
                     onClick={() => setOpen(v => !v)}
-                    className={`inline-flex w-full items-center justify-between gap-2 rounded-[6px] border px-3 py-2 text-sm ${buttonClassName}`}
+                    className={`inline-flex w-full items-center justify-between gap-2 rounded-[6px] border px-3 py-2 text-xs ${buttonClassName}`}
                     style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                 >
                     <span className="truncate">{current.label}</span>
-                    <ChevronDown
-                        className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`}
-                        style={{ color: 'var(--text-primary)' }}
-                    />
+                    <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
                 </button>
 
                 {open && (
@@ -102,8 +95,7 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
                                     aria-selected={selected}
                                     onMouseEnter={() => setActive(idx)}
                                     onClick={() => { onChange(opt.value); setOpen(false); }}
-                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
-                                        } ${selected ? 'font-medium' : ''}`}
+                                    className={`px-3 py-2 text-xs cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'} ${selected ? 'font-medium' : ''}`}
                                 >
                                     <span className="truncate">{opt.label}</span>
                                     {selected && <Check className="w-4 h-4" />}
@@ -111,7 +103,7 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
                             );
                         })}
                         {options.length === 0 && (
-                            <li className="px-3 py-2 text-sm text-muted-foreground">Không có lựa chọn</li>
+                            <li className="px-3 py-2 text-xs text-muted-foreground">Không có lựa chọn</li>
                         )}
                     </ul>
                 )}
@@ -125,12 +117,12 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
 const StatCard = ({ title, value, icon: Icon, description, color }) => (
     <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border-l-4" style={{ borderLeftColor: color }}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{title}</CardTitle>
-            <Icon className="h-5 w-5 text-muted-foreground" style={{ color }} />
+            <CardTitle className="text-xs font-medium">{title}</CardTitle>
+            <Icon className="h-4 w-4" style={{ color }} />
         </CardHeader>
         <CardContent>
-            <div className="text-2xl font-bold">{value}</div>
-            <h5 className="text-xs text-muted-foreground">{description}</h5>
+            <div className="text-xl font-bold leading-tight">{value}</div>
+            <h5 className="text-[10px] text-muted-foreground">{description}</h5>
         </CardContent>
     </Card>
 );
@@ -150,29 +142,203 @@ const DataQualityChart = ({ valid, invalid, missing }) => {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-            legend: { position: 'bottom' },
-            title: { display: true, text: 'Tỷ lệ chất lượng Data', font: { size: 16 } },
+            legend: { position: 'bottom', labels: { boxWidth: 10 } },
+            title: { display: true, text: 'Tỷ lệ chất lượng Data', font: { size: 14 } },
         },
     };
     return <Doughnut data={data} options={options} />;
 };
 
-function ReceptionLogTable({ logs, visibleCount, onReachEnd }) {
+/* ======================= Helpers ======================= */
+
+function hasZalo(customer) {
+    const hasUid = Array.isArray(customer.uid) && customer.uid.length > 0 && customer.uid[0]?.uid;
+    const noteSuccess = Array.isArray(customer.care) && customer.care.some(
+        (n) => /tìm uid zalo/i.test(n.content || '') && /thành công/i.test(n.content || '')
+    );
+    return !!(hasUid || noteSuccess);
+}
+
+function isMissingInfo(customer) {
+    return !customer?.name || !customer?.phone;
+}
+
+function deriveGroup(customer, serviceMap) {
+    const tagTypes = new Set(
+        (customer?.tags || [])
+            .map((id) => serviceMap.get(String(id))?.type)
+            .filter(Boolean)
+    );
+    if (tagTypes.has('ngoai_khoa')) return 'ngoai_khoa';
+    if (tagTypes.has('noi_khoa')) return 'noi_khoa';
+    return 'unknown';
+}
+
+const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
+
+const currency = (v) =>
+    new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(v || 0);
+
+const prettyStatus = (raw) => {
+    if (!raw) return { text: 'Không rõ', color: 'bg-slate-200 text-slate-700' };
+    const key = raw.toLowerCase();
+    if (key.includes('valid')) return { text: 'Hợp lệ', color: 'bg-emerald-100 text-emerald-700 border border-emerald-200' };
+    if (key.includes('invalid')) return { text: 'Không hợp lệ', color: 'bg-rose-100 text-rose-700 border border-rose-200' };
+    if (key.includes('msg_success')) return { text: 'Đã gửi Zalo', color: 'bg-sky-100 text-sky-700 border border-sky-200' };
+    if (key.includes('duplicate_merged')) return { text: 'Đã gộp trùng', color: 'bg-slate-100 text-slate-700 border border-slate-200' };
+    if (key.includes('noikhoa')) return { text: 'Nội khoa', color: 'bg-indigo-100 text-indigo-700 border border-indigo-200' };
+    if (key.includes('ngoaikhoa')) return { text: 'Ngoại khoa', color: 'bg-violet-100 text-violet-700 border border-violet-200' };
+    if (key.includes('scheduled')) return { text: 'Đã đặt lịch', color: 'bg-amber-100 text-amber-700 border border-amber-200' };
+    if (key.includes('canceled')) return { text: 'Hủy lịch', color: 'bg-rose-100 text-rose-700 border border-rose-200' };
+    if (key.includes('serviced_completed')) return { text: 'Hoàn tất dịch vụ', color: 'bg-green-100 text-green-700 border border-green-200' };
+    if (key.includes('serviced_in_progress')) return { text: 'Đang làm dịch vụ', color: 'bg-blue-100 text-blue-700 border border-blue-200' };
+    if (key.includes('new_unconfirmed')) return { text: 'Mới (chưa xác nhận)', color: 'bg-zinc-100 text-zinc-700 border border-zinc-200' };
+    return { text: raw.replaceAll('_', ' '), color: 'bg-slate-100 text-slate-700 border border-slate-200' };
+};
+
+const serviceStatusColor = (s) => {
+    const key = (s || '').toLowerCase();
+    if (key === 'completed') return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+    if (key === 'in_progress') return 'bg-blue-100 text-blue-700 border border-blue-200';
+    return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
+};
+
+const qualityBadge = (customer) => {
+    if (isMissingInfo(customer)) return { text: 'Thiếu thông tin', className: 'bg-amber-100 text-amber-700 border border-amber-200' };
+    if (hasZalo(customer)) return { text: 'Data hợp lệ', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' };
+    return { text: 'Không có Zalo', className: 'bg-rose-100 text-rose-700 border border-rose-200' };
+};
+
+const lastPipeline = (customer) => {
+    const arr = Array.isArray(customer?.pipelineStatus) ? customer.pipelineStatus : [];
+    const last = [...arr].reverse().find(Boolean);
+    return last || null;
+};
+
+/* ======================= Popup Content ======================= */
+
+function Line({ icon: Icon, label, value, mono = false }) {
+    return (
+        <div className="flex items-start gap-2 py-1">
+            <Icon className="w-3.5 h-3.5 mt-0.5 text-muted-foreground" />
+            <div className="min-w-[92px] text-[11px] text-muted-foreground">{label}</div>
+            <div className={`text-[12px] leading-5 ${mono ? 'font-medium' : ''}`}>{value || <span className="text-muted-foreground">—</span>}</div>
+        </div>
+    );
+}
+
+function Chips({ customer, serviceMap }) {
+    const q = qualityBadge(customer);
+    const lp = lastPipeline(customer);
+    const g = deriveGroup(customer, serviceMap);
+    return (
+        <div className="flex flex-wrap gap-1.5">
+            <span className={`px-2 py-0.5 rounded text-[10px] ${q.className}`}>{q.text}</span>
+            {lp && <span className={`px-2 py-0.5 rounded text-[10px] ${prettyStatus(lp).color}`}>{prettyStatus(lp).text}</span>}
+            {g !== 'unknown' && (
+                <span className={`px-2 py-0.5 rounded text-[10px] ${g === 'noi_khoa' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-violet-100 text-violet-700 border border-violet-200'}`}>
+                    {g === 'noi_khoa' ? 'Nội khoa' : 'Ngoại khoa'}
+                </span>
+            )}
+            <span className={`px-2 py-0.5 rounded text-[10px] ${serviceStatusColor(customer?.serviceDetails?.status)}`}>
+                Dịch vụ: {customer?.serviceDetails?.status ? customer.serviceDetails.status.replaceAll('_', ' ') : '—'}
+            </span>
+        </div>
+    );
+}
+
+function CustomerPopup({ open, onClose, customer, serviceMap }) {
+    if (!customer) return null;
+
+    const tags = (customer.tags || [])
+        .map((id) => serviceMap.get(String(id))?.name)
+        .filter(Boolean);
+
+    const zalo = customer?.uid?.[0];
+    const last3Care = (customer?.care || []).slice(-3).reverse();
+
+    const header = (
+        <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0">
+                {customer.zaloavt ? (
+                    <img src={customer.zaloavt} alt={customer.name} className="w-full h-full object-cover" />
+                ) : null}
+            </div>
+            <div className="min-w-0">
+                <div className="truncate">{customer.name || 'Khách hàng'}</div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                    {customer.source?.name || '—'} • {new Date(customer.createAt).toLocaleString('vi-VN')}
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <Popup open={open} onClose={onClose} header={header} widthClass="max-w-md">
+            <Chips customer={customer} serviceMap={serviceMap} />
+
+            <div className="grid grid-cols-1 gap-2 rounded-md border p-2 bg-white mt-3" style={{ borderColor: 'var(--border)' }}>
+                <Line icon={User} label="Tên KH" value={customer.name} />
+                <Line icon={Phone} label="Số điện thoại" value={customer.phone} mono />
+                <Line icon={Mail} label="Email" value={customer.email} mono />
+                <Line icon={MapPin} label="Khu vực" value={customer.area} />
+                <Line icon={Calendar} label="Tiếp nhận" value={new Date(customer.createAt).toLocaleString('vi-VN')} />
+                <Line
+                    icon={Tag}
+                    label="Dịch vụ quan tâm"
+                    value={tags.length ? (
+                        <div className="flex flex-wrap gap-1">
+                            {tags.map((t, i) => (
+                                <span key={t + i} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] border border-slate-200">
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
+                    ) : '—'}
+                />
+            </div>
+
+            <div className="rounded-md border p-2 bg-white mt-3" style={{ borderColor: 'var(--border)' }}>
+                <div className="text-[11px] text-muted-foreground mb-1">Hoạt động gần đây</div>
+                {last3Care.length ? (
+                    <ul className="space-y-1">
+                        {last3Care.map((c) => (
+                            <li key={c._id} className="text-[12px] leading-5">
+                                <span className="text-[11px] text-muted-foreground">{new Date(c.createAt).toLocaleString('vi-VN')}</span>
+                                <span className="mx-1.5 text-muted-foreground">•</span>
+                                <span>{c.content}</span>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <div className="text-[12px] text-muted-foreground">Chưa có hoạt động.</div>
+                )}
+            </div>
+        </Popup>
+    );
+}
+
+/* ======================= Log Table (clickable rows) ======================= */
+
+function ReceptionLogTable({ logs, visibleCount, onReachEnd, onRowClick }) {
     const containerRef = useRef(null);
     const rows = logs.slice(0, visibleCount);
 
     const handleScroll = (e) => {
         const el = e.currentTarget;
-        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 16) {
-            onReachEnd?.();
-        }
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 16) onReachEnd?.();
     };
 
     return (
         <Card className="shadow-lg col-span-1 lg:col-span-2">
             <CardHeader>
-                <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Log Tiếp nhận Data</CardTitle>
-                <CardDescription>Danh sách data được ghi nhận vào hệ thống gần đây nhất.</CardDescription>
+                <CardTitle className="flex items-center text-sm"><History className="mr-2 h-4 w-4" />Log Tiếp nhận Data</CardTitle>
+                <CardDescription className="text-xs">Danh sách data được ghi nhận vào hệ thống gần đây nhất.</CardDescription>
             </CardHeader>
             <CardContent>
                 <div
@@ -181,29 +347,33 @@ function ReceptionLogTable({ logs, visibleCount, onReachEnd }) {
                     onScroll={handleScroll}
                 >
                     <Table>
-                        <TableHeader className="sticky top-0 bg-secondary">
+                        <TableHeader className="sticky top-0 bg-secondary/60 backdrop-blur supports-[backdrop-filter]:bg-secondary/50">
                             <TableRow>
-                                <TableHead>Khách hàng</TableHead>
-                                <TableHead>Nguồn</TableHead>
-                                <TableHead className="text-right">Thời gian</TableHead>
+                                <TableHead className="text-xs">Khách hàng</TableHead>
+                                <TableHead className="text-xs">Nguồn</TableHead>
+                                <TableHead className="text-right text-xs">Thời gian</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {rows.length > 0 ? rows.map((log) => (
-                                <TableRow key={log.id}>
-                                    <TableCell className="font-medium">{log.customerName}</TableCell>
-                                    <TableCell><Badge variant="outline">{log.source}</Badge></TableCell>
-                                    <TableCell className="text-right text-xs">{new Date(log.createdAt).toLocaleString('vi-VN')}</TableCell>
+                                <TableRow
+                                    key={log.id}
+                                    onClick={() => onRowClick(log.id)}
+                                    className="cursor-pointer hover:bg-muted/60"
+                                >
+                                    <TableCell className="font-medium text-[12px]">{log.customerName}</TableCell>
+                                    <TableCell className="text-[12px]"><Badge variant="outline" className="text-[10px]">{log.source}</Badge></TableCell>
+                                    <TableCell className="text-right text-[11px] text-muted-foreground">{new Date(log.createdAt).toLocaleString('vi-VN')}</TableCell>
                                 </TableRow>
                             )) : (
-                                <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Chưa có dữ liệu.</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground text-sm">Chưa có dữ liệu.</TableCell></TableRow>
                             )}
                         </TableBody>
                     </Table>
                     {visibleCount < logs.length && (
                         <div className="flex justify-center py-3">
                             <button
-                                className="text-sm px-4 py-2 rounded-[6px] border"
+                                className="text-xs px-3 py-1.5 rounded-[6px] border"
                                 style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                                 onClick={() => onReachEnd?.()}
                             >
@@ -217,38 +387,8 @@ function ReceptionLogTable({ logs, visibleCount, onReachEnd }) {
     );
 }
 
-/* ======================= Helpers ======================= */
-
-function hasZalo(customer) {
-    const hasUid = Array.isArray(customer.uid) && customer.uid.length > 0 && customer.uid[0]?.uid;
-    const noteSuccess = Array.isArray(customer.care) && customer.care.some(
-        n => /tìm uid zalo/i.test(n.content || '') && /thành công/i.test(n.content || '')
-    );
-    return !!(hasUid || noteSuccess);
-}
-
-function isMissingInfo(customer) {
-    return !customer?.name || !customer?.phone;
-}
-
-function deriveGroup(customer, serviceMap) {
-    const tagTypes = new Set(
-        (customer?.tags || [])
-            .map(id => serviceMap.get(String(id))?.type)
-            .filter(Boolean)
-    );
-    if (tagTypes.has('ngoai_khoa')) return 'ngoai_khoa';
-    if (tagTypes.has('noi_khoa')) return 'noi_khoa';
-    return 'unknown';
-}
-
 /* ======================= Main Component ======================= */
-const toYMD = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-};
+
 export default function DataReceptionClient({ initialData, service = [] }) {
     const [data] = useState(initialData);
 
@@ -256,17 +396,13 @@ export default function DataReceptionClient({ initialData, service = [] }) {
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
     const [tagFilter, setTagFilter] = useState('all');     // 'all' | service.name
     const [startDate, setStartDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        d.setDate(d.getDate() - 7);
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7);
         return toYMD(d);
     });
-
     const [endDate, setEndDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
+        const d = new Date(); d.setHours(0, 0, 0, 0);
         return toYMD(d);
-    });         // YYYY-MM-DD
+    }); // YYYY-MM-DD
 
     // Infinite scroll for log
     const [visibleCount, setVisibleCount] = useState(10);
@@ -365,13 +501,22 @@ export default function DataReceptionClient({ initialData, service = [] }) {
     // Reset paging when filters change
     useEffect(() => { setVisibleCount(10); }, [groupFilter, tagFilter, startDate, endDate]);
 
+    // Popup state
+    const [open, setOpen] = useState(false);
+    const [selectedCustomer, setSelectedCustomer] = useState(null);
+    const onRowClick = (id) => {
+        const found = (data || []).find(c => c._id === id) || null;
+        setSelectedCustomer(found);
+        setOpen(true);
+    };
+
     return (
         <div className="flex-1 space-y-4 py-4 pt-6 min-h-screen">
 
-            {/* ====== Filters (responsive) ====== */}
+            {/* ====== Filters ====== */}
             <Card className="shadow-md">
                 <CardHeader>
-                    <CardTitle>Lọc theo nhóm, dịch vụ quan tâm và khoảng thời gian tiếp nhận.</CardTitle>
+                    <CardTitle className="text-sm">Lọc theo nhóm, dịch vụ quan tâm và khoảng thời gian tiếp nhận.</CardTitle>
                 </CardHeader>
 
                 <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
@@ -390,30 +535,30 @@ export default function DataReceptionClient({ initialData, service = [] }) {
                     />
 
                     <div>
-                        <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
+                        <label className="block mb-2 text-xs text-muted-foreground">Từ ngày</label>
                         <input
                             type="date"
                             value={startDate}
                             onChange={(e) => setStartDate(e.target.value)}
-                            className="w-full rounded-[6px] border px-3 py-2 text-sm mt-2"
+                            className="w-full rounded-[6px] border px-3 py-2 text-xs"
                             style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                         />
                     </div>
 
                     <div>
-                        <label className="block mb-2 text-sm text-muted-foreground">Đến ngày</label>
+                        <label className="block mb-2 text-xs text-muted-foreground">Đến ngày</label>
                         <input
                             type="date"
                             value={endDate}
                             onChange={(e) => setEndDate(e.target.value)}
-                            className="w-full rounded-[6px] border px-3 py-2 text-sm mt-2"
+                            className="w-full rounded-[6px] border px-3 py-2 text-xs"
                             style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                         />
                     </div>
                 </CardContent>
             </Card>
 
-            {/* ====== Stats (responsive cards) ====== */}
+            {/* ====== Stats ====== */}
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
                 <StatCard title="Tổng Data" value={stats.total} icon={Users} description="Tổng data theo bộ lọc" color="#3b82f6" />
                 <StatCard title="Data Hợp lệ" value={stats.valid} icon={CheckCircle} description="Có Zalo (UID) hoặc tìm UID thành công" color="#10b981" />
@@ -425,10 +570,10 @@ export default function DataReceptionClient({ initialData, service = [] }) {
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
                 <Card className="shadow-lg lg:col-span-1">
                     <CardHeader>
-                        <CardTitle>Chất lượng Data</CardTitle>
-                        <CardDescription>Tỷ lệ hợp lệ, không hợp lệ và thiếu thông tin.</CardDescription>
+                        <CardTitle className="text-sm">Chất lượng Data</CardTitle>
+                        <CardDescription className="text-xs">Tỷ lệ hợp lệ, không hợp lệ và thiếu thông tin.</CardDescription>
                     </CardHeader>
-                    <CardContent className="h-[360px] sm:h-[400px] relative">
+                    <CardContent className="h-[340px] sm:h-[380px] relative">
                         <DataQualityChart valid={stats.valid} invalid={stats.invalid} missing={stats.missing} />
                     </CardContent>
                 </Card>
@@ -439,8 +584,17 @@ export default function DataReceptionClient({ initialData, service = [] }) {
                     onReachEnd={() => {
                         if (visibleCount < receptionLog.length) handleReachEnd();
                     }}
+                    onRowClick={onRowClick}
                 />
             </div>
+
+            {/* ====== Popup ====== */}
+            <CustomerPopup
+                open={open}
+                onClose={() => setOpen(false)}
+                customer={selectedCustomer}
+                serviceMap={serviceMap}
+            />
         </div>
     );
 }

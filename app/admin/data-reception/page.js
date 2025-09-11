@@ -6,6 +6,8 @@ import { service_data } from "@/data/services/wraperdata.db";
 export default async function AdminPage() {
     const data = await customer_data();
     const service = await service_data();
+    console.log(data);
+    
     return (
         <>
             <Navbar />

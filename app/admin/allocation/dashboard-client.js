@@ -3,10 +3,14 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
+import Popup from '@/components/ui/popup.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Users, UserCheck, History, RefreshCw, ChevronDown, Check } from 'lucide-react';
+import {
+    Users, UserCheck, History, RefreshCw, ChevronDown, Check,
+    Phone, Mail, MapPin, User, Calendar
+} from 'lucide-react';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
@@ -67,10 +71,7 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
                     style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                 >
                     <span className="truncate">{current.label}</span>
-                    <ChevronDown
-                        className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`}
-                        style={{ color: 'var(--text-primary)' }}
-                    />
+                    <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
                 </button>
 
                 {open && (
@@ -91,8 +92,7 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
                                     aria-selected={selected}
                                     onMouseEnter={() => setActive(idx)}
                                     onClick={() => { onChange(opt.value); setOpen(false); }}
-                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
-                                        } ${selected ? 'font-medium' : ''}`}
+                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'} ${selected ? 'font-medium' : ''}`}
                                 >
                                     <span className="truncate">{opt.label}</span>
                                     {selected && <Check className="w-4 h-4" />}
@@ -146,7 +146,126 @@ const LeadsDistributionChart = ({ assigned, pending }) => {
     return <Doughnut data={data} options={options} />;
 };
 
-function AssignmentLogTable({ rows, visibleCount, onReachEnd, title = 'Lịch sử phân bổ gần đây' }) {
+/* ======================= Helpers ======================= */
+
+const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
+
+const badgeClass = (type) => {
+    if (type === 'assigned') return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+    if (type === 'pending') return 'bg-amber-100 text-amber-700 border border-amber-200';
+    if (type === 'noi_khoa') return 'bg-indigo-100 text-indigo-700 border border-indigo-200';
+    if (type === 'ngoai_khoa') return 'bg-violet-100 text-violet-700 border border-violet-200';
+    return 'bg-slate-100 text-slate-700 border border-slate-200';
+};
+
+const currency = (v) =>
+    new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(v || 0);
+
+/* =========== Popup: small, compact =========== */
+
+function Line({ icon: Icon, label, value, mono = false }) {
+    return (
+        <div className="flex items-start gap-2 py-1">
+            <Icon className="w-3.5 h-3.5 mt-0.5 text-muted-foreground" />
+            <div className="min-w-[92px] text-[11px] text-muted-foreground">{label}</div>
+            <div className={`text-[12px] leading-5 ${mono ? 'font-medium' : ''}`}>{value || <span className="text-muted-foreground">—</span>}</div>
+        </div>
+    );
+}
+
+function LeadPopup({ open, onClose, lead, userMap }) {
+    if (!lead) return null;
+
+    const lastAssign = Array.isArray(lead.assignees) && lead.assignees.length
+        ? lead.assignees[lead.assignees.length - 1]
+        : null;
+
+    const lastAssigneeName = lastAssign ? (userMap.get(String(lastAssign.user))?.name || 'N/A') : '—';
+    const lastAssigneeGroup = lastAssign ? (userMap.get(String(lastAssign.user))?.group || lastAssign.group || '—') : '—';
+
+    const header = (
+        <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-muted shrink-0" />
+            <div className="min-w-0">
+                <div className="truncate">{lead.name || 'Khách hàng'}</div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                    {lead.source?.name || '—'} • {new Date(lead.createAt).toLocaleString('vi-VN')}
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <Popup open={open} onClose={onClose} header={header} widthClass="max-w-md">
+            {/* Chips */}
+            <div className="flex flex-wrap gap-1.5">
+                <span className={`px-2 py-0.5 rounded text-[10px] ${badgeClass(lastAssign ? 'assigned' : 'pending')}`}>
+                    {lastAssign ? 'Đã phân bổ' : 'Chờ phân bổ'}
+                </span>
+                {lastAssign && (
+                    <span className={`px-2 py-0.5 rounded text-[10px] ${badgeClass(lastAssigneeGroup)}`}>
+                        {lastAssigneeGroup === 'noi_khoa' ? 'Nội khoa' : lastAssigneeGroup === 'ngoai_khoa' ? 'Ngoại khoa' : lastAssigneeGroup}
+                    </span>
+                )}
+                {lead.serviceDetails?.status && (
+                    <span className="px-2 py-0.5 rounded text-[10px] bg-sky-100 text-sky-700 border border-sky-200">
+                        Dịch vụ: {String(lead.serviceDetails.status).replaceAll('_', ' ')}
+                    </span>
+                )}
+            </div>
+
+            {/* Info */}
+            <div className="grid grid-cols-1 rounded-md border p-2 bg-white mt-3" style={{ borderColor: 'var(--border)' }}>
+                <Line icon={User} label="Tên KH" value={lead.name} />
+                <Line icon={Phone} label="Số điện thoại" value={lead.phone} mono />
+                <Line icon={Mail} label="Email" value={lead.email} mono />
+                <Line icon={MapPin} label="Khu vực" value={lead.area} />
+                <Line icon={Calendar} label="Tiếp nhận" value={new Date(lead.createAt).toLocaleString('vi-VN')} />
+            </div>
+
+            {/* Assign info */}
+            <div className="rounded-md border p-2 bg-white mt-3" style={{ borderColor: 'var(--border)' }}>
+                <div className="text-[11px] text-muted-foreground mb-1">Phân bổ gần nhất</div>
+                {lastAssign ? (
+                    <div className="text-[12px]">
+                        <div>Nhân viên: <span className="font-medium">{lastAssigneeName}</span></div>
+                        <div>Nhóm: <span className="font-medium capitalize">{lastAssigneeGroup}</span></div>
+                        <div>Thời gian: <span className="text-muted-foreground">{new Date(lastAssign.assignedAt).toLocaleString('vi-VN')}</span></div>
+                    </div>
+                ) : (
+                    <div className="text-[12px] text-muted-foreground">Chưa có thông tin phân bổ.</div>
+                )}
+            </div>
+
+            {/* Care logs (nếu có) */}
+            <div className="rounded-md border p-2 bg-white mt-3" style={{ borderColor: 'var(--border)' }}>
+                <div className="text-[11px] text-muted-foreground mb-1">Hoạt động gần đây</div>
+                {Array.isArray(lead.care) && lead.care.length ? (
+                    <ul className="space-y-1">
+                        {[...lead.care].slice(-3).reverse().map(c => (
+                            <li key={c._id} className="text-[12px] leading-5">
+                                <span className="text-[11px] text-muted-foreground">{new Date(c.createAt).toLocaleString('vi-VN')}</span>
+                                <span className="mx-1.5 text-muted-foreground">•</span>
+                                <span>{c.content}</span>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <div className="text-[12px] text-muted-foreground">Chưa có hoạt động.</div>
+                )}
+            </div>
+        </Popup>
+    );
+}
+
+/* ======================= Table (clickable rows -> popup) ======================= */
+
+function AssignmentLogTable({ rows, visibleCount, onReachEnd, title = 'Lịch sử phân bổ gần đây', onRowClick }) {
     const containerRef = useRef(null);
     const visible = rows.slice(0, visibleCount);
 
@@ -176,13 +295,19 @@ function AssignmentLogTable({ rows, visibleCount, onReachEnd, title = 'Lịch s�
                         </TableHeader>
                         <TableBody>
                             {visible.length > 0 ? visible.map((log, index) => (
-                                <TableRow key={`${log.id}-${index}`}>
+                                <TableRow
+                                    key={`${log.id}-${index}`}
+                                    className="cursor-pointer hover:bg-muted/60"
+                                    onClick={() => onRowClick?.(log)}
+                                >
                                     <TableCell>
                                         <div className="font-medium">{log.customerName}</div>
-                                        <div className="text-xs text-muted-foreground">{log.zaloName || 'N/A'}</div>
+                                        <div className="text-xs text-muted-foreground">{log.zaloName || '—'}</div>
                                     </TableCell>
                                     <TableCell>{log.assignedToName || 'chưa phân bổ'}</TableCell>
-                                    <TableCell className="hidden md:table-cell"><Badge variant="outline">{log.group || 'chưa phân bổ'}</Badge></TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                        <Badge variant="outline">{log.group || 'chưa phân bổ'}</Badge>
+                                    </TableCell>
                                     <TableCell className="text-right text-xs">{new Date(log.assignedAt).toLocaleString('vi-VN')}</TableCell>
                                 </TableRow>
                             )) : (
@@ -208,27 +333,18 @@ function AssignmentLogTable({ rows, visibleCount, onReachEnd, title = 'Lịch s�
 }
 
 /* ======================= Main Component ======================= */
-const toYMD = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-};
+
 export default function DashboardClient({ initialData, user = [] }) {
     const [data, setData] = useState(initialData);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // ===== Filters =====
     const [startDate, setStartDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        d.setDate(d.getDate() - 7);
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7);
         return toYMD(d);
     });
-
     const [endDate, setEndDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
+        const d = new Date(); d.setHours(0, 0, 0, 0);
         return toYMD(d);
     });
     const [statusFilter, setStatusFilter] = useState('all'); // all | assigned | pending
@@ -264,24 +380,21 @@ export default function DashboardClient({ initialData, user = [] }) {
         ...(user || []).map(u => ({ value: String(u._id), label: u.name }))
     ]), [user]);
 
-    // ===== Apply filters to leads =====
+    // ===== Apply filters =====
     const filteredLeads = useMemo(() => {
         const start = startDate ? new Date(startDate + 'T00:00:00') : null;
         const end = endDate ? new Date(endDate + 'T23:59:59.999') : null;
 
         return (data || []).filter(c => {
-            // Time by createAt (filter tổng thể nguồn vào hệ thống)
             const ct = new Date(c.createAt);
             if (start && ct < start) return false;
             if (end && ct > end) return false;
 
             const hasAssignees = Array.isArray(c.assignees) && c.assignees.length > 0;
 
-            // Status filter
             if (statusFilter === 'assigned' && !hasAssignees) return false;
             if (statusFilter === 'pending' && hasAssignees) return false;
 
-            // Group filter — áp cho leads đã phân bổ (dựa vào group của user được giao gần nhất)
             if (groupFilter !== 'all') {
                 if (!hasAssignees) return false;
                 const last = c.assignees[c.assignees.length - 1];
@@ -290,7 +403,6 @@ export default function DashboardClient({ initialData, user = [] }) {
                 if (g !== groupFilter) return false;
             }
 
-            // Employee filter — lead phải có ít nhất 1 lần phân bổ cho nhân viên đó
             if (employeeFilter !== 'all') {
                 if (!hasAssignees) return false;
                 const matched = c.assignees.some(a => String(a.user) === employeeFilter);
@@ -301,13 +413,11 @@ export default function DashboardClient({ initialData, user = [] }) {
         });
     }, [data, startDate, endDate, statusFilter, groupFilter, employeeFilter, userMap]);
 
-    // ===== Stats & Assignment Log (from filteredLeads) =====
+    // ===== Stats & Rows =====
     const { stats, assignmentRows, pendingRows } = useMemo(() => {
-        // ===== Stats =====
         const assigned = filteredLeads.filter(c => Array.isArray(c.assignees) && c.assignees.length > 0).length;
         const pending = filteredLeads.length - assigned;
 
-        // ===== Assignment rows (đã phân bổ) =====
         const start = startDate ? new Date(startDate + 'T00:00:00') : null;
         const end = endDate ? new Date(endDate + 'T23:59:59.999') : null;
 
@@ -317,6 +427,8 @@ export default function DashboardClient({ initialData, user = [] }) {
                 const u = userMap.get(String(a.user));
                 return {
                     id: `${c._id}-${a._id || a.assignedAt}`,
+                    customerId: String(c._id),
+                    status: 'assigned',
                     customerName: c.name,
                     zaloName: c.zaloname,
                     assignedToId: String(a.user),
@@ -336,24 +448,22 @@ export default function DashboardClient({ initialData, user = [] }) {
             })
             .sort((a, b) => new Date(b.assignedAt) - new Date(a.assignedAt));
 
-        // ===== Pending rows (chưa phân bổ) =====
         const pendingRows = filteredLeads
             .filter(c => !Array.isArray(c.assignees) || c.assignees.length === 0)
             .map(c => ({
                 id: String(c._id),
+                customerId: String(c._id),
+                status: 'pending',
                 customerName: c.name,
                 zaloName: c.zaloname,
                 assignedToName: '—',
                 group: '—',
-                // dùng createAt làm mốc thời gian hiển thị/sort
                 assignedAt: c.createAt,
             }))
             .filter(r => {
-                // lọc theo time range (createAt)
                 const at = new Date(r.assignedAt);
                 if (start && at < start) return false;
                 if (end && at > end) return false;
-                // nếu đang lọc theo employee hoặc group thì không áp cho pending (không có người/group)
                 if (employeeFilter !== 'all') return false;
                 if (groupFilter !== 'all') return false;
                 return true;
@@ -362,7 +472,7 @@ export default function DashboardClient({ initialData, user = [] }) {
 
         return { stats: { total: filteredLeads.length, assigned, pending }, assignmentRows, pendingRows };
     }, [filteredLeads, startDate, endDate, employeeFilter, groupFilter, userMap]);
-    // Reset paging when filters change
+
     useEffect(() => { setVisibleCount(10); }, [startDate, endDate, statusFilter, groupFilter, employeeFilter]);
 
     // (Optional) fake refresh
@@ -374,8 +484,19 @@ export default function DashboardClient({ initialData, user = [] }) {
         }, 30000);
         return () => clearInterval(interval);
     }, []);
+
     const rowsToShow = statusFilter === 'pending' ? pendingRows : assignmentRows;
     const tableTitle = statusFilter === 'pending' ? 'Danh sách chờ phân bổ' : 'Lịch sử phân bổ gần đây';
+
+    // ====== Popup state & handler ======
+    const [popupOpen, setPopupOpen] = useState(false);
+    const [selectedLead, setSelectedLead] = useState(null);
+    const onRowClick = (row) => {
+        const found = (data || []).find(c => String(c._id) === String(row.customerId));
+        setSelectedLead(found || null);
+        setPopupOpen(true);
+    };
+
     return (
         <div className="flex-1 space-y-4 py-4 pt-6 min-h-screen">
 
@@ -401,25 +522,9 @@ export default function DashboardClient({ initialData, user = [] }) {
                 </CardHeader>
 
                 <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
-                    <Listbox
-                        label="Tình trạng"
-                        options={statusOptions}
-                        value={statusFilter}
-                        onChange={setStatusFilter}
-                    />
-                    <Listbox
-                        label="Nhóm nhân viên"
-                        options={groupOptions}
-                        value={groupFilter}
-                        onChange={setGroupFilter}
-                    />
-                    <Listbox
-                        label="Nhân viên"
-                        options={employeeOptions}
-                        value={employeeFilter}
-                        onChange={setEmployeeFilter}
-                    />
-
+                    <Listbox label="Tình trạng" options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
+                    <Listbox label="Nhóm nhân viên" options={groupOptions} value={groupFilter} onChange={setGroupFilter} />
+                    <Listbox label="Nhân viên" options={employeeOptions} value={employeeFilter} onChange={setEmployeeFilter} />
                     <div>
                         <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
                         <input
@@ -469,8 +574,12 @@ export default function DashboardClient({ initialData, user = [] }) {
                         if (visibleCount < rowsToShow.length) handleReachEnd();
                     }}
                     title={tableTitle}
+                    onRowClick={onRowClick}
                 />
             </div>
+
+            {/* ===== Popup ===== */}
+            <LeadPopup open={popupOpen} onClose={() => setPopupOpen(false)} lead={selectedLead} userMap={userMap} />
         </div>
     );
 }
