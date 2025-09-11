@@ -3,7 +3,7 @@
 'use server';
 
 import { getWorkflowAll, getWorkflowOne } from '@/data/workflow/handledata.db';
-import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflow.model';
+import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflows.model';
 import connectDB from '@/config/connectDB';
 import { revalidateTag } from 'next/cache';
 import initAgenda from '@/config/agenda';

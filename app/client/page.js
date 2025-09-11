@@ -9,6 +9,7 @@ import { getRunningSchedulesAction } from '../actions/schedule.actions';
 import { workflow_data } from '@/data/workflow/wraperdata.db';
 import { service_data } from '@/data/services/wraperdata.db';
 import { maskPhoneNumber } from '@/function';
+import { customer_data } from '@/data/customers/wraperdata.db';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -18,7 +19,8 @@ export default async function Page({ searchParams }) {
     let c = await searchParams
     const user = await checkAuthToken()
     if (!user) return null
-    const [initialResult, userAuth, sources, label, zalo, users, variant, running, workflow, service] = await Promise.all([
+    const [customer, initialResult, userAuth, sources, label, zalo, users, variant, running, workflow, service] = await Promise.all([
+        customer_data(),
         getCombinedData(c),
         user_data({ _id: user.id }),
         form_data(),
@@ -31,7 +33,6 @@ export default async function Page({ searchParams }) {
         service_data()
     ]);
     const reversedLabel = [...label].reverse();
-    console.log('User Auth:', userAuth);
     if (userAuth[0].role.includes('Sale')) {
         const filteredData = initialResult.data.filter(item => {
             if (Array.isArray(item.assignees) && item.assignees.length > 0) {
@@ -46,9 +47,6 @@ export default async function Page({ searchParams }) {
                 phonex: maskPhoneNumber(item.phone) // tạo field mới phonex
             };
         });
-
-        console.log(filteredData);
-
         initialResult.data = filteredData;
         initialResult.total = filteredData.length;
     }
@@ -68,6 +66,7 @@ export default async function Page({ searchParams }) {
                 c={c}
                 workflow={workflow}
                 service={service}
+                customer={customer}
             />
         </Suspense>
     );

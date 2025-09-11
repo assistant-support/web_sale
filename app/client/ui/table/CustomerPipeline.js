@@ -8,7 +8,7 @@ import {
     MessageSquare, CheckCircle2, CircleDot, Circle, Loader2, SendHorizonal,
     UserCheck, UserX, UserSearch, MessageSquareText, MessageSquareX, CheckCircle, XCircle, User
 } from 'lucide-react';
-
+import { getCurrentStageFromPipeline } from '@/function/index';
 // --- Shadcn UI Component Imports ---
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,36 +122,30 @@ export default function CustomerPipeline({
         { id: 6, title: 'Chốt dịch vụ', getStatus: getStep6Status }
     ], []);
 
-    const currentStageIndex = useMemo(() => {
-        if (customer.serviceDetails?.status) return 5; // Bước 6
-        const maxStep = customer.care.reduce((max, note) => Math.max(max, note.step || 0), 0);
-        if (maxStep > 0) return maxStep - 1;
-        const pipelineStatusMap = {
-            'new_unconfirmed': 0, 'missing_info': 0, 'valid': 0,
-            'messaged_pending': 1, 'messaged_responded': 1,
-            'assigned': 2,
-            'consulted': 3,
-            'appointed': 4,
-        };
-        return pipelineStatusMap[customer.pipelineStatus] ?? 0;
+    const { currentStageId, currentStageIndex } = useMemo(() => {
+        return getCurrentStageFromPipeline(customer);
     }, [customer]);
 
     return (
         <div className="p-4 max-h-[calc(80vh-100px)] overflow-y-auto">
             <Accordion type="single" collapsible defaultValue={`item-${currentStageIndex}`} className="w-full">
                 {PIPELINE_STAGES.map((stage, index) => {
-                    const isCompleted = customer.serviceDetails?.status || index < currentStageIndex;
-                    const isCurrent = !isCompleted && index === currentStageIndex;
+                    // stage.id là 1..6
+                    const isCompleted = stage.id < currentStageId;
+                    const isCurrent = stage.id === currentStageId;
                     const status = isCompleted ? 'completed' : (isCurrent ? 'current' : 'pending');
-                    const Icon = status === 'completed' ? CheckCircle2 : (isCurrent ? CircleDot : Circle);
+
+                    const IconCmp = status === 'completed' ? CheckCircle2 : (isCurrent ? CircleDot : Circle);
                     const color = status === 'completed' ? 'text-green-500' : (isCurrent ? 'text-blue-500' : 'text-slate-400');
+
                     const notesForStage = customer.care.filter(note => note.step === stage.id);
                     const statusChip = stage.getStatus(customer);
+
                     return (
                         <AccordionItem key={stage.id} value={`item-${index}`}>
                             <AccordionTrigger className={`hover:no-underline ${status === 'current' ? 'bg-muted/50' : ''}`}>
                                 <div className="flex items-center gap-3 flex-1">
-                                    <Icon className={`h-5 w-5 ${color} flex-shrink-0`} />
+                                    <IconCmp className={`h-5 w-5 ${color} flex-shrink-0`} />
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <h5>{stage.id}. {stage.title}</h5>
                                         {statusChip && (
@@ -164,23 +158,22 @@ export default function CustomerPipeline({
                                 </div>
                                 {notesForStage.length > 0 && <MessageSquare className="h-4 w-4 text-muted-foreground ml-3 flex-shrink-0" />}
                             </AccordionTrigger>
+
                             <AccordionContent className="p-2">
                                 <div className="border rounded-md p-2">
                                     {notesForStage.length > 0
                                         ? notesForStage.map(note => <CareNoteItem key={note._id} note={note} />)
                                         : <h6 className='text-center text-muted-foreground p-4'>Chưa có hoạt động.</h6>
                                     }
+
                                     {stage.id === 6 ? (
-                                        <>
-                                            {notesForStage.map(note => <CareNoteItem key={note._id} note={note} />)}
-                                            <div className="border-t mt-3 pt-3">
-                                                <CloseServiceForm
-                                                    customer={customer}
-                                                    dispatchAction={closeServiceAction}
-                                                    actionState={closeState}
-                                                />
-                                            </div>
-                                        </>
+                                        <div className="border-t mt-3 pt-3">
+                                            <CloseServiceForm
+                                                customer={customer}
+                                                dispatchAction={closeServiceAction}
+                                                actionState={closeState}
+                                            />
+                                        </div>
                                     ) : (
                                         <AddNoteForm
                                             customerId={customer._id}

@@ -16,10 +16,8 @@ const navLinks = [
 
 export function Navbar() {
     const pathname = usePathname();
-    console.log(pathname);
-
     return (
-        <nav className="bg-white shadow-md sticky top-0 z-50">
+        <nav className="bg-white shadow-md sticky top-0 z-50 rounded-sm">
             <div className="container mx-auto px-4">
                 <div className="flex items-center justify-between h-16">
                     <div className="flex items-center">
@@ -33,8 +31,8 @@ export function Navbar() {
                                 return (
                                     <Link key={link.name} href={link.href}>
                                         <div className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${isActive
-                                                ? 'bg-blue-600 text-white'
-                                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                                             }`}>
                                             <link.icon className="mr-2 h-4 w-4" />
                                             {link.name}
@@ -55,8 +53,8 @@ export function Navbar() {
                         return (
                             <Link key={link.name} href={link.href}>
                                 <div className={`flex-shrink-0 flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${isActive
-                                        ? 'bg-blue-600 text-white shadow-sm'
-                                        : 'text-gray-600 hover:bg-gray-100'
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'text-gray-600 hover:bg-gray-100'
                                     }`}>
                                     <link.icon className="mr-2 h-4 w-4" />
                                     {link.name}

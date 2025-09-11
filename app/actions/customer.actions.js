@@ -17,44 +17,68 @@ export async function getCombinedData(params) {
     const cachedData = nextCache(
         async (currentParams) => {
             await connectDB();
+
             const page = Number(currentParams.page) || 1;
             const limit = Number(currentParams.limit) || 10;
             const query = currentParams.query || '';
             const skip = (page - 1) * limit;
+
             const filterConditions = [];
 
+            // Tìm kiếm theo tên/SĐT
             if (query) {
-                filterConditions.push({ $or: [{ name: { $regex: query, $options: 'i' } }, { phone: { $regex: query, $options: 'i' } }] });
+                filterConditions.push({
+                    $or: [
+                        { name: { $regex: query, $options: 'i' } },
+                        { phone: { $regex: query, $options: 'i' } },
+                    ],
+                });
             }
+
+            // Lọc theo nguồn
             if (currentParams.source && mongoose.Types.ObjectId.isValid(currentParams.source)) {
                 filterConditions.push({ source: new mongoose.Types.ObjectId(currentParams.source) });
             }
+
+            // Lọc theo TRẠNG THÁI dựa trên phần tử đầu tiên pipelineStatus[0]
+            // + fallback legacy (bỏ hậu tố _1/_2/... nếu còn dữ liệu cũ)
             if (currentParams.pipelineStatus) {
-                filterConditions.push({ pipelineStatus: currentParams.pipelineStatus });
+                const v = String(currentParams.pipelineStatus);
+                const legacy = v.replace(/_\d+$/, ''); // "new_unconfirmed_1" -> "new_unconfirmed"
+                filterConditions.push({
+                    $or: [{ 'pipelineStatus.0': v }, { 'pipelineStatus.0': legacy }],
+                });
             }
+
+            // Lọc theo DỊCH VỤ QUAN TÂM (tags)
             if (currentParams.tags) {
                 if (currentParams.tags === 'null') {
-                    filterConditions.push({ $or: [{ tags: { $exists: false } }, { tags: null }, { tags: { $size: 0 } }] });
+                    filterConditions.push({
+                        $or: [{ tags: { $exists: false } }, { tags: null }, { tags: { $size: 0 } }],
+                    });
                 } else {
-                    const tagsAsObjectIds = currentParams.tags.split(',')
-                        .map(id => id.trim())
-                        .filter(id => mongoose.Types.ObjectId.isValid(id))
-                        .map(id => new mongoose.Types.ObjectId(id));
+                    const tagsAsObjectIds = currentParams.tags
+                        .split(',')
+                        .map((id) => id.trim())
+                        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+                        .map((id) => new mongoose.Types.ObjectId(id));
                     if (tagsAsObjectIds.length > 0) {
                         filterConditions.push({ tags: { $in: tagsAsObjectIds } });
                     }
                 }
             }
 
-            // THAY ĐỔI 1: Sửa logic lọc để tìm trong mảng 'assignees'
+            // Lọc theo người phụ trách trong mảng assignees
             if (currentParams.assignee && mongoose.Types.ObjectId.isValid(currentParams.assignee)) {
-                // Tìm các document có 'assignees.user' chứa _id người dùng được chỉ định
                 filterConditions.push({ 'assignees.user': new mongoose.Types.ObjectId(currentParams.assignee) });
             }
 
+            // Zalo phase
             if (currentParams.zaloPhase) {
                 filterConditions.push({ zaloPhase: currentParams.zaloPhase });
             }
+
+            // Khoảng ngày tạo
             if (currentParams.startDate && currentParams.endDate) {
                 const startDate = new Date(currentParams.startDate);
                 startDate.setHours(0, 0, 0, 0);
@@ -63,61 +87,64 @@ export async function getCombinedData(params) {
                 filterConditions.push({ createAt: { $gte: startDate, $lte: endDate } });
             }
 
-            const matchStage = filterConditions.length > 0 ? { $match: { $and: filterConditions } } : { $match: {} };
+            const matchStage =
+                filterConditions.length > 0 ? { $match: { $and: filterConditions } } : { $match: {} };
 
-            // THAY ĐỔI 2: Đơn giản hóa pipeline, loại bỏ lookup cho 'assignee' (sẽ populate bằng code JS)
-            let pipeline = [
+            // Pipeline tổng hợp
+            const pipeline = [
                 matchStage,
                 { $lookup: { from: 'forms', localField: 'source', foreignField: '_id', as: 'sourceInfo' } },
                 { $unwind: { path: '$sourceInfo', preserveNullAndEmptyArrays: true } },
                 {
                     $addFields: {
                         sourceName: '$sourceInfo.name',
-                        lastCareNote: { $last: '$care' }
-                    }
+                        lastCareNote: { $last: '$care' },
+                    },
                 },
                 { $lookup: { from: 'services', localField: 'tags', foreignField: '_id', as: 'tags' } },
-                { $project: { sourceInfo: 0 } } // Chỉ cần loại bỏ sourceInfo
-            ];
-
-            const commonStages = [
+                { $project: { sourceInfo: 0 } },
                 { $sort: { createAt: -1 } },
-                { $facet: { paginatedResults: [{ $skip: skip }, { $limit: limit }], totalCount: [{ $count: 'count' }] } }
+                {
+                    $facet: {
+                        paginatedResults: [{ $skip: skip }, { $limit: limit }],
+                        totalCount: [{ $count: 'count' }],
+                    },
+                },
             ];
-            pipeline.push(...commonStages);
 
             const results = await Customer.aggregate(pipeline).exec();
             let paginatedData = results[0]?.paginatedResults || [];
 
+            // Populate user cho care & assignees
             if (paginatedData.length > 0) {
                 const userIds = new Set();
-                paginatedData.forEach(customer => {
-                    // Thu thập userId từ 'care'
-                    customer.care?.forEach(note => { if (note.createBy) userIds.add(note.createBy.toString()); });
-
-                    // THAY ĐỔI 3: Thu thập userId từ mảng 'assignees'
-                    customer.assignees?.forEach(assignment => { if (assignment.user) userIds.add(assignment.user.toString()); });
+                paginatedData.forEach((customer) => {
+                    customer.care?.forEach((note) => {
+                        if (note.createBy) userIds.add(String(note.createBy));
+                    });
+                    customer.assignees?.forEach((assignment) => {
+                        if (assignment.user) userIds.add(String(assignment.user));
+                    });
                 });
 
                 if (userIds.size > 0) {
-                    const users = await User.find({ _id: { $in: Array.from(userIds) } }).select('name avt').lean();
-                    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+                    const users = await User.find({ _id: { $in: Array.from(userIds) } })
+                        .select('name avt')
+                        .lean();
+                    const userMap = new Map(users.map((u) => [String(u._id), u]));
 
-                    paginatedData.forEach(customer => {
-                        // Gắn thông tin user vào 'care'
-                        customer.care?.forEach(note => {
-                            if (note.createBy && userMap.has(note.createBy.toString())) {
-                                note.createBy = userMap.get(note.createBy.toString());
+                    paginatedData.forEach((customer) => {
+                        customer.care?.forEach((note) => {
+                            if (note.createBy && userMap.has(String(note.createBy))) {
+                                note.createBy = userMap.get(String(note.createBy));
                             }
                         });
-                        if (customer.lastCareNote?.createBy && userMap.has(customer.lastCareNote.createBy.toString())) {
-                            customer.lastCareNote.createBy = userMap.get(customer.lastCareNote.createBy.toString());
+                        if (customer.lastCareNote?.createBy && userMap.has(String(customer.lastCareNote.createBy))) {
+                            customer.lastCareNote.createBy = userMap.get(String(customer.lastCareNote.createBy));
                         }
-
-                        // THAY ĐỔI 4: Gắn thông tin user vào mảng 'assignees'
-                        customer.assignees?.forEach(assignment => {
-                            if (assignment.user && userMap.has(assignment.user.toString())) {
-                                assignment.user = userMap.get(assignment.user.toString());
+                        customer.assignees?.forEach((assignment) => {
+                            if (assignment.user && userMap.has(String(assignment.user))) {
+                                assignment.user = userMap.get(String(assignment.user));
                             }
                         });
                     });
@@ -133,6 +160,7 @@ export async function getCombinedData(params) {
         ['data-by-type'],
         { tags: ['combined-data'], revalidate: 3600 }
     );
+
     return cachedData(params);
 }
 

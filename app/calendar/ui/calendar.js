@@ -7,7 +7,7 @@ import {
     isSameMonth, isSameDay, addMonths, addWeeks, subMonths, subWeeks, parse, isToday
 } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Filter, List, Grid3X3 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Filter, List, Grid3X3, Pill, Scissors } from 'lucide-react';
 
 import AppointmentDetail from './appointment-detail';
 import DayDetail from './day-detail';
@@ -125,11 +125,17 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
         setSelectedAppointment(null);
     };
 
-    // Handle appointment creation
-    const handleAppointmentCreated = (newAppointment) => {
-        setAppointments(prev => [...prev, newAppointment]);
-        setIsCreateModalOpen(false);
-    };
+
+    const TypePill = ({ type }) => (
+        <span
+            className="inline-flex items-center gap-1 rounded-[5px] border px-1.5 py-1.5 text-xs"
+            style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
+        >
+            {type === 'noi_khoa' ? <Pill className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}
+        </span>
+    );
+
+
 
     return (
         <div className="container">
@@ -215,7 +221,14 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
                             <span className={`inline-block w-3 h-3 rounded-full ${statusColors.cancelled}`}></span>
                             <h6 className="text-sm">Đã hủy</h6>
                         </div>
-
+                        <div className="hidden md:flex items-center gap-2">
+                            <Pill className='w-3.5 h-3.5' />
+                            <h6 className="text-sm">Nội khoa</h6>
+                        </div>
+                        <div className="hidden md:flex items-center gap-2">
+                            <Scissors className='w-3.5 h-3.5' />
+                            <h6 className="text-sm">Ngoại khoa</h6>
+                        </div>
                         <div className="md:hidden">
                             <Button variant="ghost" size="sm">
                                 <h6>Chú thích</h6>
@@ -263,18 +276,25 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
                                 </div>
 
                                 <div className="mt-1 space-y-1 max-h-[calc(100%-24px)] overflow-hidden">
-                                    {dayAppointments.slice(0, 3).map((appointment) => (
-                                        <div
-                                            key={appointment._id}
-                                            className={`text-xs p-1 rounded truncate ${statusColors[appointment.status]} text-white`}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleAppointmentClick(appointment);
-                                            }}
-                                        >
-                                            {format(new Date(appointment.appointmentDate), 'HH:mm')} - {appointment.title}
-                                        </div>
-                                    ))}
+                                    {dayAppointments.slice(0, 3).map((appointment) => {
+                                        return (
+                                            <div className='flex gap-1' key={appointment._id}>
+                                                <div>
+                                                    <TypePill type={appointment.createdBy.group} />
+                                                </div>
+                                                <div
+                                                    className={`flex-1 text-xs p-1 rounded truncate ${statusColors[appointment.status]} text-white`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleAppointmentClick(appointment);
+                                                    }}
+                                                >
+                                                    {format(new Date(appointment.appointmentDate), 'HH:mm')} - {appointment.title}
+                                                </div>
+                                            </div>
+
+                                        )
+                                    })}
                                 </div>
                             </div>
                         );

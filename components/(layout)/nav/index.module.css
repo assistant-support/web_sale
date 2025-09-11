@@ -11,7 +11,7 @@
     width: 100px;
     border-right: thin solid var(--border-color);
     background-color: var(--bg-primary);
-    z-index: 6;
+    z-index: 4;
     /* Đảm bảo nav luôn ở trên các phần tử khác */
     transition: transform 0.3s ease-in-out;
     /* Thêm hiệu ứng trượt cho mobile */
@@ -218,7 +218,7 @@
         padding: 0 16px;
         background-color: var(--bg-primary);
         border-bottom: 1px solid var(--border-color);
-        z-index: 900;
+        z-index: 3;
     }
 
     /* Nút bấm mở menu mobile (hamburger icon) */
@@ -245,7 +245,7 @@
         right: 0;
         bottom: 0;
         background-color: rgba(0, 0, 0, 0.5);
-        z-index: 999;
+        z-index: 3;
         /* Nằm dưới nav, trên nội dung trang */
         animation: fadeIn 0.3s ease;
     }

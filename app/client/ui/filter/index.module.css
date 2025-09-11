@@ -47,6 +47,7 @@
     border: thin solid var(--border-color);
     display: flex;
     flex-direction: column;
+    max-height: 300px;
 }
 
 .menulist p {

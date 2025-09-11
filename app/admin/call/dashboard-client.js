@@ -1,7 +1,7 @@
 // app/(wherever)/TelesalesReportClient.jsx
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import {
     Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend
 } from 'chart.js';
@@ -10,9 +10,8 @@ import { Bar } from 'react-chartjs-2';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Phone, PhoneMissed, Percent, History, PhoneForwarded } from 'lucide-react';
-
-import RecordingPlayer from "@/components/call/RecordingPlayer"; // ⬅️ player API stream đã làm
+import { Phone, PhoneMissed, Percent, History, PhoneForwarded, ChevronDown, Check, RefreshCw } from 'lucide-react';
+import RecordingPlayer from "@/components/call/RecordingPlayer";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -39,7 +38,104 @@ const statusToBadge = (st) => {
     }
 };
 
-// ---------- sub components ----------
+/* ============== Listbox (Dropdown button, aria chuẩn) ============== */
+function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', buttonClassName = '' }) {
+    const [open, setOpen] = useState(false);
+    const btnRef = useRef(null);
+    const listRef = useRef(null);
+    const [active, setActive] = useState(-1);
+
+    const current = useMemo(
+        () => options.find(o => o.value === value) || { label: placeholder, value: undefined },
+        [options, value, placeholder]
+    );
+
+    useEffect(() => {
+        function onClickOutside(e) {
+            if (!open) return;
+            if (btnRef.current?.contains(e.target)) return;
+            if (listRef.current?.contains(e.target)) return;
+            setOpen(false);
+        }
+        document.addEventListener('mousedown', onClickOutside);
+        return () => document.removeEventListener('mousedown', onClickOutside);
+    }, [open]);
+
+    const handleKeyDown = (e) => {
+        if (!open && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            setOpen(true);
+            setActive(Math.max(0, options.findIndex(o => o.value === value)));
+            return;
+        }
+        if (!open) return;
+        if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
+        if (e.key === 'ArrowDown') { e.preventDefault(); setActive(prev => (prev + 1) % options.length); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); setActive(prev => (prev - 1 + options.length) % options.length); return; }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const opt = options[active] || options.find(o => o.value === value);
+            if (opt) onChange(opt.value);
+            setOpen(false);
+        }
+    };
+
+    return (
+        <div className="w-full">
+            {label && <label className="block mb-2 text-sm text-muted-foreground">{label}</label>}
+            <div className="relative" onKeyDown={handleKeyDown}>
+                <button
+                    ref={btnRef}
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={open}
+                    onClick={() => setOpen(v => !v)}
+                    className={`inline-flex w-full items-center justify-between gap-2 rounded-[6px] border px-3 py-2 text-sm ${buttonClassName}`}
+                    style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                >
+                    <span className="truncate">{current.label}</span>
+                    <ChevronDown
+                        className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`}
+                        style={{ color: 'var(--text-primary)' }}
+                    />
+                </button>
+                {open && (
+                    <ul
+                        ref={listRef}
+                        role="listbox"
+                        tabIndex={-1}
+                        className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-[6px] border bg-white shadow-sm"
+                        style={{ borderColor: 'var(--border)' }}
+                    >
+                        {options.map((opt, idx) => {
+                            const selected = opt.value === value;
+                            const isActive = idx === active;
+                            return (
+                                <li
+                                    key={opt.value ?? `opt-${idx}`}
+                                    role="option"
+                                    aria-selected={selected}
+                                    onMouseEnter={() => setActive(idx)}
+                                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
+                                        } ${selected ? 'font-medium' : ''}`}
+                                >
+                                    <span className="truncate">{opt.label}</span>
+                                    {selected && <Check className="w-4 h-4" />}
+                                </li>
+                            );
+                        })}
+                        {options.length === 0 && (
+                            <li className="px-3 py-2 text-sm text-muted-foreground">Không có lựa chọn</li>
+                        )}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/* ============== sub components ============== */
 const StatCard = ({ title, value, icon: Icon, description, color }) => (
     <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border-l-4" style={{ borderLeftColor: color }}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -48,7 +144,7 @@ const StatCard = ({ title, value, icon: Icon, description, color }) => (
         </CardHeader>
         <CardContent>
             <div className="text-2xl font-bold">{value}</div>
-            <p className="text-xs text-muted-foreground">{description}</p>
+            <h5>{description}</h5>
         </CardContent>
     </Card>
 );
@@ -124,53 +220,82 @@ const CallLogTable = ({ rows }) => (
     </Card>
 );
 
-// ---------- main ----------
-export default function TelesalesReportClient({ initialData = [] }) {
-    const {
-        stats, chartData, tableRows
-    } = useMemo(() => {
+/* ============== main ============== */
+export default function TelesalesReportClient({ initialData = [], user = [] }) {
+    // filters
+    const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
+    const [endDate, setEndDate] = useState('');   // YYYY-MM-DD
+    const [userFilter, setUserFilter] = useState('all');      // 'all' | userId
+    const [groupFilter, setGroupFilter] = useState('all');      // 'all' | 'noi_khoa' | 'ngoai_khoa'
+
+    // map users
+    const userMap = useMemo(() => {
+        const m = new Map();
+        (user || []).forEach(u => m.set(String(u._id), u));
+        return m;
+    }, [user]);
+
+    // listbox options
+    const userOptions = useMemo(() => ([
+        { value: 'all', label: 'Tất cả nhân viên' },
+        ...(user || []).map(u => ({ value: String(u._id), label: u.name }))
+    ]), [user]);
+
+    const groupOptions = useMemo(() => ([
+        { value: 'all', label: 'Tất cả nhóm' },
+        { value: 'noi_khoa', label: 'Nội khoa' },
+        { value: 'ngoai_khoa', label: 'Ngoại khoa' },
+    ]), []);
+
+    // filtered calls
+    const filtered = useMemo(() => {
         const calls = Array.isArray(initialData) ? initialData : [];
+        const start = startDate ? new Date(startDate + 'T00:00:00') : null;
+        const end = endDate ? new Date(endDate + 'T23:59:59.999') : null;
 
-        // nhóm đếm
+        return calls.filter(c => {
+            const ct = new Date(c.createdAt);
+            if (start && ct < start) return false;
+            if (end && ct > end) return false;
+
+            // filter by user
+            const uid = String(c.user?._id || '');
+            if (userFilter !== 'all' && uid !== userFilter) return false;
+
+            // filter by group (lookup from users list)
+            if (groupFilter !== 'all') {
+                const usr = userMap.get(uid);
+                const g = usr?.group;
+                if (g !== groupFilter) return false;
+            }
+            return true;
+        });
+    }, [initialData, startDate, endDate, userFilter, groupFilter, userMap]);
+
+    // stats & chart & table rows (chart chỉ dùng failed + completed)
+    // stats & chart & table rows (chart chỉ dùng failed + completed)
+    const { stats, chartData, tableRows } = useMemo(() => {
+        const calls = filtered;
+
         let completed = 0;
-        let noContact = 0;         // no_answer + missed
-        let rejectedBusy = 0;      // rejected + busy
-        let failed = 0;            // failed
-        let voicemail = 0;
-        let ongoing = 0;
+        let failed = 0;
+        let noContact = 0; // KHÔNG liên lạc = mọi status KHÁC 'completed'
 
-        // thời lượng TB của cuộc gọi thành công
         let successDurTotal = 0;
         let successDurCount = 0;
 
         calls.forEach(c => {
-            const st = c.status;
-            switch (st) {
-                case 'completed':
-                    completed += 1;
-                    if (Number(c.duration) > 0) {
-                        successDurTotal += Number(c.duration);
-                        successDurCount += 1;
-                    }
-                    break;
-                case 'no_answer':
-                case 'missed':
-                    noContact += 1;
-                    break;
-                case 'rejected':
-                case 'busy':
-                    rejectedBusy += 1;
-                    break;
-                case 'voicemail':
-                    voicemail += 1;
-                    break;
-                case 'ongoing':
-                    ongoing += 1;
-                    break;
-                case 'failed':
-                default:
+            if (c.status === 'completed') {
+                completed += 1;
+                if (Number(c.duration) > 0) {
+                    successDurTotal += Number(c.duration);
+                    successDurCount += 1;
+                }
+            } else {
+                noContact += 1;              // <- cập nhật ở đây
+                if (c.status === 'failed') { // để phục vụ biểu đồ 2 cột
                     failed += 1;
-                    break;
+                }
             }
         });
 
@@ -178,18 +303,15 @@ export default function TelesalesReportClient({ initialData = [] }) {
         const connectionRate = total ? (completed / total) * 100 : 0;
         const avgSuccessDur = successDurCount ? Math.round(successDurTotal / successDurCount) : 0;
 
+        // Biểu đồ CHỈ 2 trạng thái: completed & failed
         const chart = {
-            labels: ['Thành công', 'Không liên lạc', 'Bận/Từ chối', 'Voicemail', 'Lỗi', 'Đang diễn ra'],
+            labels: ['Thành công', 'Lỗi kỹ thuật'],
             datasets: [{
                 label: 'Số lượng',
-                data: [completed, noContact, rejectedBusy, voicemail, failed, ongoing],
+                data: [completed, failed],
                 backgroundColor: [
-                    'rgba(59, 130, 246, 0.7)',    // blue
-                    'rgba(239, 68, 68, 0.7)',     // red
-                    'rgba(107, 114, 128, 0.7)',   // gray
-                    'rgba(234, 179, 8, 0.7)',     // amber
-                    'rgba(244, 63, 94, 0.7)',     // rose
-                    'rgba(16, 185, 129, 0.7)',    // emerald
+                    'rgba(59, 130, 246, 0.7)',   // completed
+                    'rgba(244, 63, 94, 0.7)',    // failed
                 ],
             }],
         };
@@ -201,27 +323,80 @@ export default function TelesalesReportClient({ initialData = [] }) {
                 totalCalls: total,
                 connectionRate: `${connectionRate.toFixed(1)}%`,
                 avgSuccessDur: fmtDur(avgSuccessDur),
-                noContactCount: noContact,
+                noContactCount: noContact, // <- giờ sẽ ra đúng
             },
             chartData: chart,
             tableRows: rows,
         };
-    }, [initialData]);
+    }, [filtered]);
+
 
     return (
-        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-gray-50 min-h-screen">
+        <div className="flex-1 space-y-4 py-4 pt-6 min-h-screen">
+            {/* Filters */}
+            <Card className="shadow-md">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <CardTitle>Bộ lọc</CardTitle>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => { setStartDate(''); setEndDate(''); setUserFilter('all'); setGroupFilter('all'); }}
+                        className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
+                        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                    >
+                        <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
+                    </button>
+                </CardHeader>
+
+                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                    <Listbox
+                        label="Nhân viên gọi"
+                        options={userOptions}
+                        value={userFilter}
+                        onChange={setUserFilter}
+                    />
+                    <Listbox
+                        label="Nhóm (group)"
+                        options={groupOptions}
+                        value={groupFilter}
+                        onChange={setGroupFilter}
+                    />
+                    <div>
+                        <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
+                        <input
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                            className="w-full rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        />
+                    </div>
+                    <div>
+                        <label className="block mb-2 text-sm text-muted-foreground">Đến ngày</label>
+                        <input
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            className="w-full rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        />
+                    </div>
+                </CardContent>
+            </Card>
+
             {/* Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                     title="Tổng cuộc gọi"
                     value={stats.totalCalls}
                     icon={Phone}
-                    description="Tổng số cuộc gọi đã ghi nhận"
+                    description="Tổng số cuộc gọi sau bộ lọc"
                     color="#3b82f6"
                 />
                 <StatCard
                     title="Tỷ lệ kết nối"
-                    value={stats.connectionRate}
+                    value={`${stats.totalCalls - stats.noContactCount} (${stats.connectionRate})`}
                     icon={Percent}
                     description="Thành công / Tổng cuộc gọi"
                     color="#10b981"
@@ -235,9 +410,9 @@ export default function TelesalesReportClient({ initialData = [] }) {
                 />
                 <StatCard
                     title="Không liên lạc được"
-                    value={stats.noContactCount}
+                    value={`${stats.noContactCount} (${Number(stats.noContactCount / stats.totalCalls * 100).toFixed(2)}%)`}
                     icon={PhoneMissed}
-                    description="Gồm: không bắt máy & bỏ lỡ"
+                    description="Cuộc gọi thất bại / không bắt máy"
                     color="#ef4444"
                 />
             </div>
@@ -247,7 +422,7 @@ export default function TelesalesReportClient({ initialData = [] }) {
                 <Card className="shadow-lg">
                     <CardHeader>
                         <CardTitle>Biểu đồ trạng thái cuộc gọi</CardTitle>
-                        <CardDescription>Phân tích theo nhóm trạng thái.</CardDescription>
+                        <CardDescription>Chỉ hiển thị Thành công & Lỗi kỹ thuật.</CardDescription>
                     </CardHeader>
                     <CardContent className="h-[400px] relative">
                         <CallOutcomeChart chartData={chartData} />

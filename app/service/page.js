@@ -1,9 +1,5 @@
-import { service_data } from '@/data/services/wraperdata.db';
-import ServiceManager from './ui/ServiceManager';
+import ServiceManagerServer from './ui/ServiceManager.server';
 
-export default async function ServicesPage() {
-    const services = await service_data();
-    console.log(services);
-    
-    return <ServiceManager initialServices={services} />;
+export default function ServicesPage() {
+    return <ServiceManagerServer />;
 }

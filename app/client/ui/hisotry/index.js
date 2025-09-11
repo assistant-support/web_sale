@@ -17,7 +17,7 @@ const getActionTypeName = (type) => {
 }
 
 function HistoryItem({ job, onShowTasks, onShowJobDetails }) {
-    if (!job || !job._id) return null; 
+    if (!job || !job._id) return null;
     const { total, completed, failed } = job.statistics;
 
     return (
@@ -44,7 +44,7 @@ function HistoryItem({ job, onShowTasks, onShowJobDetails }) {
                     <h6 style={{ color: 'var(--text-primary)' }}>Danh sách thực hiện</h6>
                 </button>
                 <button className='btn_s_b' onClick={() => onShowJobDetails(job)}>
-                    <h6>Chi tiết lịch trình</h6>
+                    <h6 style={{ color: 'white' }}>Chi tiết lịch trình</h6>
                 </button>
             </div>
         </div>
@@ -76,7 +76,7 @@ function HistoryTaskItem({ task }) {
 
 // Component mới: Hiển thị chi tiết Lịch trình
 function ScheduleDetailsView({ job }) {
-    if( !job || !job._id) return null;
+    if (!job || !job._id) return null;
     return (
         <div className={styles.detailItem} style={{ border: 'none' }}>
             <div className={styles.detailHeader}>
@@ -164,7 +164,7 @@ export default function ActionHistory({ history = [] }) {
     return (
         <>
             <button className='btn_s' onClick={handleOpenPopup}>
-                <Svg_History w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'}/>
+                <Svg_History w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
                 <h5>Lịch sử: {history.length}</h5>
             </button>
             <FlexiblePopup

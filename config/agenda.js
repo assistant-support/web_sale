@@ -2,7 +2,7 @@
 
 import Agenda from 'agenda';
 import mongoose from 'mongoose';
-import { CustomerWorkflow, WorkflowTemplate } from '@/models/workflow.model';
+import { CustomerWorkflow, WorkflowTemplate } from '@/models/workflows.model';
 import Customer from '@/models/customer.model';
 import Zalo from '@/models/zalo.model';
 import Logs from '@/models/log.model';

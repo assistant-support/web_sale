@@ -7,7 +7,7 @@ import '@/models/users';
 
 export async function GET(req, { params }) {
     try {
-        const { callId } = params || {};
+        const { callId } = await params || {};
         if (!callId) return new Response('Missing callId', { status: 400 });
 
         // 1) Auth
@@ -18,6 +18,8 @@ export async function GET(req, { params }) {
 
         // 2) Tìm Call và kiểm tra quyền
         const call = await Call.findById(callId).populate({ path: 'user', select: 'name role' }).lean();
+        console.log(call);
+        
         if (!call) return new Response('Not found', { status: 404 });
 
         const isAdmin = Array.isArray(session.role) ? session.role.includes('Admin') :

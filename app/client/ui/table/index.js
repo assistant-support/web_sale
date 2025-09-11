@@ -136,13 +136,11 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
 
             case 'pipelineStatus': {
                 const status = getStatusInVietnamese(customer.pipelineStatus[0]);
-                console.log(status);
-                
                 return <h6>{status}</h6>;
             }
             case 'assignees': return <h6>{Array.isArray(value) && value.length > 0 ? value.map(a => a.user?.name).join(', ') : '-'}</h6>;
             case 'currentStep': {
-                const status = customer.pipelineStatus.length;
+                const status = customer.pipelineStatus.length - 1;
                 return <h6>Bước {status}</h6>;
             }
             default: return <h6 className="truncate">{String(value)}</h6>;

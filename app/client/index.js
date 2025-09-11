@@ -13,6 +13,7 @@ import RunningActions from './ui/action';
 import SettingVariant from './ui/variant';
 import SettingZaloRoles from './ui/zalos';
 import ActionHistory from './ui/hisotry';
+import { reloadCustomers } from '@/data/customers/wraperdata.db';
 
 function TableSkeleton() {
     return (
@@ -22,7 +23,7 @@ function TableSkeleton() {
     );
 }
 
-export default function CustomerView({ c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
+export default function CustomerView({ customer, c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
     const router = useRouter();
     const intervalRef = useRef(null);
 
@@ -122,7 +123,7 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                                         <SettingLabel data={labelData} />
                                     </>
                                 )}
-                                <SettingData data={formData} service={service} />
+                                <SettingData data={formData} service={service} customer={customer} />
                             </div>
                         </div>
                     </div>
@@ -132,6 +133,7 @@ export default function CustomerView({ c, running, initialResult, user, sources,
                         users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
                         labels={labelData}
                         sources={sources}
+                        service={service}
                     />
                 </>
             )}

@@ -7,19 +7,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent } from '@/components/ui/card';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-// Data Logic
 import WorkflowForm from '../WorkflowForm';
 import { workflow_data, reloadWorkflow, deleteWorkflow } from '@/data/workflow/wraperdata.db';
 // Utils & Icons
 import { formatDelay } from '@/function/index';
-import { Pencil, Plus, Eye, MessageSquare, UserPlus, CheckCircle2, Tag, ArrowRight, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Eye, MessageSquare, UserPlus, CheckCircle2, FolderSearch, Tag, ArrowRight, Trash2, Bell, UserRoundCog } from 'lucide-react';
 
 const actionDetails = {
     message: { icon: MessageSquare, name: "Gửi Tin Nhắn", color: "bg-blue-100 text-blue-700" },
     friendRequest: { icon: UserPlus, name: "Gửi Kết Bạn", color: "bg-green-100 text-green-700" },
     checkFriend: { icon: CheckCircle2, name: "Kiểm Tra Bạn Bè", color: "bg-yellow-100 text-yellow-700" },
     tag: { icon: Tag, name: "Gắn Thẻ", color: "bg-purple-100 text-purple-700" },
+    allocation: { icon: UserRoundCog, name: "Phân bổ", color: "bg-yellow-100 text-yellow-700" },
+    bell: { icon: Bell, name: "Thông báo", color: "bg-purple-100 text-purple-700" },
+    findUid: { icon: FolderSearch, name: "Tìm Uid", color: "bg-purple-100 text-purple-700" },
 };
 
 const WorkflowViewer = ({ workflow }) => {
@@ -27,9 +28,10 @@ const WorkflowViewer = ({ workflow }) => {
     return (
         <DialogContent className="max-w-4xl">
             <DialogHeader>
-                <DialogTitle>Xem Luồng Công Việc: {workflow.name}</DialogTitle>
+                <DialogTitle></DialogTitle>
+                <h4>Xem Luồng Công Việc: {workflow.name}</h4>
             </DialogHeader>
-            <div className="p-4 overflow-x-auto">
+            <div className="p-4 overflow-hidden overflow-x-auto">
                 <div className="flex items-center gap-4">
                     {workflow.steps.sort((a, b) => a.delay - b.delay).map((step, index) => {
                         const details = actionDetails[step.action] || { icon: ArrowRight, name: step.action, color: "bg-gray-100 text-gray-700" };
@@ -40,8 +42,8 @@ const WorkflowViewer = ({ workflow }) => {
                                     <div className={`w-20 h-20 rounded-lg flex items-center justify-center ${details.color}`}>
                                         <Icon className="h-8 w-8" />
                                     </div>
-                                    <p className="font-semibold text-center w-32 text-sm">{details.name}</p>
-                                    <p className="text-xs text-gray-500">{formatDelay(step.delay)}</p>
+                                    <h4 className="font-semibold text-center w-32 text-sm">{details.name}</h4>
+                                    <h5 className="text-xs text-gray-500">{formatDelay(step.delay)}</h5>
                                 </div>
                                 {index < workflow.steps.length - 1 && (
                                     <div className="flex-shrink-0 text-gray-300">
@@ -94,20 +96,20 @@ export default function WorkflowManager({ initialWorkflows, forms }) {
     };
 
     return (
-        <div className="p-4 md:p-6 space-y-6">
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
                 <div>
-                    <h4>Quản lý Workflow</h4>
-                    <p className="text-gray-500">Tạo, chỉnh sửa và quản lý các luồng công việc.</p>
+                    <p className='text_w_600'>Quản lý Workflow</p>
+                    <h4>Tạo, chỉnh sửa và quản lý các luồng công việc.</h4>
                 </div>
                 <div className='flex items-center gap-2'>
-                    <Tabs value={filter} onValueChange={(value) => value && setFilter(value)}>
+                    {/* <Tabs value={filter} onValueChange={(value) => value && setFilter(value)}>
                         <TabsList>
                             <TabsTrigger value="all">Tất cả</TabsTrigger>
                             <TabsTrigger value="fixed">Cố định</TabsTrigger>
                             <TabsTrigger value="custom">Tùy biến</TabsTrigger>
                         </TabsList>
-                    </Tabs>
+                    </Tabs> */}
                     <Button onClick={() => handleOpenForm()}><Plus className="mr-2 h-4 w-4" /> Tạo Mới</Button>
                 </div>
             </header>
@@ -144,14 +146,13 @@ export default function WorkflowManager({ initialWorkflows, forms }) {
 
             <Dialog open={isFormOpen} onOpenChange={setFormOpen}>
                 <DialogContent className="w-full sm:max-w-[1200px] p-0">
+                    <DialogTitle></DialogTitle>
                     <WorkflowForm workflow={selectedWorkflow} forms={forms} onSuccess={handleSuccess} onCancel={() => setFormOpen(false)} />
                 </DialogContent>
             </Dialog>
 
             <Dialog open={isViewerOpen} onOpenChange={setViewerOpen}>
-                <DialogContent className="w-full sm:max-w-[1200px] p-0">
-                    <WorkflowViewer workflow={selectedWorkflow} />
-                </DialogContent>
+                <WorkflowViewer workflow={selectedWorkflow} />
             </Dialog>
         </div>
     );

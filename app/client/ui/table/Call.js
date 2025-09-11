@@ -638,7 +638,7 @@ export default function OMICallClient({ customer, user }) {
                 {historyLoading && <p className="text-sm text-muted-foreground">Đang tải lịch sử…</p>}
                 {historyError && <p className="text-sm text-red-500">Lỗi: {historyError}</p>}
                 {!historyLoading && !historyError && callHistory.length === 0 && (
-                    <p className="text-sm text-muted-foreground">Chưa có lịch sử.</p>
+                    <h5 className='p-2'>Chưa có lịch sử.</h5>
                 )}
                 <div className="divide-y rounded-md border bg-white max-h-80 overflow-auto">
                     {callHistory.map((h) => (

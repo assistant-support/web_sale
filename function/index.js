@@ -67,7 +67,7 @@ export function formatDelay(ms) {
 // Chuyển status code thành text
 const statusMap = {
     // ... (nội dung giống hệt ở trên) ...
-    'new_unconfirmed_1': 'Mới, chưa xác nhận',
+    'new_unconfirmed_1': 'Data mới',
     'missing_info_1': 'Thiếu thông tin',
     'not_valid_1': 'Không hợp lệ',
     'duplicate_merged_1': 'Trùng lặp (đã gộp)',
@@ -104,4 +104,25 @@ export function maskPhoneNumber(phone) {
     const suffix = phone.slice(-2);
     const mask = 'xxxxxx';
     return `${prefix}${mask}${suffix}`;
+}
+
+
+export function getCurrentStageFromPipeline(customer) {
+    const arr = Array.isArray(customer?.pipelineStatus)
+        ? customer.pipelineStatus
+        : (customer?.pipelineStatus ? [customer.pipelineStatus] : []);
+
+    // arr[0] = code hiện tại, arr[1..6] = đã qua các bước 1..6
+    let highestStep = 0; // 0 nghĩa là chưa vào bước nào (sẽ mặc định mở bước 1)
+    for (let i = 1; i <= 6; i++) {
+        if (typeof arr[i] !== 'undefined' && arr[i] !== null) {
+            highestStep = i;         // có phần tử tại vị trí i => đã tới bước i
+        } else {
+            // Nếu dữ liệu đảm bảo đi theo thứ tự, có thể break để tối ưu:
+            // break;
+        }
+    }
+    const currentStageId = highestStep === 0 ? 1 : highestStep; // 1..6
+    const currentStageIndex = currentStageId - 1;               // 0..5 (dùng cho Accordion)
+    return { currentStageId, currentStageIndex };
 }

@@ -22,22 +22,22 @@ export async function dataAppointment(params = {}) {
     try {
         await connectDB()
         const matchStage = {};
-        
+
         // Lọc theo ID khách hàng
         if (params.customerId) {
             matchStage.customer = new mongoose.Types.ObjectId(params.customerId);
         }
-        
+
         // Lọc theo người tạo
         if (params.createdBy) {
             matchStage.createdBy = new mongoose.Types.ObjectId(params.createdBy);
         }
-        
+
         // Lọc theo trạng thái
         if (params.status) {
             matchStage.status = params.status;
         }
-        
+
         // Lọc theo khoảng thời gian
         if (params.dateRange && params.dateRange.start && params.dateRange.end) {
             matchStage.appointmentDate = {
@@ -58,7 +58,7 @@ export async function dataAppointment(params = {}) {
                 $lte: endDate,
             };
         }
-        
+
         // Pipeline để lấy dữ liệu và populate thông tin liên quan
         const aggregationPipeline = [
             { $match: matchStage },
@@ -93,7 +93,7 @@ export async function dataAppointment(params = {}) {
                     status: 1,
                     createdAt: 1,
                     customer: { _id: "$customerInfo._id", name: "$customerInfo.name", phone: "$customerInfo.phone" },
-                    createdBy: { _id: "$creatorInfo._id", name: "$creatorInfo.name" }
+                    createdBy: { _id: "$creatorInfo._id", name: "$creatorInfo.name", group: "$creatorInfo.group" }
                 }
             }
         ];

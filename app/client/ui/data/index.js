@@ -129,7 +129,7 @@ function AreaForm({ formAction, formState, initialData = null, submitText }) {
     );
 }
 
-export default function SettingData({ data, service }) {
+export default function SettingData({ data, service, customer }) {
     const router = useRouter();
     const [isRightPopupOpen, setIsRightPopupOpen] = useState(false);
     const [isCreatePopupOpen, setIsCreatePopupOpen] = useState(false);
@@ -235,17 +235,20 @@ export default function SettingData({ data, service }) {
                                 <h4>Danh sách sự kiện - nguồn dữ liệu</h4>
                             </div>
                             <div className={styles.itemsContainer}>
-                                {data.map((item) => (
-                                    <div key={item._id} className={styles.item} onClick={() => handleOpenUpdatePopup(item)}>
-                                        <h5 style={{ textTransform: 'uppercase' }}>{item.name}</h5>
-                                        <div style={{ display: 'flex', gap: 16 }}>
-                                            <h6>Ngày tạo: {formatDate(new Date(item.createdAt)) || 'Không rõ'}</h6>
-                                            <h6>Được tạo bởi: {item.createdBy?.name || 'Không rõ'}</h6>
-                                            <h6>Số khách hàng: {item.customerCount || 0}</h6>
+                                {data.map((item) => {
+                                    let sum = customer.filter(c => c.source?._id === item._id).length
+                                    return (
+                                        <div key={item._id} className={styles.item} onClick={() => handleOpenUpdatePopup(item)}>
+                                            <h5 style={{ textTransform: 'uppercase' }}>{item.name}</h5>
+                                            <div style={{ display: 'flex', gap: 16 }}>
+                                                <h6>Ngày tạo: {formatDate(new Date(item.createdAt)) || 'Không rõ'}</h6>
+                                                <h6>Được tạo bởi: {item.createdBy?.name || 'Không rõ'}</h6>
+                                                <h6>Số khách hàng: {sum}</h6>
+                                            </div>
+                                            <h5 className="text_w_400">{item.describe}</h5>
                                         </div>
-                                        <h5 className="text_w_400">{item.describe}</h5>
-                                    </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         </div>
                     </div>

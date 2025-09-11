@@ -1,17 +1,115 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Check, X, UserCheck, Percent, History } from 'lucide-react';
+import { Calendar, Check, X, UserCheck, Percent, History, ChevronDown, Check as CheckIcon, RefreshCw } from 'lucide-react';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
-// --- Sub Components ---
+/* ======================= Listbox (Dropdown) ======================= */
+function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', buttonClassName = '' }) {
+    const [open, setOpen] = useState(false);
+    const btnRef = useRef(null);
+    const listRef = useRef(null);
+    const [active, setActive] = useState(-1);
 
+    const current = useMemo(
+        () => options.find(o => o.value === value) || { label: placeholder, value: undefined },
+        [options, value, placeholder]
+    );
+
+    useEffect(() => {
+        function onClickOutside(e) {
+            if (!open) return;
+            if (btnRef.current?.contains(e.target)) return;
+            if (listRef.current?.contains(e.target)) return;
+            setOpen(false);
+        }
+        document.addEventListener('mousedown', onClickOutside);
+        return () => document.removeEventListener('mousedown', onClickOutside);
+    }, [open]);
+
+    const handleKeyDown = (e) => {
+        if (!open && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            setOpen(true);
+            setActive(Math.max(0, options.findIndex(o => o.value === value)));
+            return;
+        }
+        if (!open) return;
+
+        if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
+        if (e.key === 'ArrowDown') { e.preventDefault(); setActive(prev => (prev + 1) % options.length); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); setActive(prev => (prev - 1 + options.length) % options.length); return; }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const opt = options[active] || options.find(o => o.value === value);
+            if (opt) onChange(opt.value);
+            setOpen(false);
+        }
+    };
+
+    return (
+        <div className="w-full">
+            {label && <label className="block mb-2 text-sm text-muted-foreground">{label}</label>}
+            <div className="relative" onKeyDown={handleKeyDown}>
+                <button
+                    ref={btnRef}
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={open}
+                    onClick={() => setOpen(v => !v)}
+                    className={`inline-flex w-full items-center justify-between gap-2 rounded-[6px] border px-3 py-2 text-sm ${buttonClassName}`}
+                    style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                >
+                    <span className="truncate">{current.label}</span>
+                    <ChevronDown
+                        className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`}
+                        style={{ color: 'var(--text-primary)' }}
+                    />
+                </button>
+
+                {open && (
+                    <ul
+                        ref={listRef}
+                        role="listbox"
+                        tabIndex={-1}
+                        className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-[6px] border bg-white shadow-sm"
+                        style={{ borderColor: 'var(--border)' }}
+                    >
+                        {options.map((opt, idx) => {
+                            const selected = opt.value === value;
+                            const isActive = idx === active;
+                            return (
+                                <li
+                                    key={opt.value ?? `opt-${idx}`}
+                                    role="option"
+                                    aria-selected={selected}
+                                    onMouseEnter={() => setActive(idx)}
+                                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
+                                        } ${selected ? 'font-medium' : ''}`}
+                                >
+                                    <span className="truncate">{opt.label}</span>
+                                    {selected && <CheckIcon className="w-4 h-4" />}
+                                </li>
+                            );
+                        })}
+                        {options.length === 0 && (
+                            <li className="px-3 py-2 text-sm text-muted-foreground">Không có lựa chọn</li>
+                        )}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/* ======================= Sub Components ======================= */
 const StatCard = ({ title, value, icon: Icon, description, color }) => (
     <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border-l-4" style={{ borderLeftColor: color }}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -20,7 +118,7 @@ const StatCard = ({ title, value, icon: Icon, description, color }) => (
         </CardHeader>
         <CardContent>
             <div className="text-2xl font-bold">{value}</div>
-            <p className="text-xs text-muted-foreground">{description}</p>
+            <h5 className="text-xs text-muted-foreground">{description}</h5>
         </CardContent>
     </Card>
 );
@@ -91,12 +189,68 @@ const AppointmentLogTable = ({ appointments }) => {
     );
 };
 
-// --- Main Client Component ---
-export default function AppointmentStatsClient({ initialData }) {
+/* ======================= Main Component ======================= */
+export default function AppointmentStatsClient({ initialData = [], user = [] }) {
+    // Filters
+    const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
+    const [endDate, setEndDate] = useState('');     // YYYY-MM-DD
+    const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
+    const [statusFilter, setStatusFilter] = useState('all'); // all | completed | confirmed | pending | cancelled | postponed | missed
 
+    // Users map (for group lookup by createdBy)
+    const userMap = useMemo(() => {
+        const m = new Map();
+        (user || []).forEach(u => m.set(String(u._id), u));
+        return m;
+    }, [user]);
+
+    // Listbox options
+    const groupOptions = useMemo(() => ([
+        { value: 'all', label: 'Tất cả nhóm' },
+        { value: 'noi_khoa', label: 'Nội khoa' },
+        { value: 'ngoai_khoa', label: 'Ngoại khoa' },
+    ]), []);
+
+    const statusOptions = useMemo(() => ([
+        { value: 'all', label: 'Tất cả trạng thái' },
+        { value: 'completed', label: 'Hoàn thành' },
+        { value: 'confirmed', label: 'Đã xác nhận' },
+        { value: 'pending', label: 'Chờ xử lý' },
+        { value: 'cancelled', label: 'Đã hủy' },
+        { value: 'postponed', label: 'Hoãn' },
+        { value: 'missed', label: 'Không đến' },
+    ]), []);
+
+    // Apply filters
+    const filtered = useMemo(() => {
+        const data = Array.isArray(initialData) ? initialData : [];
+        const start = startDate ? new Date(startDate + 'T00:00:00') : null;
+        const end = endDate ? new Date(endDate + 'T23:59:59.999') : null;
+
+        return data.filter(a => {
+            // Time by appointmentDate
+            const at = new Date(a.appointmentDate);
+            if (start && at < start) return false;
+            if (end && at > end) return false;
+
+            // Group by createdBy -> user.group
+            if (groupFilter !== 'all') {
+                const u = userMap.get(String(a.createdBy));
+                if ((u?.group || 'unknown') !== groupFilter) return false;
+            }
+
+            // Status
+            if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+
+            return true;
+        });
+    }, [initialData, startDate, endDate, groupFilter, statusFilter, userMap]);
+
+    // Stats + Chart
     const { stats, chartData } = useMemo(() => {
-        let confirmed = 0, completed = 0, cancelled = 0, postponed = 0, noShow = 0, pending = 0, missed = 0
-        initialData.forEach(appt => {
+        let confirmed = 0, completed = 0, cancelled = 0, postponed = 0, missed = 0, pending = 0;
+
+        filtered.forEach(appt => {
             switch (appt.status) {
                 case 'confirmed': confirmed++; break;
                 case 'completed': completed++; break;
@@ -107,18 +261,17 @@ export default function AppointmentStatsClient({ initialData }) {
             }
         });
 
-        const totalAttended = completed;
-        const totalShouldAttend = completed + noShow;
-        const showRate = totalShouldAttend > 0 ? (totalAttended / initialData.length) * 100 : 0;
-        console.log(totalAttended ,totalShouldAttend);
-        console.log(showRate);
-        
+        const total = filtered.length;
+        // Tỷ lệ đến hẹn: trong các lịch hẹn đủ điều kiện xuất hiện (missed + completed)
+        const denom = completed + missed;
+        const showRate = denom > 0 ? Number(((completed / denom) * 100).toFixed(2)) : 0;
+
         return {
             stats: {
-                total: initialData.length,
-                attended: totalAttended,
-                canceledOrPostponed: missed + cancelled,
-                showRate: `${showRate.toFixed(1)}%`
+                total,
+                attended: completed,
+                canceledOrPostponed: cancelled + postponed,
+                showRateText: `${showRate.toFixed(2)}%`, // 2 chữ số thập phân
             },
             chartData: {
                 labels: ['Hoàn thành', 'Đã xác nhận', 'Chờ xử lý', 'Hủy/Hoãn', 'Không đến'],
@@ -129,28 +282,83 @@ export default function AppointmentStatsClient({ initialData }) {
                 }]
             }
         };
-    }, [initialData]);
+    }, [filtered]);
 
     return (
-        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-gray-50 min-h-screen">
+        <div className="flex-1 space-y-4 py-4  pt-6 min-h-screen">
+            {/* Filters */}
+            <Card className="shadow-md">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <CardTitle>Lọc theo nhóm (người tạo lịch), trạng thái và thời gian (ngày hẹn).</CardTitle>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => { setStartDate(''); setEndDate(''); setGroupFilter('all'); setStatusFilter('all'); }}
+                        className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
+                        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                    >
+                        <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
+                    </button>
+                </CardHeader>
+
+                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                    <Listbox
+                        label="Nhóm (group)"
+                        options={groupOptions}
+                        value={groupFilter}
+                        onChange={setGroupFilter}
+                    />
+                    <Listbox
+                        label="Trạng thái lịch hẹn"
+                        options={statusOptions}
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                    />
+                    <div>
+                        <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
+                        <input
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                            className="w-full rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        />
+                    </div>
+                    <div>
+                        <label className="block mb-2 text-sm text-muted-foreground">Đến ngày</label>
+                        <input
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            className="w-full rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        />
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Stats */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard title="Tổng số Lịch hẹn" value={stats.total} icon={Calendar} description="Bao gồm tất cả trạng thái" color="#6366f1" />
+                <StatCard title="Tổng số Lịch hẹn" value={stats.total} icon={Calendar} description="Bao gồm tất cả trạng thái (sau lọc)" color="#6366f1" />
                 <StatCard title="Khách đã đến" value={stats.attended} icon={UserCheck} description="Lịch hẹn đã hoàn thành" color="#10b981" />
                 <StatCard title="Hủy / Hoãn" value={stats.canceledOrPostponed} icon={X} description="Lịch hẹn bị hủy hoặc dời lại" color="#ef4444" />
-                <StatCard title="Tỷ lệ đến hẹn" value={stats.showRate} icon={Percent} description="So với lịch hẹn đã qua" color="#f59e0b" />
+                <StatCard title="Tỷ lệ đến hẹn" value={stats.showRateText} icon={Percent} description="Trong nhóm: Hoàn thành / (Hoàn thành + Không đến)" color="#f59e0b" />
             </div>
 
+            {/* Chart + Table */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <Card className="shadow-lg">
                     <CardHeader>
                         <CardTitle>Phân bổ Trạng thái</CardTitle>
-                        <CardDescription>Tỷ lệ các trạng thái của lịch hẹn.</CardDescription>
+                        <CardDescription>Tỷ lệ các trạng thái của lịch hẹn (sau bộ lọc).</CardDescription>
                     </CardHeader>
                     <CardContent className="h-[400px] relative">
                         <AppointmentStatusChart chartData={chartData} />
                     </CardContent>
                 </Card>
-                <AppointmentLogTable appointments={initialData} />
+
+                <AppointmentLogTable appointments={filtered} />
             </div>
         </div>
     );

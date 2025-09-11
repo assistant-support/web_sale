@@ -7,7 +7,7 @@ import { reloadForm } from '@/data/form_database/wraperdata.db.js'
 import Customer from '@/models/customer.model';
 import initAgenda from '@/config/agenda';
 import mongoose from 'mongoose';
-import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflow.model';
+import { WorkflowTemplate, CustomerWorkflow } from '@/models/workflows.model';
 import { revalidateData } from '@/app/actions/customer.actions';
 import { sendGP } from "@/function/drive/appscript";
 import { service_data } from '@/data/services/wraperdata.db'
