@@ -243,15 +243,30 @@ function deriveGroup(customer, serviceMap) {
 }
 
 /* ======================= Main Component ======================= */
-
+const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
 export default function DataReceptionClient({ initialData, service = [] }) {
     const [data] = useState(initialData);
 
     // Filters
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
     const [tagFilter, setTagFilter] = useState('all');     // 'all' | service.name
-    const [startDate, setStartDate] = useState('');        // YYYY-MM-DD
-    const [endDate, setEndDate] = useState('');            // YYYY-MM-DD
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - 7);
+        return toYMD(d);
+    });
+
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return toYMD(d);
+    });         // YYYY-MM-DD
 
     // Infinite scroll for log
     const [visibleCount, setVisibleCount] = useState(10);

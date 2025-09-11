@@ -66,13 +66,17 @@ const ActivityLogTable = ({ activities, actionNames }) => (
         <CardContent>
             <div className="max-h-[400px] overflow-y-auto">
                 <Table>
-                    <TableHeader className="sticky top-0 bg-secondary"><TableRow><TableHead>Trạng thái</TableHead><TableHead>Hành động</TableHead><TableHead className="hidden md:table-cell">Đối tượng Zalo</TableHead><TableHead className="text-right">Thời gian</TableHead></TableRow></TableHeader>
+                    <TableHeader className="sticky top-0 bg-secondary"><TableRow><TableHead>Trạng thái</TableHead><TableHead>Hành động</TableHead>
+                        <TableHead className="text-left">Khách hàng</TableHead>
+                        <TableHead className="text-right">Thời gian</TableHead>
+                    </TableRow>
+                    </TableHeader>
                     <TableBody>
                         {activities.map((log) => (
                             <TableRow key={log._id}>
                                 <TableCell>{log.status.status ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Thành công</Badge> : <Badge variant="destructive">Thất bại</Badge>}</TableCell>
                                 <TableCell className="font-medium">{actionNames[log.type] || log.type}</TableCell>
-                                <TableCell className="hidden md:table-cell">{log.zalo?.name || 'N/A'}</TableCell>
+                                <TableCell className="hidden md:table-cell">{log.customer?.name || 'N/A'}</TableCell>
                                 <TableCell className="text-right text-xs">{new Date(log.createdAt).toLocaleString('vi-VN')}</TableCell>
                             </TableRow>
                         ))}
@@ -125,7 +129,7 @@ export default function MessagingStatsClient({ initialData }) {
         for (const key in initialData.byType) {
             const action = initialData.byType[key];
             actionNamesMap[key] = action.name;
-            
+
             // Chỉ thêm vào biểu đồ nếu có hành động
             if (action.total > 0) {
                 chartLabels.push(action.name);
@@ -139,7 +143,7 @@ export default function MessagingStatsClient({ initialData }) {
                 otherFailed += action.failed;
             }
         }
-        
+
         return {
             otherActions: { total: otherTotal, success: otherSuccess, failed: otherFailed },
             actionNames: actionNamesMap,

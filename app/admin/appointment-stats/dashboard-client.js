@@ -134,7 +134,6 @@ const AppointmentStatusChart = ({ chartData }) => {
     };
     return <Doughnut data={chartData} options={options} />;
 };
-
 const AppointmentLogTable = ({ appointments }) => {
     const getStatusBadge = (status) => {
         switch (status) {
@@ -158,8 +157,11 @@ const AppointmentLogTable = ({ appointments }) => {
     return (
         <Card className="shadow-lg col-span-1 lg:col-span-2">
             <CardHeader>
-                <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Log Lịch hẹn Gần đây</CardTitle>
-                <CardDescription>Danh sách các lịch hẹn và trạng thái xử lý.</CardDescription>
+                <CardTitle className="flex items-center">
+                    <History className="mr-2 h-5 w-5" />
+                    Log Lịch hẹn Gần đây
+                </CardTitle>
+                <CardDescription>Danh sách lịch hẹn kèm Khách hàng và Nhân viên tạo.</CardDescription>
             </CardHeader>
             <CardContent>
                 <div className="max-h-[400px] overflow-y-auto">
@@ -167,8 +169,9 @@ const AppointmentLogTable = ({ appointments }) => {
                         <TableHeader className="sticky top-0 bg-secondary">
                             <TableRow>
                                 <TableHead>Lịch hẹn</TableHead>
+                                <TableHead>Khách hàng</TableHead>
+                                <TableHead>Nhân viên</TableHead>
                                 <TableHead>Trạng thái</TableHead>
-                                <TableHead className="hidden md:table-cell">Ghi chú/Lý do</TableHead>
                                 <TableHead className="text-right">Thời gian</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -176,9 +179,16 @@ const AppointmentLogTable = ({ appointments }) => {
                             {appointments.map((appt) => (
                                 <TableRow key={appt._id}>
                                     <TableCell className="font-medium">{appt.title}</TableCell>
+                                    <TableCell>{appt.customer?.name ?? '—'}</TableCell>
+                                    <TableCell>
+                                        {typeof appt.createdBy === 'object'
+                                            ? (appt.createdBy?.name ?? '—')
+                                            : '—'}
+                                    </TableCell>
                                     <TableCell>{getStatusBadge(appt.status)}</TableCell>
-                                    <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{appt.notes || 'Không có'}</TableCell>
-                                    <TableCell className="text-right text-xs">{new Date(appt.appointmentDate).toLocaleString('vi-VN')}</TableCell>
+                                    <TableCell className="text-right text-xs">
+                                        {new Date(appt.appointmentDate).toLocaleString('vi-VN')}
+                                    </TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
@@ -188,12 +198,26 @@ const AppointmentLogTable = ({ appointments }) => {
         </Card>
     );
 };
-
+const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
 /* ======================= Main Component ======================= */
 export default function AppointmentStatsClient({ initialData = [], user = [] }) {
     // Filters
-    const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
-    const [endDate, setEndDate] = useState('');     // YYYY-MM-DD
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - 7);
+        return toYMD(d);
+    }); // YYYY-MM-DD
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return toYMD(d);
+    });
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
     const [statusFilter, setStatusFilter] = useState('all'); // all | completed | confirmed | pending | cancelled | postponed | missed
 

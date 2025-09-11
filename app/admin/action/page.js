@@ -3,8 +3,6 @@ import { Navbar } from "../nav";
 import { history_data } from '@/data/actions/get';
 export default async function AdminPage() {
     const historyResult = await history_data();
-    console.log(historyResult);
-    
     const historyData = processHistoryData(historyResult.success ? historyResult : { data: [] });
     console.log(historyData);
 

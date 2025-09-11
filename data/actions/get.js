@@ -40,8 +40,6 @@ export async function form_data() {
 // Lịch sử chăm sóc
 
 export async function history_data(id, type) {
-    console.log(id);
-
     try {
         await connectDB();
 
@@ -73,12 +71,11 @@ export async function history_data(id, type) {
                 0
             ),
         };
-        console.log(filter);
-
         // Lấy lịch sử log theo filter
         const history = await Logs.find(filter)
             .populate("zalo", "name avt")
             .populate("createBy", "name")
+            .populate('customer', 'name')
             .sort({ createdAt: -1 })
             .lean();
         console.log(history);

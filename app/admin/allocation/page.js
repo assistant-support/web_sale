@@ -6,8 +6,7 @@ import { user_data } from "@/data/actions/get";
 export default async function AdminPage() {
     const data = await customer_data();
     const user = await user_data({})
-    console.log(user);
-    
+
     return (
         <>
             <Navbar />

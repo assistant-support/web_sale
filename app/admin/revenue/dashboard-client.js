@@ -251,13 +251,28 @@ const RecentDealsTable = ({ deals }) => (
         </CardContent>
     </Card>
 );
-
+const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
 /* ================== Main Component ================== */
 export default function RevenueStatsClient({ initialData = [] }) {
     // Preset time range
     const [rangePreset, setRangePreset] = useState('custom'); // this_week, last_7, this_month, last_30, this_quarter, this_year, custom
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - 7);
+        return toYMD(d);
+    });
+
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return toYMD(d);
+    });
 
     const rangeOptions = [
         { value: 'custom', label: 'Tùy chọn' },

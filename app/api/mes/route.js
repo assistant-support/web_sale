@@ -1,241 +1,129 @@
-// app/api/fb-lab/route.js
+// app/api/messages/route.js
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import mongoose, { Schema } from 'mongoose';
-import { NextResponse } from 'next/server';
+// ===== CẤU HÌNH (dùng đúng biến/mã gốc, không dùng env) =====
+const GRAPH_VERSION = 'v19.0';
+const PAGE_ACCESS_TOKEN = 'EAAQhreP7u2QBPXkeSSaptdgsjE6o8h3YpLJX08QZCbTo3cl8ZCM7ZCSm1maAqITZAvrZCM5g09gEBjZBZAwgiJDl8K53vWAg2yNFcx77rl0ZCRIUG8zu7ZAEASQQDZBzIMlBbboURZCxKUuYyEYv0qIF8IegAcEZAFCqQhfixoxZB5ZAqEanZCtU7r71ZBqnZBB2BjSyOPjMc8ejbHvSp6wZDZD';
 
-/** =========================
- *  HẰNG SỐ (KHÔNG DÙNG ENV)
- *  ========================= */
-const VERIFY_TOKEN = 'MY_SECRET_WEBHOOK_TOKEN_123';
-// ⚠️ DÁN PAGE TOKEN THẬT VÀO ĐÂY NẾU MUỐN GỌI FB GRAPH/SEND API
-const PAGE_ACCESS_TOKEN = 'PASTE_YOUR_PAGE_ACCESS_TOKEN_HERE';
-// ⚠️ DÁN MONGODB URI THẬT VÀO ĐÂY NẾU MUỐN LƯU DB
-const MONGODB_URI = 'mongodb+srv://username:password@cluster/dbname?retryWrites=true&w=majority';
+const WINDOW_SECONDS = 60;                 // cửa sổ 60s gần nhất
+const CONVERSATION_LIMIT = 50;             // số hội thoại mỗi trang
+const MESSAGES_PER_CONVERSATION = 50;      // số message lấy cho mỗi hội thoại
+const MAX_CONV_PAGES = 3;                  // tối đa 3 trang hội thoại
+const MAX_MSG_PAGES_PER_CONV = 3;          // tối đa 3 trang message mỗi hội thoại
 
-// ============== MongoDB ==============
-let cached = globalThis.__fb_lab_db__ || { conn: null, promise: null };
-globalThis.__fb_lab_db__ = cached;
+// ===== Helpers =====
+function withParams(base, params) {
+    const u = new URL(base);
+    Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, String(v)));
+    return u.toString();
+}
+async function fbGet(url) {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        throw new Error(`Facebook API ${r.status}: ${body}`);
+    }
+    return r.json();
+}
+// FB trả "2025-09-11T10:20:30+0000" -> chuẩn hoá thành "+00:00" để Date.parse đọc được
+function parseFbTimeToMs(s) {
+    if (typeof s !== 'string') return NaN;
+    const fixed = s.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+    return Date.parse(fixed);
+}
 
-async function connectDB() {
-    if (cached.conn) return cached.conn;
-    if (!cached.promise) {
-        console.log('[DB] Connecting MongoDB ...');
-        cached.promise = mongoose.connect(MONGODB_URI, { bufferCommands: false }).then((m) => {
-            console.log('[DB] Connected');
-            return m;
-        }).catch(err => {
-            console.error('[DB] Connect error:', err?.message);
-            throw err;
+export async function GET() {
+    try {
+        const now = Date.now();
+        const cutoff = now - WINDOW_SECONDS * 1000;
+
+        // 1) Lấy pageId từ token (dùng "me" vì đây là PAGE access token)
+        const meUrl = withParams(`https://graph.facebook.com/${GRAPH_VERSION}/me`, {
+            fields: 'id',
+            access_token: PAGE_ACCESS_TOKEN
+        });
+        const me = await fbGet(meUrl);
+        const pageId = me?.id;
+        if (!pageId) throw new Error('Không lấy được Page ID từ token');
+
+        // 2) Lấy danh sách hội thoại + messages rồi lọc theo thời gian
+        let convUrl = withParams(`https://graph.facebook.com/${GRAPH_VERSION}/me/conversations`, {
+            fields: `id,updated_time,messages.limit(${MESSAGES_PER_CONVERSATION}){id,created_time,message,from}`,
+            limit: CONVERSATION_LIMIT,
+            access_token: PAGE_ACCESS_TOKEN
+        });
+
+        const results = [];
+        let convPages = 0;
+
+        while (convUrl && convPages < MAX_CONV_PAGES) {
+            convPages++;
+            const convData = await fbGet(convUrl);
+            const conversations = Array.isArray(convData?.data) ? convData.data : [];
+
+            for (const conv of conversations) {
+                const convId = conv?.id;
+
+                const take = (arr) => {
+                    for (const m of arr || []) {
+                        const ts = parseFbTimeToMs(m.created_time);
+                        if (!Number.isFinite(ts) || ts < cutoff) continue;
+                        // chỉ lấy tin người dùng gửi (loại tin do Page gửi)
+                        if (m.from?.id === pageId) continue;
+
+                        results.push({
+                            id: m.id,
+                            conversation_id: convId,
+                            text: m.message || '',
+                            from: m.from || null,
+                            created_time: m.created_time,
+                            timestamp_ms: ts
+                        });
+                    }
+                };
+
+                // trang đầu của messages
+                take(conv?.messages?.data);
+
+                // phân trang messages trong từng hội thoại (nếu có)
+                let msgUrl = conv?.messages?.paging?.next || null;
+                let msgPages = 0;
+                while (msgUrl && msgPages < MAX_MSG_PAGES_PER_CONV) {
+                    msgPages++;
+                    const msgData = await fbGet(msgUrl);
+                    take(msgData?.data);
+                    msgUrl = msgData?.paging?.next || null;
+                }
+            }
+
+            convUrl = convData?.paging?.next || null;
+        }
+
+        // unique theo id + sắp xếp tăng dần theo thời gian
+        const seen = new Set();
+        const unique = results.filter(m => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+        unique.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+
+        return new Response(JSON.stringify({
+            messages: unique,
+            meta: {
+                window_seconds: WINDOW_SECONDS,
+                conversations_scanned_pages: convPages,
+                page_id: pageId
+            }
+        }), {
+            status: 200,
+            headers: { 'content-type': 'application/json; charset=utf-8' }
+        });
+
+    } catch (err) {
+        return new Response(JSON.stringify({
+            error: 'Internal Server Error',
+            detail: err?.message || String(err)
+        }), {
+            status: 500,
+            headers: { 'content-type': 'application/json; charset=utf-8' }
         });
     }
-    cached.conn = await cached.promise;
-    return cached.conn;
-}
-
-// Models inline cho gọn
-const FbUserSchema = new Schema({
-    psid: { type: String, index: true, unique: true },
-    firstName: String,
-    lastName: String,
-    profilePic: String,
-    lastSeenAt: { type: Date, default: Date.now },
-}, { timestamps: true });
-
-const FbMessageSchema = new Schema({
-    senderPsid: { type: String, index: true },
-    type: { type: String, enum: ['message', 'postback'], required: true },
-    text: String,
-    payload: String,
-    timestamp: Date,
-    raw: Schema.Types.Mixed,
-}, { timestamps: true });
-
-const FbUser = mongoose.models.FbUser || mongoose.model('FbUser', FbUserSchema);
-const FbMessage = mongoose.models.FbMessage || mongoose.model('FbMessage', FbMessageSchema);
-
-// ============== Helpers ==============
-function isVNPhone(str = '') {
-    const s = String(str).trim();
-    return /^(0\d{9}|84\d{9}|\+84\d{9})$/.test(s);
-}
-
-async function getUserProfile(psid) {
-    const url = new URL(`https://graph.facebook.com/v19.0/${psid}`);
-    url.searchParams.set('fields', 'first_name,last_name,profile_pic');
-    url.searchParams.set('access_token', PAGE_ACCESS_TOKEN);
-
-    console.log('[FB] GET profile:', url.toString());
-    const res = await fetch(url.toString(), { method: 'GET' });
-    const text = await res.text();
-    console.log('[FB] Profile response status:', res.status);
-    console.log('[FB] Profile response body:', text);
-    if (!res.ok) throw new Error(`FB profile error: ${res.status}`);
-    return JSON.parse(text);
-}
-
-async function sendMessage(psid, message) {
-    const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`;
-    console.log('[FB] POST send message:', url);
-    console.log('[FB] Body:', JSON.stringify({ recipient: { id: psid }, message }, null, 2));
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient: { id: psid }, message }),
-    });
-    const text = await res.text();
-    console.log('[FB] Send response status:', res.status);
-    console.log('[FB] Send response body:', text);
-    return { status: res.status, body: text };
-}
-
-/** =========================================
- *  GET: GỌI LÀ CHẠY – LOG CHI TIẾT QUÁ TRÌNH
- *  Query gợi ý:
- *   - psid=... (nếu muốn gọi Graph API & Send API thật)
- *   - text=... (giả lập tin nhắn khách gửi)
- *   - payload=... (giả lập postback)
- *   - save=1 (bật lưu Mongo)
- *  ========================================= */
-export async function GET(req) {
-    const t0 = Date.now();
-    const url = new URL(req.url);
-    const psid = url.searchParams.get('psid');        // ví dụ PSID thật
-    const text = url.searchParams.get('text');        // ví dụ "0965xxxxxx" hoặc "thông tin cá nhân"
-    const payload = url.searchParams.get('payload');  // ví dụ "GET_STARTED_PAYLOAD"
-    const save = url.searchParams.get('save') === '1';
-
-    console.log('===================== /api/fb-lab (GET) START =====================');
-    console.log('[INPUT] psid   =', psid);
-    console.log('[INPUT] text   =', text);
-    console.log('[INPUT] payload=', payload);
-    console.log('[INPUT] save   =', save);
-
-    // Kết nối DB (tuỳ chọn theo save)
-    if (save) {
-        try { await connectDB(); } catch (e) { /* đã log trong connectDB */ }
-    } else {
-        console.log('[DB] Skip connect (save=0)');
-    }
-
-    // 1) Lấy profile nếu có psid
-    let profile = null;
-    if (psid && PAGE_ACCESS_TOKEN !== 'PASTE_YOUR_PAGE_ACCESS_TOKEN_HERE') {
-        try {
-            profile = await getUserProfile(psid);
-            console.log('[STEP] Got profile:', profile);
-            if (save && profile) {
-                await FbUser.findOneAndUpdate(
-                    { psid },
-                    {
-                        psid,
-                        firstName: profile.first_name,
-                        lastName: profile.last_name,
-                        profilePic: profile.profile_pic,
-                        lastSeenAt: new Date(),
-                    },
-                    { upsert: true, new: true }
-                );
-                console.log('[DB] Upsert FbUser DONE');
-            }
-        } catch (e) {
-            console.error('[ERR] getUserProfile:', e?.message);
-        }
-    } else {
-        console.log('[STEP] Skip getUserProfile (missing psid or PAGE_ACCESS_TOKEN placeholder)');
-    }
-
-    // 2) Giả lập handle message
-    let botReply = null;
-    if (text) {
-        console.log('[STEP] Handle message text =', text);
-        if (save) {
-            await FbMessage.create({
-                senderPsid: psid || 'unknown',
-                type: 'message',
-                text,
-                timestamp: new Date(),
-                raw: { demo: true },
-            });
-            console.log('[DB] Insert FbMessage (type=message) DONE');
-        }
-
-        if (isVNPhone(text)) {
-            botReply = { text: `Chúng tôi đã nhận số điện thoại của bạn: ${text}.` };
-        } else if (text.toLowerCase().includes('thông tin cá nhân')) {
-            if (profile) {
-                botReply = { text: `Chào ${profile.first_name}! Tên bạn là ${profile.first_name} ${profile.last_name}. Link: https://www.facebook.com/profile.php?id=${psid}` };
-            } else {
-                botReply = { text: 'Chào bạn! Hiện chưa lấy được thông tin cá nhân, vui lòng thử lại sau.' };
-            }
-        } else if (text.toLowerCase().includes('dịch vụ')) {
-            botReply = { text: 'Chúng tôi có nhiều dịch vụ. Bạn quan tâm dịch vụ nào? (Ví dụ: Đặt lịch, Hỗ trợ)' };
-        } else if (text.toLowerCase().includes('đặt lịch')) {
-            botReply = { text: 'Tuyệt vời! Bạn muốn đặt lịch cho dịch vụ nào và thời gian nào?' };
-        } else {
-            botReply = { text: `Bạn đã gửi: "${text}". Chúng tôi đã nhận và sẽ sớm phản hồi. Cảm ơn bạn!` };
-        }
-
-        // Gửi tin nhắn nếu có psid & token
-        if (psid && PAGE_ACCESS_TOKEN !== 'PASTE_YOUR_PAGE_ACCESS_TOKEN_HERE') {
-            try {
-                await sendMessage(psid, botReply);
-            } catch (e) {
-                console.error('[ERR] sendMessage:', e?.message);
-            }
-        } else {
-            console.log('[STEP] Skip sendMessage (missing psid or PAGE_ACCESS_TOKEN placeholder)');
-        }
-    } else {
-        console.log('[STEP] No "text" provided → skip message logic');
-    }
-
-    // 3) Giả lập handle postback
-    if (payload) {
-        console.log('[STEP] Handle postback payload =', payload);
-        if (save) {
-            await FbMessage.create({
-                senderPsid: psid || 'unknown',
-                type: 'postback',
-                payload,
-                timestamp: new Date(),
-                raw: { demo: true },
-            });
-            console.log('[DB] Insert FbMessage (type=postback) DONE');
-        }
-
-        let reply = null;
-        const userName = profile?.first_name || 'bạn';
-        if (payload === 'GET_STARTED_PAYLOAD') {
-            reply = { text: `Chào mừng ${userName} đến với page của chúng tôi! Tôi có thể giúp gì hôm nay?` };
-        } else if (payload === 'VIEW_SERVICES') {
-            reply = { text: 'Dịch vụ: [Dịch vụ A], [Dịch vụ B], [Dịch vụ C].' };
-        }
-
-        if (reply && psid && PAGE_ACCESS_TOKEN !== 'PASTE_YOUR_PAGE_ACCESS_TOKEN_HERE') {
-            try {
-                await sendMessage(psid, reply);
-            } catch (e) {
-                console.error('[ERR] sendMessage (postback):', e?.message);
-            }
-        } else if (reply) {
-            console.log('[STEP] Postback reply (dry-run):', reply);
-        }
-    } else {
-        console.log('[STEP] No "payload" provided → skip postback logic');
-    }
-
-    const dt = Date.now() - t0;
-    console.log('===================== /api/fb-lab (GET) DONE in', dt, 'ms =====================');
-
-    // Trả JSON tóm tắt (để bạn xem nhanh trên trình duyệt/Postman)
-    return NextResponse.json({
-        ok: true,
-        tookMs: dt,
-        input: { psid, text, payload, save },
-        profile: profile || null,
-        replyPreview: botReply || null,
-        note: 'Xem chi tiết tiến trình trong console.log của server.',
-    });
 }

@@ -111,7 +111,7 @@ export async function dataAppointment(params = {}) {
 export async function dataAppointments() {
     try {
         await connectDB()
-        let appointments = await Appointment.find({})
+        let appointments = await Appointment.find({}).populate('customer', 'name phone').populate('createdBy', 'name group').sort({ appointmentDate: -1 }).lean();
         return JSON.parse(JSON.stringify(appointments));
     } catch (error) {
         console.error('Lỗi trong dataAppointment:', error);
