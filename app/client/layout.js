@@ -19,13 +19,6 @@ export default async function RootLayout({ children }) {
     if (!user) {
         return <Layout_Login />
     }
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
-        return (
-            <div className="flex_center" style={{ height: '100%', width: '100%' }}>
-                <h4 style={{ fontStyle: 'italic' }}>Bạn không có quyền truy cập trang này</h4>
-            </div>
-        )
-    }
     return (
         <div className={air.layout}>
             <div className={air.nav}>
