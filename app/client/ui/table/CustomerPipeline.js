@@ -170,6 +170,7 @@ export default function CustomerPipeline({
                                         <div className="border-t mt-3 pt-3">
                                             <CloseServiceForm
                                                 customer={customer}
+                                                services={customer.tags}
                                                 dispatchAction={closeServiceAction}
                                                 actionState={closeState}
                                             />

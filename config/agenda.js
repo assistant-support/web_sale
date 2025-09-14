@@ -12,7 +12,7 @@ import Variant from '@/models/variant.model';
 import Service from '@/models/services.model';
 import User from '@/models/users';
 import { actionZalo, sendGP } from '@/function/drive/appscript';
-
+import Appointment from '@/models/appointment.model';
 let agendaInstance = null;
 
 // =============================================================
@@ -35,12 +35,13 @@ const SYSTEM_USER_ID = '68b0af5cf58b8340827174e0';
 const actionToStepMap = {
     friendRequest: 1, checkFriend: 1, tag: 1, findUid: 1,
     message: 2,
-    allocation: 3, bell: 3,
+    allocation: 3, bell: 3, appointmentReminder: 5
 };
 const actionToNameMap = {
     message: 'Gửi tin nhắn Zalo', friendRequest: 'Gửi lời mời kết bạn',
     checkFriend: 'Kiểm tra trạng thái bạn bè', tag: 'Gắn thẻ Zalo',
     findUid: 'Tìm UID Zalo', allocation: 'Phân bổ cho Sale', bell: 'Gửi thông báo hệ thống',
+    appointmentReminder: 'Nhắc lịch hẹn'
 };
 
 
@@ -97,7 +98,7 @@ function triggerRevalidation() {
         const host = process.env.URL || 'http://localhost:3000';
         const secret = process.env.REVALIDATE_SECRET_TOKEN;
         fetch(`${host}/api/cache/retag`, {
-            method: 'POST', 
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ secret, tag: 'customers' }),
         });
@@ -581,6 +582,117 @@ function formatCareHistoryForNotification(careArray, idToNameMap = new Map()) {
 }
 
 // =============================================================
+// == Processor mới: appointmentReminder
+//    - Lấy Appointment + Customer
+//    - Gửi tin nhắn nhắc hẹn qua Zalo
+//    - Gửi thông báo bell (sendGP)
+//    - Ghi care log bước 5
+// =============================================================
+async function appointmentReminderProcessor(job) {
+    const { appointmentId, customerId } = job.attrs.data || {};
+    const jobName = 'appointmentReminder';
+
+    try {
+        // 1) Lấy dữ liệu lịch hẹn và khách hàng
+        const [appointment, customer] = await Promise.all([
+            Appointment.findById(appointmentId)
+                .populate('customer', 'name phone')
+                .populate('createdBy', 'name')
+                .lean(),
+            Customer.findById(customerId).lean()
+        ]);
+
+        if (!appointment) throw new Error(`Không tìm thấy Appointment ID ${appointmentId}`);
+        if (!customer) throw new Error(`Không tìm thấy Customer ID ${customerId}`);
+
+        // 2) Chuẩn hoá dữ liệu hiển thị
+        const typeLabel = appointment.appointmentType === 'surgery' ? 'Phẫu thuật' : 'Phỏng vấn';
+        const timeStr = new Date(appointment.appointmentDate).toLocaleString('vi-VN', { hour12: false });
+        const title = appointment.title || 'Lịch hẹn';
+        const noteStr = appointment.notes?.trim() ? appointment.notes.trim() : 'Không có';
+
+        // Lấy thông tin phòng khám (nếu có)
+        const settings = await Setting.find({ key: { $in: ['clinic_name', 'clinic_phone'] } }).lean();
+        const settingMap = new Map(settings.map(s => [s.key, s.value]));
+        const clinicName = settingMap.get('clinic_name') || '';
+        const clinicPhone = settingMap.get('clinic_phone') || '';
+        const contactStr = `${clinicName ? clinicName + ' - ' : ''}${clinicPhone}`;
+
+        // 3) Soạn nội dung nhắc hẹn (VI)
+        const reminderMessage =
+            `[NHẮC HẸN] ${customer.name || ''}\n` +
+            `- Lịch hẹn: ${title} (${typeLabel})\n` +
+            `- Thời gian: ${timeStr}\n` +
+            `- Ghi chú: ${noteStr}`;
+
+        // 4) Chọn tài khoản Zalo để gửi tin (tương tự genericJobProcessor)
+        let selectedZalo;
+        if (customer.uid?.[0]?.zalo) {
+            selectedZalo = await Zalo.findById(customer.uid[0].zalo);
+        }
+        if (!selectedZalo) selectedZalo = await Zalo.findOne();
+        if (!selectedZalo) throw new Error('No Zalo account available for this action');
+
+        const zaloUid = selectedZalo.uid;
+        const zaloId = selectedZalo._id;
+
+        // 5) Gửi tin nhắn Zalo tới KH
+        const response = await actionZalo({
+            phone: customer.phone,
+            uidPerson: customer.uid?.[0]?.uid || '',
+            actionType: 'sendMessage',
+            message: reminderMessage,
+            uid: zaloUid
+        });
+
+        await Logs.create({
+            status: {
+                status: response?.status || false,
+                message: reminderMessage,
+                data: {
+                    error_code: response?.content?.error_code || null,
+                    error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from AppScript')
+                }
+            },
+            type: 'sendMessage',
+            createBy: SYSTEM_USER_ID,
+            customer: customerId,
+            zalo: zaloId,
+        });
+
+        if (!response?.status) throw new Error(response?.message || 'Action Zalo failed or returned invalid response');
+
+        // 6) Gửi bell thông báo hệ thống (sendGP)
+        const bellText =
+            `🔔 NHẮC HẸN KHÁCH HÀNG\n` +
+            `--------------------\n` +
+            `👤 Tên: ${customer.name || ''}\n` +
+            `📞 SĐT: ${customer.phone || ''}\n` +
+            `🗓️ Thời gian: ${timeStr}\n` +
+            `📝 Ghi chú: ${noteStr}\n` +
+            `--------------------\n` +
+            `Người tạo lịch: ${appointment.createdBy?.name || 'Hệ thống'}`;
+
+        const bellOk = await sendGP(bellText);
+        if (!bellOk) {
+            // Không throw để không fail job chỉ vì bell; nhưng có log care status "success (bell lỗi)"
+            await logCareHistory(customerId, jobName, 'success', 'Đã gửi Zalo; bell lỗi (Apps Script).');
+        } else {
+            await logCareHistory(customerId, jobName, 'success');
+        }
+
+    } catch (error) {
+        console.error(`[Job ${jobName}] Xảy ra lỗi: "${error.message}"`);
+        // Thất bại: ghi care + không retry trừ khi lỗi quota account (giống cấu trúc hiện có)
+        await logCareHistory(customerId, jobName, 'failed', error.message);
+        if (RETRYABLE_ERRORS.includes(error.message) && job) {
+            await handleJobFailure(job, error, job?.attrs?.data?.cwId, jobName);
+        }
+    }
+}
+
+
+// =============================================================
 // == 5. HÀM KHỞI TẠO AGENDA
 // =============================================================
 /**
@@ -605,7 +717,7 @@ const initAgenda = async () => {
     agendaInstance.define('findUid', genericJobProcessor);
     agendaInstance.define('allocation', { concurrency: 10 }, allocationJobProcessor);
     agendaInstance.define('bell', { concurrency: 10 }, bellJobProcessor);
-
+    agendaInstance.define('appointmentReminder', { priority: 'high', concurrency: 10 }, appointmentReminderProcessor);
     agendaInstance.on('fail', (err, job) => {
         console.error(`[Agenda fail] Job ${job.attrs.name} thất bại: ${err.message}`);
     });

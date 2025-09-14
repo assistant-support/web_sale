@@ -17,6 +17,13 @@ const AppointmentSchema = new Schema(
             required: true,
             index: true, // Thêm index để tối ưu truy vấn theo customer
         },
+        appointmentType: {
+            type: String,
+            required: true,
+            enum: ['interview', 'surgery'], // 'interview' = phỏng vấn, 'surgery' = phẫu thuật
+            default: 'interview',
+            index: true, // thường sẽ lọc theo loại
+        },
         // Thời gian diễn ra cuộc hẹn
         appointmentDate: {
             type: Date,

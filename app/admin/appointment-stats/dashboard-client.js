@@ -6,7 +6,7 @@ import { Doughnut } from 'react-chartjs-2';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Check, X, UserCheck, Percent, History, ChevronDown, Check as CheckIcon, RefreshCw } from 'lucide-react';
+import { Calendar, X, UserCheck, Percent, History, ChevronDown, Check as CheckIcon, RefreshCw } from 'lucide-react';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
@@ -91,8 +91,7 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', b
                                     aria-selected={selected}
                                     onMouseEnter={() => setActive(idx)}
                                     onClick={() => { onChange(opt.value); setOpen(false); }}
-                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
-                                        } ${selected ? 'font-medium' : ''}`}
+                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'} ${selected ? 'font-medium' : ''}`}
                                 >
                                     <span className="truncate">{opt.label}</span>
                                     {selected && <CheckIcon className="w-4 h-4" />}
@@ -134,6 +133,7 @@ const AppointmentStatusChart = ({ chartData }) => {
     };
     return <Doughnut data={chartData} options={options} />;
 };
+
 const AppointmentLogTable = ({ appointments }) => {
     const getStatusBadge = (status) => {
         switch (status) {
@@ -198,12 +198,14 @@ const AppointmentLogTable = ({ appointments }) => {
         </Card>
     );
 };
+
 const toYMD = (d) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
 };
+
 /* ======================= Main Component ======================= */
 export default function AppointmentStatsClient({ initialData = [], user = [] }) {
     // Filters
@@ -270,7 +272,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         });
     }, [initialData, startDate, endDate, groupFilter, statusFilter, userMap]);
 
-    // Stats + Chart
+    // Stats + Chart (thêm % hiển thị trong 4 ô)
     const { stats, chartData } = useMemo(() => {
         let confirmed = 0, completed = 0, cancelled = 0, postponed = 0, missed = 0, pending = 0;
 
@@ -286,16 +288,21 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         });
 
         const total = filtered.length;
-        // Tỷ lệ đến hẹn: trong các lịch hẹn đủ điều kiện xuất hiện (missed + completed)
-        const denom = completed + missed;
-        const showRate = denom > 0 ? Number(((completed / denom) * 100).toFixed(2)) : 0;
+        const denomForShowRate = completed + missed;
+        const showRate = denomForShowRate > 0 ? (completed / denomForShowRate) * 100 : 0;
+
+        const pctOfTotal = (n) => total > 0 ? Math.round((n / total) * 100) : 0;
 
         return {
             stats: {
                 total,
+                totalPct: total > 0 ? 100 : 0,
                 attended: completed,
+                attendedPct: pctOfTotal(completed),
                 canceledOrPostponed: cancelled + postponed,
-                showRateText: `${showRate.toFixed(2)}%`, // 2 chữ số thập phân
+                canceledOrPostponedPct: pctOfTotal(cancelled + postponed),
+                showRate: Math.round(showRate),          // %
+                showDenom: denomForShowRate,             // completed + missed
             },
             chartData: {
                 labels: ['Hoàn thành', 'Đã xác nhận', 'Chờ xử lý', 'Hủy/Hoãn', 'Không đến'],
@@ -309,7 +316,8 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
     }, [filtered]);
 
     return (
-        <div className="flex-1 space-y-4 py-4  pt-6 min-h-screen">
+        <div className="flex-1 space-y-4 py-4 pt-6 min-h-screen">
+
             {/* Filters */}
             <Card className="shadow-md">
                 <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -362,12 +370,36 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                 </CardContent>
             </Card>
 
-            {/* Stats */}
+            {/* Stats (hiển thị “số (tỷ lệ%)”) */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard title="Tổng số Lịch hẹn" value={stats.total} icon={Calendar} description="Bao gồm tất cả trạng thái (sau lọc)" color="#6366f1" />
-                <StatCard title="Khách đã đến" value={stats.attended} icon={UserCheck} description="Lịch hẹn đã hoàn thành" color="#10b981" />
-                <StatCard title="Hủy / Hoãn" value={stats.canceledOrPostponed} icon={X} description="Lịch hẹn bị hủy hoặc dời lại" color="#ef4444" />
-                <StatCard title="Tỷ lệ đến hẹn" value={stats.showRateText} icon={Percent} description="Trong nhóm: Hoàn thành / (Hoàn thành + Không đến)" color="#f59e0b" />
+                <StatCard
+                    title="Tổng số Lịch hẹn"
+                    value={`${stats.total} (${stats.totalPct}%)`}
+                    icon={Calendar}
+                    description="Bao gồm tất cả trạng thái (sau lọc)"
+                    color="#6366f1"
+                />
+                <StatCard
+                    title="Khách đã đến"
+                    value={`${stats.attended} (${stats.attendedPct}%)`}
+                    icon={UserCheck}
+                    description="Lịch hẹn đã hoàn thành"
+                    color="#10b981"
+                />
+                <StatCard
+                    title="Hủy / Hoãn"
+                    value={`${stats.canceledOrPostponed} (${stats.canceledOrPostponedPct}%)`}
+                    icon={X}
+                    description="Lịch hẹn bị hủy hoặc dời lại"
+                    color="#ef4444"
+                />
+                <StatCard
+                    title="Tỷ lệ đến hẹn"
+                    value={`${stats.attended} (${stats.showRate}%)`}
+                    icon={Percent}
+                    description="Hoàn thành / (Hoàn thành + Không đến)"
+                    color="#f59e0b"
+                />
             </div>
 
             {/* Chart + Table */}

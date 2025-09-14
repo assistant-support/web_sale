@@ -482,17 +482,26 @@ export default function DataReceptionClient({ initialData, service = [] }) {
             };
         }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+        const total = filteredData.length;
         const avgResponseTime = leadsWithResponse > 0
             ? (totalResponseTime / leadsWithResponse / 1000)
             : 0;
 
+        const pct = (n) => total > 0 ? Math.round((n / total) * 100) : 0;
+
         return {
             stats: {
-                total: filteredData.length,
+                total,
+                totalPct: total > 0 ? 100 : 0,
                 valid: validCount,
+                validPct: pct(validCount),
                 invalid: invalidCount,
+                invalidPct: pct(invalidCount),
                 missing: missingInfoCount,
-                avgResponseTime: avgResponseTime.toFixed(2) + ' giây'
+                missingPct: pct(missingInfoCount),
+                avgResponseTime: avgResponseTime.toFixed(2) + ' giây',
+                responded: leadsWithResponse,
+                respondedPct: pct(leadsWithResponse), // % số data có phản hồi đầu tiên
             },
             receptionLog: log
         };
@@ -558,12 +567,36 @@ export default function DataReceptionClient({ initialData, service = [] }) {
                 </CardContent>
             </Card>
 
-            {/* ====== Stats ====== */}
+            {/* ====== Stats (hiển thị “số (tỷ lệ%)”) ====== */}
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-                <StatCard title="Tổng Data" value={stats.total} icon={Users} description="Tổng data theo bộ lọc" color="#3b82f6" />
-                <StatCard title="Data Hợp lệ" value={stats.valid} icon={CheckCircle} description="Có Zalo (UID) hoặc tìm UID thành công" color="#10b981" />
-                <StatCard title="Data Không hợp lệ" value={stats.invalid} icon={AlertTriangle} description="Không tìm thấy Zalo (không có UID)" color="#ef4444" />
-                <StatCard title="T.gian P.hồi TB" value={stats.avgResponseTime} icon={Clock} description="Từ lúc nhận đến hoạt động đầu tiên" color="#8b5cf6" />
+                <StatCard
+                    title="Tổng Data"
+                    value={`${stats.total} (${stats.totalPct}%)`}
+                    icon={Users}
+                    description="Tổng data theo bộ lọc"
+                    color="#3b82f6"
+                />
+                <StatCard
+                    title="Data Hợp lệ"
+                    value={`${stats.valid} (${stats.validPct}%)`}
+                    icon={CheckCircle}
+                    description="Có Zalo (UID) hoặc tìm UID thành công"
+                    color="#10b981"
+                />
+                <StatCard
+                    title="Data Không hợp lệ"
+                    value={`${stats.invalid} (${stats.invalidPct}%)`}
+                    icon={AlertTriangle}
+                    description="Không tìm thấy Zalo (không có UID)"
+                    color="#ef4444"
+                />
+                <StatCard
+                    title="T.gian P.hồi TB"
+                    value={`${stats.avgResponseTime}`}
+                    icon={Clock}
+                    description="Tỷ lệ có phản hồi đầu tiên & thời gian trung bình"
+                    color="#8b5cf6"
+                />
             </div>
 
             {/* ====== Chart + Log ====== */}

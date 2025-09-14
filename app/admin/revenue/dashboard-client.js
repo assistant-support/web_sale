@@ -1,12 +1,27 @@
 'use client';
 
-import { useMemo, useState, useRef, useEffect } from 'react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import { useMemo, useState } from 'react';
+import {
+    Chart as ChartJS,
+    CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend
+} from 'chart.js';
 import { Bar } from 'react-chartjs-2';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { DollarSign, ShoppingCart, UserCheck, Percent, History, ChevronDown, RefreshCw, Check } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import Popup from '@/components/ui/popup';
+import {
+    DollarSign, ShoppingCart, UserCheck, Percent, History, Check, X, UserCog, PiggyBank,
+    Eye, LineChart
+} from 'lucide-react';
+
+import { approveServiceDealAction, rejectServiceDealAction } from '@/data/customers/wraperdata.db';
+import { driveImage } from '@/function';
+import { useActionFeedback } from '@/hooks/useAction'; // chỉnh path nếu khác
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -14,15 +29,8 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 const fmtVND = (n = 0) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
-
-const startOfWeek = (d) => { // tuần bắt đầu Thứ 2
-    const x = startOfDay(d);
-    const day = (x.getDay() + 6) % 7; // 0=Mon
-    x.setDate(x.getDate() - day);
-    return x;
-};
+const startOfWeek = (d) => { const x = startOfDay(d); const day = (x.getDay() + 6) % 7; x.setDate(x.getDate() - day); return x; };
 const endOfWeek = (d) => { const x = startOfWeek(d); x.setDate(x.getDate() + 6); return endOfDay(x); };
-
 const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0));
 const getQuarter = (d) => Math.floor(d.getMonth() / 3) + 1;
@@ -30,153 +38,32 @@ const startOfQuarter = (d) => new Date(d.getFullYear(), (getQuarter(d) - 1) * 3,
 const endOfQuarter = (d) => endOfDay(new Date(d.getFullYear(), (getQuarter(d) - 1) * 3 + 3, 0));
 const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
 const endOfYear = (d) => endOfDay(new Date(d.getFullYear(), 11, 31));
+const toYMD = (d) => { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; };
 
-const daysBetween = (a, b) => Math.max(1, Math.ceil((endOfDay(b) - startOfDay(a)) / 86400000));
-
-const isoWeekNumber = (date) => {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-    return { week, year: d.getUTCFullYear() };
-};
-
-const bucketKey = (date, mode) => {
-    const d = new Date(date);
-    switch (mode) {
-        case 'day': return d.toLocaleDateString('vi-VN');                           // dd/mm/yyyy
-        case 'week': { const { week, year } = isoWeekNumber(d); return `Tuần ${week}/${year}`; }
-        case 'month': return `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`; // mm/yyyy
-        case 'quarter': return `Q${getQuarter(d)}/${d.getFullYear()}`;
-        case 'year': return String(d.getFullYear());
-        default: return d.toLocaleDateString('vi-VN');
-    }
-};
-
-const chooseBucketMode = (start, end) => {
-    const diff = daysBetween(start, end);
-    if (diff <= 45) return 'day';
-    if (diff <= 200) return 'week';
-    if (diff <= 730) return 'month';
-    if (diff <= 1460) return 'quarter';
-    return 'year';
-};
-
-const resolveDealDate = (customer) => {
-    // Ưu tiên ngày chốt từ serviceDetails
-    if (customer?.serviceDetails?.closedAt) return new Date(customer.serviceDetails.closedAt);
-    // Suy ra từ care step 6 hoặc note "[Chốt dịch vụ]"
-    const logs = Array.isArray(customer?.care) ? customer.care : [];
-    // tìm note step 6 mới nhất
+const resolveDealDate = (c) => {
+    if (c?.serviceDetails?.closedAt) return new Date(c.serviceDetails.closedAt);
+    const logs = Array.isArray(c?.care) ? c.care : [];
     const step6 = logs
         .filter(n => n?.step === 6 || String(n?.content || '').includes('[Chốt dịch vụ]'))
         .sort((a, b) => new Date(b.createAt) - new Date(a.createAt))[0];
-    if (step6?.createAt) return new Date(step6.createAt);
-    return null;
+    return step6?.createAt ? new Date(step6.createAt) : null;
 };
 
-const isDeal = (c) => {
-    // là deal khi có ngày chốt suy ra, hoặc status chốt/in_progress, hoặc có doanh thu > 0
-    if (resolveDealDate(c)) return true;
-    const st = c?.serviceDetails?.status;
-    if (st === 'completed' || st === 'in_progress') return true;
-    if ((Number(c?.serviceDetails?.revenue) || 0) > 0) return true;
-    return false;
+const nameFromUserId = (id, userMap) => {
+    if (!id) return '—';
+    const found = userMap.get(String(id));
+    return found?.name || (typeof id === 'string' ? `User (${id.slice(-6)})` : 'NV');
 };
 
-/* ================== Listbox (dropdown button) ================== */
-function Listbox({ label, options, value, onChange, placeholder = 'Chọn...', buttonClassName = '' }) {
-    const [open, setOpen] = useState(false);
-    const btnRef = useRef(null);
-    const listRef = useRef(null);
-    const [active, setActive] = useState(-1);
-
-    const current = useMemo(
-        () => options.find(o => o.value === value) || { label: placeholder, value: undefined },
-        [options, value, placeholder]
-    );
-
-    useEffect(() => {
-        function onClickOutside(e) {
-            if (!open) return;
-            if (btnRef.current?.contains(e.target)) return;
-            if (listRef.current?.contains(e.target)) return;
-            setOpen(false);
-        }
-        document.addEventListener('mousedown', onClickOutside);
-        return () => document.removeEventListener('mousedown', onClickOutside);
-    }, [open]);
-
-    const handleKeyDown = (e) => {
-        if (!open && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')) {
-            e.preventDefault();
-            setOpen(true);
-            setActive(Math.max(0, options.findIndex(o => o.value === value)));
-            return;
-        }
-        if (!open) return;
-        if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
-        if (e.key === 'ArrowDown') { e.preventDefault(); setActive(p => (p + 1) % options.length); return; }
-        if (e.key === 'ArrowUp') { e.preventDefault(); setActive(p => (p - 1 + options.length) % options.length); return; }
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const opt = options[active] || options.find(o => o.value === value);
-            if (opt) onChange(opt.value);
-            setOpen(false);
-        }
-    };
-
-    return (
-        <div className="w-full">
-            {label && <label className="block mb-2 text-sm text-muted-foreground">{label}</label>}
-            <div className="relative" onKeyDown={handleKeyDown}>
-                <button
-                    ref={btnRef}
-                    type="button"
-                    aria-haspopup="listbox"
-                    aria-expanded={open}
-                    onClick={() => setOpen(v => !v)}
-                    className={`inline-flex w-full items-center justify-between gap-2 rounded-[6px] border px-3 py-2 text-sm ${buttonClassName}`}
-                    style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                >
-                    <span className="truncate">{current.label}</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} style={{ color: 'var(--text-primary)' }} />
-                </button>
-
-                {open && (
-                    <ul
-                        ref={listRef}
-                        role="listbox"
-                        tabIndex={-1}
-                        className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-[6px] border bg-white shadow-sm"
-                        style={{ borderColor: 'var(--border)' }}
-                    >
-                        {options.map((opt, idx) => {
-                            const selected = opt.value === value;
-                            const isActive = idx === active;
-                            return (
-                                <li
-                                    key={opt.value ?? `opt-${idx}`}
-                                    role="option"
-                                    aria-selected={selected}
-                                    onMouseEnter={() => setActive(idx)}
-                                    onClick={() => { onChange(opt.value); setOpen(false); }}
-                                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between ${isActive ? 'bg-muted' : 'bg-white'
-                                        } ${selected ? 'font-medium' : ''}`}
-                                >
-                                    <span className="truncate">{opt.label}</span>
-                                    {selected && <Check className="w-4 h-4" />}
-                                </li>
-                            );
-                        })}
-                        {options.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">Không có lựa chọn</li>}
-                    </ul>
-                )}
-            </div>
-        </div>
-    );
-}
+const namesFromAssignees = (assignees = [], userMap) => {
+    if (!Array.isArray(assignees) || assignees.length === 0) return '—';
+    return assignees.map(a => {
+        const u = a?.user;
+        if (!u) return 'NV';
+        if (typeof u === 'object' && u?._id) return u?.name || nameFromUserId(u._id, userMap);
+        return nameFromUserId(u, userMap);
+    }).join(', ');
+};
 
 /* ================== Sub Components ================== */
 const StatCard = ({ title, value, icon: Icon, description, color }) => (
@@ -192,30 +79,11 @@ const StatCard = ({ title, value, icon: Icon, description, color }) => (
     </Card>
 );
 
-const RevenueChart = ({ chartData, title }) => {
-    const options = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            title: { display: true, text: title, font: { size: 16 } },
-        },
-        scales: {
-            y: {
-                ticks: {
-                    callback: function (value) { return (value / 1_000_000) + 'tr'; }
-                }
-            }
-        }
-    };
-    return <Bar options={options} data={chartData} />;
-};
-
-const RecentDealsTable = ({ deals }) => (
+const RecentDealsTable = ({ deals, userMap }) => (
     <Card className="shadow-lg col-span-1 lg:col-span-2">
         <CardHeader>
-            <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Dịch vụ chốt gần đây</CardTitle>
-            <CardDescription>Danh sách các khách hàng đã chốt dịch vụ gần nhất.</CardDescription>
+            <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Dịch vụ chốt (đã duyệt) gần đây</CardTitle>
+            <CardDescription>Chỉ hiển thị các đơn đã duyệt.</CardDescription>
         </CardHeader>
         <CardContent>
             <div className="max-h-[400px] overflow-y-auto">
@@ -225,6 +93,7 @@ const RecentDealsTable = ({ deals }) => (
                             <TableHead>Khách hàng</TableHead>
                             <TableHead>Doanh thu</TableHead>
                             <TableHead className="hidden md:table-cell">Trạng thái</TableHead>
+                            <TableHead className="hidden md:table-cell">Sale</TableHead>
                             <TableHead className="text-right">Ngày chốt</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -240,6 +109,9 @@ const RecentDealsTable = ({ deals }) => (
                                         ? <Badge>Hoàn thành</Badge>
                                         : <Badge variant="secondary">Còn liệu trình</Badge>}
                                 </TableCell>
+                                <TableCell className="hidden md:table-cell text-xs">
+                                    {namesFromAssignees(deal.assignees, userMap)}
+                                </TableCell>
                                 <TableCell className="text-right text-xs">
                                     {deal.__dealDate ? new Date(deal.__dealDate).toLocaleDateString('vi-VN') : '—'}
                                 </TableCell>
@@ -251,39 +123,51 @@ const RecentDealsTable = ({ deals }) => (
         </CardContent>
     </Card>
 );
-const toYMD = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+
+const YearlyRevenueChart = ({ data }) => {
+    // Tự xử lý khi không có dữ liệu: tạo 1 cột năm hiện tại giá trị 0 và bước 1tr
+    const values = Array.isArray(data?.datasets?.[0]?.data) ? data.datasets[0].data : [];
+    const maxVal = values.length ? Math.max(...values.map(v => Number(v) || 0)) : 0;
+    const noData = !values.length || maxVal === 0;
+
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            title: { display: true, text: 'Biểu đồ Doanh thu theo Năm', font: { size: 18 } },
+            tooltip: {
+                callbacks: { label: ctx => fmtVND(ctx.parsed.y) }
+            }
+        },
+        scales: {
+            y: {
+                suggestedMin: 0,
+                suggestedMax: noData ? 1_000_000 : undefined,
+                ticks: {
+                    stepSize: noData ? 1_000_000 : undefined,
+                    callback: (v) => (v / 1_000_000) + 'tr'
+                }
+            }
+        }
+    };
+    return <Bar data={data} options={options} />;
 };
-/* ================== Main Component ================== */
-export default function RevenueStatsClient({ initialData = [] }) {
-    // Preset time range
-    const [rangePreset, setRangePreset] = useState('custom'); // this_week, last_7, this_month, last_30, this_quarter, this_year, custom
-    const [startDate, setStartDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        d.setDate(d.getDate() - 7);
-        return toYMD(d);
-    });
 
-    const [endDate, setEndDate] = useState(() => {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        return toYMD(d);
-    });
+/* ================== Main ================== */
+export default function DashboardClient({ initialData = [], users = [] }) {
+    /* ---------- User map (id -> user) ---------- */
+    const userMap = useMemo(() => {
+        const m = new Map();
+        for (const u of Array.isArray(users) ? users : []) m.set(String(u._id), u);
+        return m;
+    }, [users]);
 
-    const rangeOptions = [
-        { value: 'custom', label: 'Tùy chọn' },
-        { value: 'this_week', label: 'Tuần này' },
-        { value: 'last_7', label: '7 ngày qua' },
-        { value: 'this_month', label: 'Tháng này' },
-        { value: 'last_30', label: '30 ngày qua' },
-        { value: 'this_quarter', label: 'Quý này' },
-        { value: 'this_year', label: 'Năm nay' },
-    ];
-    // Tính start-end theo preset (nếu không phải custom)
+    /* ---------- Filter Range (đặt lên đầu) ---------- */
+    const [rangePreset, setRangePreset] = useState('last_30');
+    const [startDate, setStartDate] = useState(() => toYMD(new Date(Date.now() - 7 * 86400000)));
+    const [endDate, setEndDate] = useState(() => toYMD(new Date()));
+
     const { rangeStart, rangeEnd } = useMemo(() => {
         const now = new Date();
         switch (rangePreset) {
@@ -294,172 +178,652 @@ export default function RevenueStatsClient({ initialData = [] }) {
             case 'this_quarter': return { rangeStart: startOfQuarter(now), rangeEnd: endOfQuarter(now) };
             case 'this_year': return { rangeStart: startOfYear(now), rangeEnd: endOfYear(now) };
             case 'custom': {
-                const s = startDate ? startOfDay(new Date(startDate)) : startOfYear(now);
-                const e = endDate ? endOfDay(new Date(endDate)) : endOfDay(now);
+                const s = startOfDay(new Date(startDate));
+                const e = endOfDay(new Date(endDate));
                 return { rangeStart: s, rangeEnd: e };
             }
             default: return { rangeStart: startOfMonth(now), rangeEnd: endOfMonth(now) };
         }
     }, [rangePreset, startDate, endDate]);
 
-    // Chuẩn hóa deals theo care (tính __dealDate)
-    const normalizedDeals = useMemo(() => {
+    /* ---------- Bỏ dữ liệu cũ: chỉ lấy record có serviceDetails.approval ---------- */
+    const withApproval = useMemo(() => {
         const list = Array.isArray(initialData) ? initialData : [];
-        const mapped = list
-            .filter(isDeal)
-            .map(c => {
-                const dealDate = resolveDealDate(c);
-                return { ...c, __dealDate: dealDate ? dealDate.toISOString() : null };
-            });
-        return mapped;
+        return list.filter(c => c?.serviceDetails?.approval);
     }, [initialData]);
 
-    // Lọc theo khoảng thời gian
-    const filteredDeals = useMemo(() => {
-        return normalizedDeals.filter(d => {
-            if (!d.__dealDate) return false;
-            const t = new Date(d.__dealDate);
-            return t >= rangeStart && t <= rangeEnd;
-        });
-    }, [normalizedDeals, rangeStart, rangeEnd]);
+    /* ---------- Pending & Approved ---------- */
+    const pendingApprovals = useMemo(
+        () => withApproval.filter(c => c.serviceDetails.approval?.state === 'pending'),
+        [withApproval]
+    );
 
-    // Gom nhóm theo bucket (tự động chọn granularity)
-    const { stats, chartData, recentDeals, chartTitle } = useMemo(() => {
-        const totalDeals = filteredDeals.length;
-        const totalRevenue = filteredDeals.reduce((sum, d) => sum + (Number(d?.serviceDetails?.revenue) || 0), 0);
-        const avgRevenue = totalDeals ? totalRevenue / totalDeals : 0;
+    const approvedDeals = useMemo(() => {
+        return withApproval
+            .filter(c => c.serviceDetails.approval?.state === 'approved')
+            .map(c => ({ ...c, __dealDate: resolveDealDate(c)?.toISOString() || null }))
+            .filter(c => c.__dealDate && new Date(c.__dealDate) >= rangeStart && new Date(c.__dealDate) <= rangeEnd);
+    }, [withApproval, rangeStart, rangeEnd]);
 
-        // upsellRate dựa serviceDetails.customTags (nếu có)
-        const upsellCount = filteredDeals.filter(d =>
-            d?.serviceDetails?.customTags?.some(tag => ['upsell', 'cross-sell'].includes(String(tag).toLowerCase()))
-        ).length;
-        const upsellRate = totalDeals ? Number(((upsellCount / totalDeals) * 100).toFixed(2)) : 0;
-
-        // chọn bucketMode
-        const mode = chooseBucketMode(rangeStart, rangeEnd);
-        const buckets = new Map();
-        filteredDeals.forEach(d => {
-            const key = bucketKey(new Date(d.__dealDate), mode);
-            const rev = Number(d?.serviceDetails?.revenue) || 0;
-            buckets.set(key, (buckets.get(key) || 0) + rev);
-        });
-
-        // sắp xếp key theo thời gian thực tế
-        const sortKeyToDate = (key) => {
-            try {
-                switch (mode) {
-                    case 'day': return new Date(key.split('/').reverse().join('-')); // rough for vi-VN dd/mm/yyyy
-                    case 'week': { const [, wkYear] = key.replace('Tuần ', '').split('/'); return new Date(Number(wkYear), 0, 1); }
-                    case 'month': { const [mm, yyyy] = key.split('/'); return new Date(Number(yyyy), Number(mm) - 1, 1); }
-                    case 'quarter': { const [q, yyyy] = key.replace('Q', '').split('/'); return new Date(Number(yyyy), (Number(q) - 1) * 3, 1); }
-                    case 'year': return new Date(Number(key), 0, 1);
-                    default: return new Date(key);
-                }
-            } catch { return new Date(); }
+    /* ---------- Stats ---------- */
+    const stats = useMemo(() => {
+        const totalDeals = approvedDeals.length;
+        const totalRevenueNum = approvedDeals.reduce((s, c) => s + (Number(c?.serviceDetails?.revenue) || 0), 0);
+        const avgRevenueNum = totalDeals ? totalRevenueNum / totalDeals : 0;
+        return {
+            totalDeals,
+            totalRevenue: fmtVND(totalRevenueNum),
+            avgRevenue: fmtVND(avgRevenueNum),
         };
+    }, [approvedDeals]);
 
-        const labels = Array.from(buckets.keys()).sort((a, b) => sortKeyToDate(a) - sortKeyToDate(b));
-        const values = labels.map(l => buckets.get(l));
+    /* ---------- Top Commissions (đã duyệt) ---------- */
+    const topCommissions = useMemo(() => {
+        const map = new Map(); // userId -> totalAmount
+        for (const c of withApproval.filter(d => d.serviceDetails.approval?.state === 'approved')) {
+            const revBase = Number(c?.serviceDetails?.revenue || c?.serviceDetails?.pricing?.finalPrice || 0);
+            const arr = Array.isArray(c?.serviceDetails?.commissions) ? c.serviceDetails.commissions : [];
+            for (const it of arr) {
+                if (!it?.user) continue;
+                const amount = Number(it.amount) || ((Number(it.percent) || 0) / 100) * revBase;
+                const key = String(typeof it.user === 'object' && it.user?._id ? it.user._id : it.user);
+                map.set(key, (map.get(key) || 0) + amount);
+            }
+        }
+        const rows = Array.from(map.entries()).map(([user, total]) => ({ user, total }));
+        rows.sort((a, b) => b.total - a.total);
+        return rows.slice(0, 5);
+    }, [withApproval]);
 
-        const chartTitle = `Doanh thu theo ${mode === 'day' ? 'ngày' : mode === 'week' ? 'tuần' : mode === 'month' ? 'tháng' : mode === 'quarter' ? 'quý' : 'năm'}`;
+    /* ---------- Yearly Revenue (LARGE CHART) ---------- */
+    const yearlyChartData = useMemo(() => {
+        const approvedAll = withApproval.filter(c => c.serviceDetails.approval?.state === 'approved');
+        const byYear = new Map(); // year -> sum revenue
+        for (const c of approvedAll) {
+            const dt = resolveDealDate(c);
+            if (!dt) continue;
+            const year = dt.getFullYear();
+            const rev = Number(c?.serviceDetails?.revenue) || 0;
+            byYear.set(year, (byYear.get(year) || 0) + rev);
+        }
+        let years = Array.from(byYear.keys()).sort((a, b) => a - b);
+        let values = years.map(y => byYear.get(y));
 
-        const recentDeals = [...filteredDeals].sort((a, b) => new Date(b.__dealDate) - new Date(a.__dealDate));
+        // Fallback nếu không có dữ liệu
+        if (years.length === 0) {
+            const y = new Date().getFullYear();
+            years = [y];
+            values = [0];
+        }
 
         return {
-            stats: {
-                totalDeals,
-                totalRevenue: fmtVND(totalRevenue),
-                avgRevenue: fmtVND(avgRevenue),
-                upsellRate: `${upsellRate.toFixed(2)}%`,
-            },
-            chartData: {
-                labels,
-                datasets: [{
-                    label: 'Doanh thu',
-                    data: values,
-                    backgroundColor: 'rgba(22, 163, 74, 0.7)',
-                    borderColor: 'rgba(21, 128, 61, 1)',
-                    borderWidth: 1,
-                }]
-            },
-            recentDeals,
-            chartTitle
+            labels: years.map(String),
+            datasets: [{
+                label: 'Doanh thu',
+                data: values,
+                backgroundColor: 'rgba(22, 163, 74, 0.7)',
+                borderColor: 'rgba(21, 128, 61, 1)',
+                borderWidth: 1
+            }]
         };
-    }, [filteredDeals, rangeStart, rangeEnd]);
+    }, [withApproval]);
 
+    /* ---------- Approve Popup (listPrice = revenue; hoa hồng 1 trong 2) ---------- */
+    const [openApprove, setOpenApprove] = useState(false);
+    const [selected, setSelected] = useState(null);
+    const [form, setForm] = useState({
+        listPrice: '',
+        discountType: 'none',
+        discountValue: '',
+        revenue: '',
+        commissions: [{ user: '', role: 'sale', mode: 'percent', percent: '', amount: '' }],
+        notes: ''
+    });
+
+    const { run } = useActionFeedback();
+
+    const openApproveFor = (row) => {
+        setSelected(row);
+        const current = row?.serviceDetails || {};
+        // Chuẩn hóa commissions
+        const preparedCommissions = (current?.commissions?.length
+            ? current.commissions
+            : [{ user: (row.assignees?.[0]?.user?._id || row.assignees?.[0]?.user || ''), role: 'sale', percent: '', amount: '' }]
+        ).map(x => {
+            const uid = String((typeof x.user === 'object' && x.user?._id) ? x.user._id : x.user || '');
+            const pct = x.percent ?? '';
+            const amt = x.amount ?? '';
+            const mode = Number(amt) > 0 ? 'amount' : 'percent';
+            return { user: uid, role: x.role || 'sale', mode, percent: mode === 'percent' ? pct : '', amount: mode === 'amount' ? amt : '' };
+        });
+
+        const revenueInit = current?.revenue ?? '';
+        setForm({
+            listPrice: revenueInit,                 // ⬅️ Giá gốc = Doanh thu (approved)
+            discountType: current?.pricing?.discountType ?? 'none',
+            discountValue: current?.pricing?.discountValue ?? '',
+            revenue: revenueInit,
+            commissions: preparedCommissions.length ? preparedCommissions : [{ user: '', role: 'sale', mode: 'percent', percent: '', amount: '' }],
+            notes: current?.notes || ''
+        });
+        setOpenApprove(true);
+    };
+
+    const calcFinalPrice = () => {
+        const lp = Number(form.listPrice) || 0;
+        const dv = Number(form.discountValue) || 0;
+        if (form.discountType === 'percent') return Math.max(0, Math.round(lp * (1 - dv / 100)));
+        if (form.discountType === 'amount') return Math.max(0, lp - dv);
+        return lp;
+    };
+
+    const onAddCommission = () =>
+        setForm(f => ({ ...f, commissions: [...f.commissions, { user: '', role: 'sale', mode: 'percent', percent: '', amount: '' }] }));
+    const onRemoveCommission = (idx) =>
+        setForm(f => ({ ...f, commissions: f.commissions.filter((_, i) => i !== idx) }));
+
+    const validateCommissions = () => {
+        for (const [i, c] of form.commissions.entries()) {
+            const p = Number(c.percent) || 0;
+            const a = Number(c.amount) || 0;
+            if (c.mode === 'percent' && a > 0) return `Dòng hoa hồng #${i + 1}: Chọn theo % thì không được nhập tiền.`;
+            if (c.mode === 'amount' && p > 0) return `Dòng hoa hồng #${i + 1}: Chọn theo tiền thì không được nhập %.`;
+            if (!c.user) return `Dòng hoa hồng #${i + 1}: Chưa chọn nhân viên.`;
+        }
+        return '';
+    };
+
+    const submitApprove = async () => {
+        if (!selected) return;
+
+        const err = validateCommissions();
+        if (err) {
+            await run(async () => ({ success: false, error: err }), [], { toast: true, overlay: false, autoRefresh: false, silent: false });
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('customerId', selected._id);
+
+        // Giá gốc luôn = doanh thu (approved)
+        const revenueNum = Number(form.revenue || 0) || 0;
+        const listPriceAuto = revenueNum;
+        fd.append('listPrice', String(listPriceAuto));
+
+        fd.append('discountType', form.discountType || 'none');
+        fd.append('discountValue', String(form.discountValue || 0));
+        fd.append('finalPrice', String(calcFinalPrice()));
+        fd.append('revenue', String(revenueNum));
+
+        const cleanCommissions = form.commissions.map(x => ({
+            user: x.user,
+            role: x.role,
+            percent: x.mode === 'percent' ? Number(x.percent || 0) : 0,
+            amount: x.mode === 'amount' ? Number(x.amount || 0) : 0,
+        }));
+        fd.append('commissions', JSON.stringify(cleanCommissions));
+        fd.append('notes', form.notes || '');
+
+        const res = await run(
+            approveServiceDealAction,
+            [null, fd],
+            {
+                successMessage: 'Duyệt đơn thành công.',
+                errorMessage: (r) => r?.error || 'Không thể duyệt đơn.',
+                autoRefresh: true,
+                toast: true,
+                overlay: true,
+            }
+        );
+        if (res?.success) setOpenApprove(false);
+    };
+
+    const submitReject = async () => {
+        if (!selected) return;
+        const reason = prompt('Lý do từ chối? (không bắt buộc)') || '';
+        const fd = new FormData();
+        fd.append('customerId', selected._id);
+        fd.append('reason', reason);
+
+        const res = await run(
+            rejectServiceDealAction,
+            [null, fd],
+            {
+                successMessage: 'Đã từ chối đơn.',
+                errorMessage: (r) => r?.error || 'Không thể từ chối đơn.',
+                autoRefresh: true,
+                toast: true,
+                overlay: true,
+            }
+        );
+        if (res?.success) setOpenApprove(false);
+    };
+
+    /* ---------- DETAILS POPUP ---------- */
+    const [openDetails, setOpenDetails] = useState(false);
+    const [detailsRow, setDetailsRow] = useState(null);
+    const openDetailsFor = (row) => { setDetailsRow(row); setOpenDetails(true); };
+
+    /* ---------- UI ---------- */
     return (
-        <div className="flex-1 space-y-4 py-4 pt-6 min-h-screen">
-            {/* Filters */}
+        <div className="flex-1 space-y-6 py-4 pt-6 min-h-screen">
+
+            {/* ====== Filter Bar (đặt lên đầu) ====== */}
             <Card className="shadow-md">
                 <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <CardTitle>Bộ lọc thời gian</CardTitle>
+                        <CardDescription>Áp dụng cho thống kê & danh sách.</CardDescription>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => { setRangePreset('custom'); setStartDate(''); setEndDate(''); }}
-                        className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
-                        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                    >
-                        <RefreshCw className="w-4 h-4" /> Đặt lại
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <select
+                            className="w-40 border rounded px-3 py-2 text-sm"
+                            value={rangePreset}
+                            onChange={(e) => setRangePreset(e.target.value)}
+                        >
+                            <option value="last_30">30 ngày qua</option>
+                            <option value="last_7">7 ngày qua</option>
+                            <option value="this_week">Tuần này</option>
+                            <option value="this_month">Tháng này</option>
+                            <option value="this_quarter">Quý này</option>
+                            <option value="this_year">Năm nay</option>
+                            <option value="custom">Tùy chọn</option>
+                        </select>
+                        {rangePreset === 'custom' && (
+                            <>
+                                <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40" />
+                                <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-40" />
+                            </>
+                        )}
+                    </div>
                 </CardHeader>
-
-                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                    <Listbox
-                        label="Khoảng thời gian"
-                        options={rangeOptions}
-                        value={rangePreset}
-                        onChange={(v) => setRangePreset(v)}
-                    />
-                    {rangePreset === 'custom' && (
-                        <>
-                            <div>
-                                <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
-                                <input
-                                    type="date"
-                                    value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                    className="w-full rounded-[6px] border px-3 py-2 text-sm"
-                                    style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                                />
-                            </div>
-                            <div>
-                                <label className="block mb-2 text-sm text-muted-foreground">Đến ngày</label>
-                                <input
-                                    type="date"
-                                    value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
-                                    className="w-full rounded-[6px] border px-3 py-2 text-sm"
-                                    style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                                />
-                            </div>
-                        </>
-                    )}
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0">
+                    <div className="text-sm">
+                        <span className="text-muted-foreground">Thời gian bắt đầu:&nbsp;</span>
+                        <b>{rangeStart.toLocaleString('vi-VN')}</b>
+                    </div>
+                    <div className="text-sm">
+                        <span className="text-muted-foreground">Thời gian kết thúc:&nbsp;</span>
+                        <b>{rangeEnd.toLocaleString('vi-VN')}</b>
+                    </div>
                 </CardContent>
             </Card>
 
-            {/* Stats */}
+            {/* ====== Stats (4 ô) ====== */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard title="Tổng Dịch vụ Chốt" value={stats.totalDeals} icon={ShoppingCart} description="Số khách hàng đã chốt (sau lọc)" color="#16a34a" />
-                <StatCard title="Tổng Doanh thu" value={stats.totalRevenue} icon={DollarSign} description="Tổng doanh thu (sau lọc)" color="#16a34a" />
+                <StatCard title="Tổng Dịch vụ (đã duyệt)" value={stats.totalDeals} icon={ShoppingCart} description="Số đơn đã duyệt trong khoảng lọc" color="#16a34a" />
+                <StatCard title="Tổng Doanh thu (đã duyệt)" value={stats.totalRevenue} icon={DollarSign} description="Không tính đơn chờ duyệt" color="#16a34a" />
                 <StatCard title="Doanh thu TB/DV" value={stats.avgRevenue} icon={UserCheck} description="Trung bình mỗi dịch vụ" color="#16a34a" />
-                <StatCard title="Tỷ lệ Upsell" value={stats.upsellRate} icon={Percent} description="Upsell/Cross-sell trên tổng" color="#f97316" />
+                <StatCard title="Top Hoa hồng" value={topCommissions.length} icon={Percent} description="Số nhân sự hiện diện trong top" color="#f97316" />
             </div>
 
-            {/* Chart + Table */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <Card className="shadow-lg">
-                    <CardHeader>
-                        <CardTitle>Biểu đồ Doanh thu</CardTitle>
-                        <CardDescription>Tự động đổi thang thời gian theo khoảng lọc.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="h-[400px] relative">
-                        <RevenueChart chartData={chartData} title={chartTitle} />
-                    </CardContent>
-                </Card>
-                <RecentDealsTable deals={recentDeals} />
-            </div>
+            {/* ====== Large Yearly Chart ====== */}
+            <Card className="shadow-lg">
+                <CardHeader className="flex items-center justify-between">
+                    <div>
+                        <CardTitle className="flex items-center gap-2">
+                            <LineChart className="w-5 h-5" />
+                            Doanh thu theo năm
+                        </CardTitle>
+                        <CardDescription>Tổng hợp các đơn <b>đã duyệt</b> (không phụ thuộc bộ lọc bên trên). Nếu chưa có dữ liệu, trục Y hiển thị bước 1&nbsp;triệu.</CardDescription>
+                    </div>
+                </CardHeader>
+                <CardContent className="h-[480px]">
+                    <YearlyRevenueChart data={yearlyChartData} />
+                </CardContent>
+            </Card>
+
+            {/* ====== Pending approvals ====== */}
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center"><UserCog className="mr-2 h-5 w-5" />Danh sách cần duyệt</CardTitle>
+                    <CardDescription>Đơn chốt đang ở trạng thái <b>chờ duyệt</b> — chưa tính vào doanh thu.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="max-h-[360px] overflow-y-auto">
+                        <Table>
+                            <TableHeader className="sticky top-0 bg-secondary">
+                                <TableRow>
+                                    <TableHead>Khách hàng</TableHead>
+                                    <TableHead>Sale liên quan</TableHead>
+                                    <TableHead>Doanh thu (Sale nhập)</TableHead>
+                                    <TableHead>Ghi chú</TableHead>
+                                    <TableHead className="text-right">Thao tác</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {pendingApprovals.length === 0 && (
+                                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có đơn cần duyệt</TableCell></TableRow>
+                                )}
+                                {pendingApprovals.map(row => (
+                                    <TableRow key={row._id}>
+                                        <TableCell className="font-medium">
+                                            {row.name}
+                                            <div className="text-xs text-muted-foreground">{row.phone}</div>
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                            {namesFromAssignees(row.assignees, userMap)}
+                                        </TableCell>
+                                        <TableCell className="font-semibold">{fmtVND(row.serviceDetails?.revenue)}</TableCell>
+                                        <TableCell className="text-xs">{row.serviceDetails?.notes || '—'}</TableCell>
+                                        <TableCell className="text-right flex items-center justify-end gap-2">
+                                            <Button size="sm" variant="outline" onClick={() => openDetailsFor(row)}><Eye className="w-4 h-4 mr-1" />Xem</Button>
+                                            <Button size="sm" onClick={() => openApproveFor(row)}><Check className="w-4 h-4 mr-1" />Duyệt</Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* ====== Top Commissions ====== */}
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center"><PiggyBank className="mr-2 h-5 w-5" />Top nhân viên có hoa hồng cao</CardTitle>
+                    <CardDescription>Tính từ các đơn đã duyệt (dựa theo amount hoặc % * revenue).</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Nhân viên</TableHead>
+                                <TableHead className="text-right">Tổng hoa hồng</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {topCommissions.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">Chưa có dữ liệu</TableCell></TableRow>}
+                            {topCommissions.map(row => (
+                                <TableRow key={row.user}>
+                                    <TableCell>{nameFromUserId(row.user, userMap)}</TableCell>
+                                    <TableCell className="text-right font-semibold">{fmtVND(row.total)}</TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+
+            {/* ====== Recent Deals (approved) ====== */}
+            <RecentDealsTable userMap={userMap} deals={[...approvedDeals].sort((a, b) => new Date(b.__dealDate) - new Date(a.__dealDate)).slice(0, 12)} />
+
+            {/* ===== POPUP: DUYỆT (giá gốc = doanh thu; hoa hồng 1 trong 2) ===== */}
+            <Popup
+                open={openApprove}
+                onClose={() => setOpenApprove(false)}
+                header={selected ? `Duyệt đơn: ${selected?.name} — ${selected?.phone}` : 'Duyệt đơn'}
+                widthClass="max-w-4xl"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setOpenApprove(false)}><X className="w-4 h-4 mr-2" />Đóng</Button>
+                        <Button variant="destructive" onClick={submitReject}><X className="w-4 h-4 mr-2" />Từ chối</Button>
+                        <Button onClick={submitApprove}><Check className="w-4 h-4 mr-2" />Duyệt & Lưu</Button>
+                    </>
+                }
+            >
+                {/* Vùng thông tin KH */}
+                {selected && (
+                    <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-[8px] border bg-[var(--surface-2)]" style={{ borderColor: 'var(--border)' }}>
+                        <div>
+                            <div className="text-xs text-muted-foreground">Khách hàng</div>
+                            <div className="font-semibold">{selected.name}</div>
+                            <div className="text-xs text-muted-foreground">{selected.phone}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-muted-foreground">Sale liên quan</div>
+                            <div className="text-sm">{namesFromAssignees(selected.assignees, userMap)}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-muted-foreground">Ghi chú</div>
+                            <div className="text-sm truncate">{selected?.serviceDetails?.notes || '—'}</div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 1) Giá & Giảm giá */}
+                <section className="mb-5 p-4 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                    <h4 className="font-semibold mb-3">1) Giá & Giảm giá</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="md:col-span-1">
+                            <label className="block mb-1 text-sm">Giá gốc (listPrice)</label>
+                            {/* ReadOnly + luôn chạy theo revenue */}
+                            <Input
+                                value={form.listPrice}
+                                readOnly
+                                className="bg-muted/40"
+                            />
+                            <p className="text-[11px] text-muted-foreground mt-1">Tự động = Doanh thu (approved).</p>
+                        </div>
+                        <div className="md:col-span-1">
+                            <label className="block mb-1 text-sm">Kiểu giảm</label>
+                            <select
+                                className="w-full border rounded px-3 py-2 text-sm"
+                                value={form.discountType}
+                                onChange={e => setForm(f => ({ ...f, discountType: e.target.value }))}
+                            >
+                                <option value="none">Không</option>
+                                <option value="amount">Theo tiền</option>
+                                <option value="percent">Theo %</option>
+                            </select>
+                        </div>
+                        <div className="md:col-span-1">
+                            <label className="block mb-1 text-sm">Giá trị giảm</label>
+                            <Input type="number" value={form.discountValue} onChange={e => setForm(f => ({ ...f, discountValue: e.target.value }))} />
+                        </div>
+                        <div className="md:col-span-1">
+                            <label className="block mb-1 text-sm">Giá sau giảm (final)</label>
+                            <Input value={fmtVND(calcFinalPrice()).replace(' đ', '')} readOnly />
+                        </div>
+                    </div>
+                </section>
+
+                {/* 2) Doanh thu */}
+                <section className="mb-5 p-4 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                    <h4 className="font-semibold mb-3">2) Doanh thu & Ghi chú</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label className="block mb-1 text-sm">Doanh thu (approved)</label>
+                            <Input
+                                type="number"
+                                value={form.revenue}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    // ⬇️ Giá gốc luôn bằng doanh thu
+                                    setForm(f => ({ ...f, revenue: v, listPrice: v }));
+                                }}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">Tổng tiền thu cuối cùng ghi nhận. Giá gốc sẽ tự bằng giá trị này.</p>
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-sm">Ghi chú</label>
+                            <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                        </div>
+                    </div>
+                </section>
+
+                {/* 3) Hoa hồng (chỉ 1 cách nhập: % hoặc tiền) */}
+                <section className="mb-5 p-4 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold">3) Hoa hồng</h4>
+                        <Button type="button" size="sm" onClick={onAddCommission}>+ Thêm dòng</Button>
+                    </div>
+                    <div className="space-y-2">
+                        {form.commissions.map((row, idx) => {
+                            const handleChange = (patch) => setForm(f => {
+                                const arr = [...f.commissions];
+                                if (patch.mode && patch.mode !== arr[idx].mode) {
+                                    if (patch.mode === 'percent') { arr[idx].amount = ''; }
+                                    if (patch.mode === 'amount') { arr[idx].percent = ''; }
+                                }
+                                arr[idx] = { ...arr[idx], ...patch };
+                                return { ...f, commissions: arr };
+                            });
+
+                            const base = Number(form.revenue) || calcFinalPrice() || 0;
+                            const p = Number(row.percent) || 0;
+                            const a = Number(row.amount) || 0;
+                            const preview = row.mode === 'percent'
+                                ? Math.round((p / 100) * base)
+                                : a;
+                            const computedNote = `≈ ${fmtVND(preview)} (${row.mode === 'percent' ? `${p}% * ${fmtVND(base)}` : 'số tiền cố định'})`;
+
+                            return (
+                                <div key={idx} className="grid grid-cols-12 gap-2">
+                                    <div className="col-span-3">
+                                        <label className="block mb-1 text-xs text-muted-foreground">Nhân viên</label>
+                                        <select
+                                            className="w-full border rounded px-3 py-2 text-sm"
+                                            value={row.user}
+                                            onChange={(e) => handleChange({ user: e.target.value })}
+                                        >
+                                            <option value="">— Chọn nhân viên —</option>
+                                            {users.map(u => (
+                                                <option key={u._id} value={String(u._id)}>
+                                                    {u.name} {u.group ? `• ${u.group}` : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <div className="text-[11px] mt-1 text-muted-foreground">
+                                            {row.user ? nameFromUserId(row.user, userMap) : 'Chưa chọn'}
+                                        </div>
+                                    </div>
+
+                                    <div className="col-span-2">
+                                        <label className="block mb-1 text-xs text-muted-foreground">Vai trò</label>
+                                        <Input placeholder="sale/doctor/..." value={row.role} onChange={e => handleChange({ role: e.target.value })} />
+                                    </div>
+
+                                    <div className="col-span-2">
+                                        <label className="block mb-1 text-xs text-muted-foreground">Cách nhập</label>
+                                        <select
+                                            className="w-full border rounded px-3 py-2 text-sm"
+                                            value={row.mode}
+                                            onChange={(e) => handleChange({ mode: e.target.value })}
+                                        >
+                                            <option value="percent">% theo doanh thu</option>
+                                            <option value="amount">Số tiền cố định</option>
+                                        </select>
+                                    </div>
+
+                                    {row.mode === 'percent' ? (
+                                        <>
+                                            <div className="col-span-2">
+                                                <label className="block mb-1 text-xs text-muted-foreground">Phần trăm (%)</label>
+                                                <Input type="number" placeholder="%" value={row.percent} onChange={e => handleChange({ percent: e.target.value, amount: '' })} />
+                                            </div>
+                                            <div className="col-span-2 opacity-50 pointer-events-none">
+                                                <label className="block mb-1 text-xs text-muted-foreground">Số tiền (bị khóa)</label>
+                                                <Input disabled placeholder="VND" value="" />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="col-span-2 opacity-50 pointer-events-none">
+                                                <label className="block mb-1 text-xs text-muted-foreground">Phần trăm (bị khóa)</label>
+                                                <Input disabled placeholder="%" value="" />
+                                            </div>
+                                            <div className="col-span-2">
+                                                <label className="block mb-1 text-xs text-muted-foreground">Số tiền</label>
+                                                <Input type="number" placeholder="VND" value={row.amount} onChange={e => handleChange({ amount: e.target.value, percent: '' })} />
+                                            </div>
+                                        </>
+                                    )}
+
+                                    <div className="col-span-1 flex items-end justify-end">
+                                        <Button type="button" variant="ghost" onClick={() => onRemoveCommission(idx)}><X className="w-4 h-4" /></Button>
+                                    </div>
+
+                                    <div className="col-span-12 text-[11px] text-muted-foreground -mt-1">{computedNote}</div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+
+                {/* 4) Tóm tắt */}
+                <section className="p-4 rounded-[8px] border bg-[var(--surface-2)]" style={{ borderColor: 'var(--border)' }}>
+                    <h4 className="font-semibold mb-2">4) Tóm tắt</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <div>Giá gốc: <b>{fmtVND(form.listPrice)}</b></div>
+                        <div>Giảm: <b>{form.discountType === 'percent' ? `${form.discountValue || 0}%` : (form.discountType === 'amount' ? fmtVND(form.discountValue) : '0')}</b></div>
+                        <div>Giá sau giảm: <b>{fmtVND(calcFinalPrice())}</b></div>
+                    </div>
+                </section>
+            </Popup>
+
+            {/* ===== POPUP: XEM CHI TIẾT HỒ SƠ ===== */}
+            <Popup
+                open={openDetails}
+                onClose={() => setOpenDetails(false)}
+                header={detailsRow ? `Chi tiết hồ sơ: ${detailsRow?.name} — ${detailsRow?.phone}` : 'Chi tiết hồ sơ'}
+                widthClass="max-w-3xl"
+                footer={<Button variant="secondary" onClick={() => setOpenDetails(false)}><X className="w-4 h-4 mr-2" />Đóng</Button>}
+            >
+                {detailsRow && (
+                    <div className="space-y-4">
+                        {/* Info row */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                            <div>
+                                <div className="text-xs text-muted-foreground">Khách hàng</div>
+                                <div className="font-semibold">{detailsRow.name}</div>
+                                <div className="text-xs text-muted-foreground">{detailsRow.phone}</div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-muted-foreground">Sale liên quan</div>
+                                <div className="text-sm">
+                                    {namesFromAssignees(detailsRow.assignees, userMap)}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-muted-foreground">Trạng thái nhập</div>
+                                <div className="text-sm">{detailsRow?.serviceDetails?.status || '—'}</div>
+                            </div>
+                        </div>
+
+                        {/* Notes & Revenue */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                                <div className="text-xs text-muted-foreground mb-1">Ghi chú Sale</div>
+                                <div className="text-sm whitespace-pre-wrap">{detailsRow?.serviceDetails?.notes || '—'}</div>
+                            </div>
+                            <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                                <div className="text-xs text-muted-foreground mb-1">Doanh thu Sale nhập</div>
+                                <div className="text-lg font-semibold text-green-600">{fmtVND(detailsRow?.serviceDetails?.revenue)}</div>
+                            </div>
+                        </div>
+
+                        {/* Image Preview (invoice / hợp đồng) */}
+                        <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                            <div className="text-xs text-muted-foreground mb-2">Hình ảnh đính kèm</div>
+                            {detailsRow?.serviceDetails?.invoiceDriveId ? (
+                                <img
+                                    src={driveImage(detailsRow.serviceDetails.invoiceDriveId)}
+                                    alt="Invoice/Contract"
+                                    className="w-full max-h-[420px] object-contain rounded-md border"
+                                    style={{ borderColor: 'var(--border)' }}
+                                />
+                            ) : (
+                                <div className="text-sm text-muted-foreground">Chưa có hình ảnh</div>
+                            )}
+                        </div>
+
+                        {/* Dịch vụ / Tags */}
+                        <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
+                            <div className="text-xs text-muted-foreground mb-1">Dịch vụ / Tags</div>
+                            <div className="text-sm">
+                                {Array.isArray(detailsRow?.tags) && detailsRow.tags.length > 0
+                                    ? detailsRow.tags.map(t => {
+                                        if (typeof t === 'object' && t?.name) return t.name;
+                                        if (typeof t === 'string') return t.slice(-6);
+                                        return 'DV';
+                                    }).join(', ')
+                                    : (detailsRow?.serviceDetails?.service ? String(detailsRow.serviceDetails.service).slice(-6) : '—')}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </Popup>
         </div>
     );
 }

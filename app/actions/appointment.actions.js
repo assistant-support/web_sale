@@ -21,6 +21,8 @@ export async function createAppointmentAction(prevState, formData) {
     const title = formData.get('title');
     const appointmentDate = formData.get('appointmentDate');
     const notes = formData.get('notes');
+    // Nếu bạn có field appointmentType trong form, lấy thêm:
+    const appointmentType = formData.get('appointmentType'); // 'interview' | 'surgery' (optional)
 
     if (!customerId || !title || !appointmentDate) {
         return { status: false, message: 'Vui lòng điền đầy đủ thông tin lịch hẹn' };
@@ -37,23 +39,40 @@ export async function createAppointmentAction(prevState, formData) {
             notes,
             status: 'pending', // Trạng thái ban đầu của lịch hẹn
             createdBy: user.id,
+            ...(appointmentType ? { appointmentType } : {}), // nếu có
         });
+
+        // 1.1 Lên lịch job nhắc hẹn (Agenda)
+        // -----------------------------------
+        // Thời điểm nhắc = 24h trước lịch hẹn; nếu đã <24h thì gửi sau 1 phút
+        const { default: initAgenda } = await import('@/config/agenda');
+        const agenda = await initAgenda();
+
+        const apptTime = new Date(newAppointment.appointmentDate).getTime();
+        const remindAt = new Date(apptTime - 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const scheduledTime = remindAt > now ? remindAt : new Date(now.getTime() + 60 * 1000); // Phương án A
+
+        await agenda.schedule(scheduledTime, 'appointmentReminder', {
+            appointmentId: newAppointment._id.toString(),
+            customerId: customerId.toString(),
+        });
+        // -----------------------------------
 
         // 2. Cập nhật khách hàng: Thêm care log và cập nhật pipelineStatus
         const newPipelineStatus = 'scheduled_unconfirmed_4'; // Trạng thái pipeline khi mới đặt lịch
         const careEntry = {
             content: `Đặt lịch hẹn: ${title} vào ${new Date(appointmentDate).toLocaleString('vi-VN')}`,
             createBy: user.id,
-            step: 5, // Theo mô tả, bước này thuộc Giai đoạn 5: Nhắc lịch & Xác nhận
+            step: 5, // Giai đoạn 5: Nhắc lịch & Xác nhận
             createAt: new Date()
         };
 
-        // Sử dụng một lệnh update để tối ưu hóa hiệu suất
         await Customer.findByIdAndUpdate(customerId, {
             $push: { care: careEntry },
             $set: {
-                'pipelineStatus.0': newPipelineStatus, // Cập nhật trạng thái tổng quan gần nhất
-                'pipelineStatus.5': newPipelineStatus, // Cập nhật trạng thái của giai đoạn lịch hẹn
+                'pipelineStatus.0': newPipelineStatus,
+                'pipelineStatus.5': newPipelineStatus,
             }
         });
 
@@ -67,6 +86,7 @@ export async function createAppointmentAction(prevState, formData) {
         return { status: false, message: 'Đã xảy ra lỗi khi tạo lịch hẹn' };
     }
 }
+
 
 /**
  * Action để cập nhật trạng thái lịch hẹn.

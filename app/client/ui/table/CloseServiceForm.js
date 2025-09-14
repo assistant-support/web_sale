@@ -31,10 +31,11 @@ const closeServiceSchema = z.object({
         required_error: "Vui lòng chọn trạng thái chốt dịch vụ."
     }),
     revenue: z.string().optional(),
+    selectedService: z.string().optional(), // ObjectId dạng string
     notes: z.string().optional(),
-    invoiceImage: z.any() // Zod không thể validate FileList trực tiếp, sẽ dùng superRefine
+    invoiceImage: z.any()
 }).superRefine((data, ctx) => {
-    // Nếu trạng thái không phải là "Từ chối" thì ảnh hóa đơn là bắt buộc
+    // Ảnh hoá đơn bắt buộc nếu không phải rejected
     if (data.status !== 'rejected' && (!data.invoiceImage || data.invoiceImage.length === 0)) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -42,19 +43,35 @@ const closeServiceSchema = z.object({
             message: "Ảnh hóa đơn/hợp đồng là bắt buộc khi chốt dịch vụ.",
         });
     }
+    // Dịch vụ chốt bắt buộc nếu không phải rejected
+    if (data.status !== 'rejected') {
+        if (!data.selectedService) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['selectedService'],
+                message: "Vui lòng chọn dịch vụ để chốt.",
+            });
+        } else if (!/^[0-9a-fA-F]{24}$/.test(data.selectedService)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['selectedService'],
+                message: "Dịch vụ không hợp lệ.",
+            });
+        }
+    }
 });
-
 
 // =============================================================
 // == COMPONENT CHÍNH
 // =============================================================
-export default function CloseServiceCard({ customer }) {
+export default function CloseServiceCard({ customer, services = [] }) {
     const [imagePreview, setImagePreview] = useState(null);
     const form = useForm({
         resolver: zodResolver(closeServiceSchema),
         defaultValues: {
             status: 'completed',
             revenue: '',
+            selectedService: '',
             notes: '',
             invoiceImage: null
         },
@@ -67,8 +84,8 @@ export default function CloseServiceCard({ customer }) {
         formData.append('customerId', customer._id);
         formData.append('status', values.status);
         formData.append('revenue', values.revenue || '0');
-        // 'tags' không có trong form này, action sẽ xử lý
         formData.append('notes', values.notes || '');
+        if (values.selectedService) formData.append('selectedService', values.selectedService);
 
         if (values.invoiceImage && values.invoiceImage.length > 0) {
             formData.append('invoiceImage', values.invoiceImage[0]);
@@ -82,9 +99,7 @@ export default function CloseServiceCard({ customer }) {
                 if (result.success) {
                     form.reset();
                     setImagePreview(null);
-                    // Tùy chọn: bạn có thể gọi một hàm callback ở đây nếu cần
-                    // ví dụ: onActionSuccess();
-                    return result.message || "Chốt dịch vụ thành công!";
+                    return result.message || "Chốt dịch vụ thành công (chờ duyệt)!";
                 }
                 throw new Error(result.error || "Có lỗi xảy ra từ máy chủ.");
             },
@@ -103,7 +118,7 @@ export default function CloseServiceCard({ customer }) {
                     <h4>Chốt Dịch Vụ & Lưu Trữ</h4>
                 </CardTitle>
                 <CardDescription>
-                    Xác nhận trạng thái cuối, doanh thu và tải lên hóa đơn/hợp đồng để hoàn tất.
+                    Xác nhận trạng thái cuối, doanh thu và tải lên hóa đơn/hợp đồng. Đơn sẽ chuyển sang <b>chờ duyệt</b>.
                 </CardDescription>
             </CardHeader>
             <CardContent>
@@ -119,6 +134,26 @@ export default function CloseServiceCard({ customer }) {
                                         <FormItem className="flex items-center space-x-2"><FormControl><RadioGroupItem value="in_progress" /></FormControl><FormLabel className="font-normal">Còn liệu trình</FormLabel></FormItem>
                                         <FormItem className="flex items-center space-x-2"><FormControl><RadioGroupItem value="rejected" /></FormControl><FormLabel className="font-normal">Từ chối sau khám</FormLabel></FormItem>
                                     </RadioGroup>
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
+
+                        {/* Dịch vụ chốt */}
+                        <FormField control={form.control} name="selectedService" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Dịch vụ chốt *</FormLabel>
+                                <FormControl>
+                                    <select
+                                        {...field}
+                                        className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        disabled={form.getValues('status') === 'rejected'}
+                                    >
+                                        <option value="">-- Chọn dịch vụ --</option>
+                                        {services.map(s => (
+                                            <option key={s._id} value={s._id}>{s.name}</option>
+                                        ))}
+                                    </select>
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>
@@ -152,7 +187,7 @@ export default function CloseServiceCard({ customer }) {
                                         accept="image/*"
                                         {...fileRef}
                                         onChange={(e) => {
-                                            fileRef.onChange(e); // Báo cho react-hook-form về sự thay đổi
+                                            fileRef.onChange(e);
                                             if (e.target.files && e.target.files[0]) {
                                                 setImagePreview(URL.createObjectURL(e.target.files[0]));
                                             } else {

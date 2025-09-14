@@ -49,12 +49,76 @@ const FormSchema = new Schema(
             default: false
         },
         serviceDetails: {
+            // Trạng thái xử lý chung
             status: { type: String, enum: ['new', 'in_progress', 'completed'], default: 'new' },
             notes: { type: String, trim: true },
+
+            // Dịch vụ quan tâm & dịch vụ đã chốt
+            interestedServices: {
+                type: [{ type: Schema.Types.ObjectId, ref: 'service' }], // dịch vụ KH quan tâm
+                default: []
+            },
+            selectedService: { type: Schema.Types.ObjectId, ref: 'service' }, // dịch vụ chốt (nếu có 1 dịch vụ chính)
+
+            // Thông tin giá/giảm giá/chốt
+            pricing: {
+                listPrice: { type: Number, default: 0 }, // giá gốc/niêm yết
+                discountType: { type: String, enum: ['none', 'amount', 'percent'], default: 'none' }, // giảm theo tiền hoặc %
+                discountValue: { type: Number, default: 0 }, // số tiền hoặc %
+                finalPrice: { type: Number, default: 0 }, // giá sau giảm (mục tiêu chốt)
+            },
+
+            // Thanh toán (nhiều đợt)
+            payments: {
+                type: [{
+                    amount: { type: Number, required: true }, // số tiền thu ở đợt này
+                    method: { type: String, enum: ['cash', 'card', 'transfer', 'momo', 'zalopay', 'other'], default: 'cash' },
+                    paidAt: { type: Date, default: Date.now },
+                    receivedBy: { type: Schema.Types.ObjectId, ref: 'user' },
+                    note: { type: String, trim: true }
+                }],
+                default: []
+            },
+            amountReceivedTotal: { type: Number, default: 0 }, // tổng tiền đã nhận (cộng dồn từ payments)
+            outstandingAmount: { type: Number, default: 0 },   // công nợ còn lại = finalPrice - amountReceivedTotal
+
+            // Chi phí (để tính lợi nhuận)
+            costs: {
+                type: [{
+                    label: { type: String, trim: true }, // mô tả: vật tư, CTV, marketing,...
+                    amount: { type: Number, required: true, default: 0 },
+                    createdAt: { type: Date, default: Date.now },
+                    createdBy: { type: Schema.Types.ObjectId, ref: 'user' }
+                }],
+                default: []
+            },
+
+            // Chia hoa hồng cho các nhân sự liên quan (nhập tay)
+            commissions: {
+                type: [{
+                    user: { type: Schema.Types.ObjectId, ref: 'user', required: true },
+                    role: { type: String, trim: true }, // ví dụ: 'sale', 'doctor', 'referrer'...
+                    percent: { type: Number, default: 0 }, // % hoa hồng
+                    amount: { type: Number, default: 0 }   // tiền hoa hồng (nếu nhập tay)
+                }],
+                default: []
+            },
+
+            // Quy trình duyệt chốt đơn
+            approval: {
+                state: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+                approvedBy: { type: Schema.Types.ObjectId, ref: 'user' },
+                approvedAt: { type: Date },
+                reason: { type: String, trim: true } // ghi chú khi reject/approve
+            },
+
+            // Thông tin kết sổ hiện tại bạn đang có — giữ nguyên + có thể đồng bộ với pricing/payments
             closedAt: { type: Date },
             closedBy: { type: Schema.Types.ObjectId, ref: 'user' },
             invoiceDriveId: { type: String },
-            revenue: { type: Number, default: 0 },
+
+            // Doanh thu ghi nhận (tuỳ chính sách: có thể gán = finalPrice hoặc = amountReceivedTotal)
+            revenue: { type: Number, default: 0 }
         }
     },
     { timestamps: false, versionKey: false }
