@@ -8,10 +8,10 @@ import User from '@/models/users';
 import '@/models/zalo.model' // Giữ lại nếu Zalo Account vẫn liên quan đến Customer
 import ScheduledJob from "@/models/schedule";
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
+import Service from '@/models/services.model';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
-
 
 export async function getCombinedData(params) {
     const cachedData = nextCache(
@@ -90,7 +90,7 @@ export async function getCombinedData(params) {
             const matchStage =
                 filterConditions.length > 0 ? { $match: { $and: filterConditions } } : { $match: {} };
 
-            // Pipeline tổng hợp
+            // Pipeline tổng hợp (giữ nguyên logic hiện tại)
             const pipeline = [
                 matchStage,
                 { $lookup: { from: 'forms', localField: 'source', foreignField: '_id', as: 'sourceInfo' } },
@@ -101,6 +101,7 @@ export async function getCombinedData(params) {
                         lastCareNote: { $last: '$care' },
                     },
                 },
+                // Lấy thẻ dịch vụ (tags) để hiển thị tên
                 { $lookup: { from: 'services', localField: 'tags', foreignField: '_id', as: 'tags' } },
                 { $project: { sourceInfo: 0 } },
                 { $sort: { createAt: -1 } },
@@ -115,9 +116,10 @@ export async function getCombinedData(params) {
             const results = await Customer.aggregate(pipeline).exec();
             let paginatedData = results[0]?.paginatedResults || [];
 
-            // Populate user cho care & assignees
+            // ===== Populate user cho care & assignees (giữ nguyên) =====
             if (paginatedData.length > 0) {
                 const userIds = new Set();
+
                 paginatedData.forEach((customer) => {
                     customer.care?.forEach((note) => {
                         if (note.createBy) userIds.add(String(note.createBy));
@@ -134,12 +136,16 @@ export async function getCombinedData(params) {
                     const userMap = new Map(users.map((u) => [String(u._id), u]));
 
                     paginatedData.forEach((customer) => {
+                        customer.ccare = customer.care; // no-op (giữ)
                         customer.care?.forEach((note) => {
                             if (note.createBy && userMap.has(String(note.createBy))) {
                                 note.createBy = userMap.get(String(note.createBy));
                             }
                         });
-                        if (customer.lastCareNote?.createBy && userMap.has(String(customer.lastCareNote.createBy))) {
+                        if (
+                            customer.lastCareNote?.createBy &&
+                            userMap.has(String(customer.lastCareNote.createBy))
+                        ) {
                             customer.lastCareNote.createBy = userMap.get(String(customer.lastCareNote.createBy));
                         }
                         customer.assignees?.forEach((assignment) => {
@@ -151,6 +157,117 @@ export async function getCombinedData(params) {
                 }
             }
 
+            // ====== Bổ sung: populate đầy đủ serviceDetails ======
+            // Thu thập ID Users & Services từ serviceDetails để query 1 lần
+            const sdUserIds = new Set();
+            const sdServiceIds = new Set();
+
+            const collectFromServiceDetail = (sd) => {
+                // Users
+                if (sd.closedBy) sdUserIds.add(String(sd.closedBy));
+                if (sd.approvedBy) sdUserIds.add(String(sd.approvedBy));
+                (sd.payments || []).forEach((p) => {
+                    if (p.receivedBy) sdUserIds.add(String(p.receivedBy));
+                });
+                (sd.commissions || []).forEach((cm) => {
+                    if (cm.user) sdUserIds.add(String(cm.user));
+                });
+                (sd.costs || []).forEach((c) => {
+                    if (c.createdBy) sdUserIds.add(String(c.createdBy));
+                });
+
+                // Services
+                if (sd.selectedService) sdServiceIds.add(String(sd.selectedService));
+                (sd.interestedServices || []).forEach((sid) => sdServiceIds.add(String(sid)));
+            };
+
+            paginatedData.forEach((customer) => {
+                const list = Array.isArray(customer.serviceDetails)
+                    ? customer.serviceDetails
+                    : customer.serviceDetails
+                        ? [customer.serviceDetails]
+                        : [];
+                list.forEach(collectFromServiceDetail);
+            });
+
+            // Query users/services một lần
+            let sdUserMap = new Map();
+            let sdServiceMap = new Map();
+            if (sdUserIds.size > 0) {
+                const users = await User.find({ _id: { $in: Array.from(sdUserIds) } })
+                    .select('name avt')
+                    .lean();
+                sdUserMap = new Map(users.map((u) => [String(u._id), u]));
+            }
+            if (sdServiceIds.size > 0) {
+                const services = await Service.find({ _id: { $in: Array.from(sdServiceIds) } })
+                    .select('name code price')
+                    .lean();
+                sdServiceMap = new Map(services.map((s) => [String(s._id), s]));
+            }
+
+            // Map dữ liệu vào từng serviceDetails
+            paginatedData.forEach((customer) => {
+                const list = Array.isArray(customer.serviceDetails)
+                    ? customer.serviceDetails
+                    : customer.serviceDetails
+                        ? [customer.serviceDetails]
+                        : [];
+
+                // Gán lại đã map → đảm bảo luôn là mảng trong output
+                customer.serviceDetails = list.map((sd) => {
+                    const cloned = { ...sd };
+
+                    // Users
+                    if (cloned.closedBy && sdUserMap.has(String(cloned.closedBy))) {
+                        cloned.closedBy = sdUserMap.get(String(cloned.closedBy));
+                    }
+                    if (cloned.approvedBy && sdUserMap.has(String(cloned.approvedBy))) {
+                        cloned.approvedBy = sdUserMap.get(String(cloned.approvedBy));
+                    }
+                    if (Array.isArray(cloned.payments)) {
+                        cloned.payments = cloned.payments.map((p) => {
+                            const cp = { ...p };
+                            if (cp.receivedBy && sdUserMap.has(String(cp.receivedBy))) {
+                                cp.receivedBy = sdUserMap.get(String(cp.receivedBy));
+                            }
+                            return cp;
+                        });
+                    }
+                    if (Array.isArray(cloned.commissions)) {
+                        cloned.commissions = cloned.commissions.map((cm) => {
+                            const ccm = { ...cm };
+                            if (ccm.user && sdUserMap.has(String(ccm.user))) {
+                                ccm.user = sdUserMap.get(String(ccm.user));
+                            }
+                            return ccm;
+                        });
+                    }
+                    if (Array.isArray(cloned.costs)) {
+                        cloned.costs = cloned.costs.map((c) => {
+                            const cc = { ...c };
+                            if (cc.createdBy && sdUserMap.has(String(cc.createdBy))) {
+                                cc.createdBy = sdUserMap.get(String(cc.createdBy));
+                            }
+                            return cc;
+                        });
+                    }
+
+                    // Services
+                    if (cloned.selectedService && sdServiceMap.has(String(cloned.selectedService))) {
+                        cloned.selectedService = sdServiceMap.get(String(cloned.selectedService));
+                    }
+                    if (Array.isArray(cloned.interestedServices)) {
+                        cloned.interestedServices = cloned.interestedServices
+                            .map((sid) => sdServiceMap.get(String(sid)))
+                            .filter(Boolean); // giữ các service tìm thấy
+                    }
+
+                    return cloned;
+                });
+            });
+
+            // Kết quả cuối
             const plainData = JSON.parse(JSON.stringify(paginatedData));
             return {
                 data: plainData,
@@ -163,6 +280,7 @@ export async function getCombinedData(params) {
 
     return cachedData(params);
 }
+
 
 export async function revalidateData() {
     revalidateTag('combined-data');

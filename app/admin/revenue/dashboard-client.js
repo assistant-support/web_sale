@@ -19,9 +19,12 @@ import {
     Eye, LineChart
 } from 'lucide-react';
 
-import { approveServiceDealAction, rejectServiceDealAction } from '@/data/customers/wraperdata.db';
+import {
+    approveServiceDealAction,
+    rejectServiceDealAction
+} from '@/data/customers/wraperdata.db';
 import { driveImage } from '@/function';
-import { useActionFeedback } from '@/hooks/useAction'; // chỉnh path nếu khác
+import { useActionFeedback } from '@/hooks/useAction';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -40,9 +43,13 @@ const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
 const endOfYear = (d) => endOfDay(new Date(d.getFullYear(), 11, 31));
 const toYMD = (d) => { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; };
 
-const resolveDealDate = (c) => {
-    if (c?.serviceDetails?.closedAt) return new Date(c.serviceDetails.closedAt);
-    const logs = Array.isArray(c?.care) ? c.care : [];
+// Lấy ngày “đơn chốt” cho 1 hàng chi tiết
+const resolveDetailDate = (row) => {
+    const d = row?.detail || {};
+    if (d.approvedAt) return new Date(d.approvedAt);
+    if (d.closedAt) return new Date(d.closedAt);
+    // fallback từ care logs (bước 6)
+    const logs = Array.isArray(row?.care) ? row.care : [];
     const step6 = logs
         .filter(n => n?.step === 6 || String(n?.content || '').includes('[Chốt dịch vụ]'))
         .sort((a, b) => new Date(b.createAt) - new Date(a.createAt))[0];
@@ -83,7 +90,7 @@ const RecentDealsTable = ({ deals, userMap }) => (
     <Card className="shadow-lg col-span-1 lg:col-span-2">
         <CardHeader>
             <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Dịch vụ chốt (đã duyệt) gần đây</CardTitle>
-            <CardDescription>Chỉ hiển thị các đơn đã duyệt.</CardDescription>
+            <CardDescription>Chỉ hiển thị các ĐƠN CHI TIẾT đã duyệt.</CardDescription>
         </CardHeader>
         <CardContent>
             <div className="max-h-[400px] overflow-y-auto">
@@ -98,22 +105,22 @@ const RecentDealsTable = ({ deals, userMap }) => (
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {deals.map(deal => (
-                            <TableRow key={deal._id}>
-                                <TableCell className="font-medium">{deal.name}</TableCell>
+                        {deals.map(row => (
+                            <TableRow key={row.detail?._id || `${row.customerId}-${row.__dealDate || ''}`}>
+                                <TableCell className="font-medium">{row.name}</TableCell>
                                 <TableCell className="font-semibold text-green-600">
-                                    {fmtVND(deal.serviceDetails?.revenue)}
+                                    {fmtVND(row.detail?.revenue)}
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell">
-                                    {deal.serviceDetails?.status === 'completed'
+                                    {row.detail?.status === 'completed'
                                         ? <Badge>Hoàn thành</Badge>
                                         : <Badge variant="secondary">Còn liệu trình</Badge>}
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell text-xs">
-                                    {namesFromAssignees(deal.assignees, userMap)}
+                                    {namesFromAssignees(row.assignees, userMap)}
                                 </TableCell>
                                 <TableCell className="text-right text-xs">
-                                    {deal.__dealDate ? new Date(deal.__dealDate).toLocaleDateString('vi-VN') : '—'}
+                                    {row.__dealDate ? new Date(row.__dealDate).toLocaleDateString('vi-VN') : '—'}
                                 </TableCell>
                             </TableRow>
                         ))}
@@ -125,7 +132,6 @@ const RecentDealsTable = ({ deals, userMap }) => (
 );
 
 const YearlyRevenueChart = ({ data }) => {
-    // Tự xử lý khi không có dữ liệu: tạo 1 cột năm hiện tại giá trị 0 và bước 1tr
     const values = Array.isArray(data?.datasets?.[0]?.data) ? data.datasets[0].data : [];
     const maxVal = values.length ? Math.max(...values.map(v => Number(v) || 0)) : 0;
     const noData = !values.length || maxVal === 0;
@@ -136,9 +142,7 @@ const YearlyRevenueChart = ({ data }) => {
         plugins: {
             legend: { display: false },
             title: { display: true, text: 'Biểu đồ Doanh thu theo Năm', font: { size: 18 } },
-            tooltip: {
-                callbacks: { label: ctx => fmtVND(ctx.parsed.y) }
-            }
+            tooltip: { callbacks: { label: ctx => fmtVND(ctx.parsed.y) } }
         },
         scales: {
             y: {
@@ -163,7 +167,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         return m;
     }, [users]);
 
-    /* ---------- Filter Range (đặt lên đầu) ---------- */
+    /* ---------- Filter Range ---------- */
     const [rangePreset, setRangePreset] = useState('last_30');
     const [startDate, setStartDate] = useState(() => toYMD(new Date(Date.now() - 7 * 86400000)));
     const [endDate, setEndDate] = useState(() => toYMD(new Date()));
@@ -186,29 +190,46 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         }
     }, [rangePreset, startDate, endDate]);
 
-    /* ---------- Bỏ dữ liệu cũ: chỉ lấy record có serviceDetails.approval ---------- */
-    const withApproval = useMemo(() => {
+    /* ---------- Chuẩn hoá dữ liệu: flatten serviceDetails[] -> rows ---------- */
+    const allRows = useMemo(() => {
         const list = Array.isArray(initialData) ? initialData : [];
-        return list.filter(c => c?.serviceDetails?.approval);
+        const rows = [];
+        for (const c of list) {
+            const details = Array.isArray(c.serviceDetails)
+                ? c.serviceDetails
+                : (c.serviceDetails ? [c.serviceDetails] : []);
+            for (const d of details) {
+                rows.push({
+                    customerId: c._id,
+                    name: c.name,
+                    phone: c.phone,
+                    assignees: c.assignees,
+                    tags: c.tags,
+                    care: c.care,
+                    detail: d, // subdoc
+                });
+            }
+        }
+        return rows;
     }, [initialData]);
 
     /* ---------- Pending & Approved ---------- */
     const pendingApprovals = useMemo(
-        () => withApproval.filter(c => c.serviceDetails.approval?.state === 'pending'),
-        [withApproval]
+        () => allRows.filter(r => r.detail?.approvalStatus === 'pending'),
+        [allRows]
     );
 
     const approvedDeals = useMemo(() => {
-        return withApproval
-            .filter(c => c.serviceDetails.approval?.state === 'approved')
-            .map(c => ({ ...c, __dealDate: resolveDealDate(c)?.toISOString() || null }))
-            .filter(c => c.__dealDate && new Date(c.__dealDate) >= rangeStart && new Date(c.__dealDate) <= rangeEnd);
-    }, [withApproval, rangeStart, rangeEnd]);
+        return allRows
+            .filter(r => r.detail?.approvalStatus === 'approved')
+            .map(r => ({ ...r, __dealDate: resolveDetailDate(r)?.toISOString() || null }))
+            .filter(r => r.__dealDate && new Date(r.__dealDate) >= rangeStart && new Date(r.__dealDate) <= rangeEnd);
+    }, [allRows, rangeStart, rangeEnd]);
 
     /* ---------- Stats ---------- */
     const stats = useMemo(() => {
         const totalDeals = approvedDeals.length;
-        const totalRevenueNum = approvedDeals.reduce((s, c) => s + (Number(c?.serviceDetails?.revenue) || 0), 0);
+        const totalRevenueNum = approvedDeals.reduce((s, r) => s + (Number(r?.detail?.revenue) || 0), 0);
         const avgRevenueNum = totalDeals ? totalRevenueNum / totalDeals : 0;
         return {
             totalDeals,
@@ -220,36 +241,36 @@ export default function DashboardClient({ initialData = [], users = [] }) {
     /* ---------- Top Commissions (đã duyệt) ---------- */
     const topCommissions = useMemo(() => {
         const map = new Map(); // userId -> totalAmount
-        for (const c of withApproval.filter(d => d.serviceDetails.approval?.state === 'approved')) {
-            const revBase = Number(c?.serviceDetails?.revenue || c?.serviceDetails?.pricing?.finalPrice || 0);
-            const arr = Array.isArray(c?.serviceDetails?.commissions) ? c.serviceDetails.commissions : [];
+        const approvedAll = allRows.filter(r => r.detail?.approvalStatus === 'approved');
+        for (const r of approvedAll) {
+            const revBase = Number(r?.detail?.revenue || r?.detail?.pricing?.finalPrice || 0);
+            const arr = Array.isArray(r?.detail?.commissions) ? r.detail.commissions : [];
             for (const it of arr) {
                 if (!it?.user) continue;
                 const amount = Number(it.amount) || ((Number(it.percent) || 0) / 100) * revBase;
-                const key = String(typeof it.user === 'object' && it.user?._id ? it.user._id : it.user);
+                const key = String((typeof it.user === 'object' && it.user?._id) ? it.user._id : it.user);
                 map.set(key, (map.get(key) || 0) + amount);
             }
         }
         const rows = Array.from(map.entries()).map(([user, total]) => ({ user, total }));
         rows.sort((a, b) => b.total - a.total);
         return rows.slice(0, 5);
-    }, [withApproval]);
+    }, [allRows]);
 
-    /* ---------- Yearly Revenue (LARGE CHART) ---------- */
+    /* ---------- Yearly Revenue (chart) ---------- */
     const yearlyChartData = useMemo(() => {
-        const approvedAll = withApproval.filter(c => c.serviceDetails.approval?.state === 'approved');
+        const approvedAll = allRows.filter(r => r.detail?.approvalStatus === 'approved');
         const byYear = new Map(); // year -> sum revenue
-        for (const c of approvedAll) {
-            const dt = resolveDealDate(c);
+        for (const r of approvedAll) {
+            const dt = resolveDetailDate(r);
             if (!dt) continue;
             const year = dt.getFullYear();
-            const rev = Number(c?.serviceDetails?.revenue) || 0;
+            const rev = Number(r?.detail?.revenue) || 0;
             byYear.set(year, (byYear.get(year) || 0) + rev);
         }
         let years = Array.from(byYear.keys()).sort((a, b) => a - b);
         let values = years.map(y => byYear.get(y));
 
-        // Fallback nếu không có dữ liệu
         if (years.length === 0) {
             const y = new Date().getFullYear();
             years = [y];
@@ -266,9 +287,9 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                 borderWidth: 1
             }]
         };
-    }, [withApproval]);
+    }, [allRows]);
 
-    /* ---------- Approve Popup (listPrice = revenue; hoa hồng 1 trong 2) ---------- */
+    /* ---------- Approve / Reject Popup ---------- */
     const [openApprove, setOpenApprove] = useState(false);
     const [selected, setSelected] = useState(null);
     const [form, setForm] = useState({
@@ -284,7 +305,8 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
     const openApproveFor = (row) => {
         setSelected(row);
-        const current = row?.serviceDetails || {};
+        const current = row?.detail || {};
+
         // Chuẩn hóa commissions
         const preparedCommissions = (current?.commissions?.length
             ? current.commissions
@@ -299,7 +321,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
         const revenueInit = current?.revenue ?? '';
         setForm({
-            listPrice: revenueInit,                 // ⬅️ Giá gốc = Doanh thu (approved)
+            listPrice: revenueInit,                 // Giá gốc = doanh thu (quy ước phê duyệt)
             discountType: current?.pricing?.discountType ?? 'none',
             discountValue: current?.pricing?.discountValue ?? '',
             revenue: revenueInit,
@@ -343,9 +365,10 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         }
 
         const fd = new FormData();
-        fd.append('customerId', selected._id);
+        fd.append('customerId', selected.customerId);
+        fd.append('serviceDetailId', selected.detail?._id); // ✅ truyền đúng id chi tiết
 
-        // Giá gốc luôn = doanh thu (approved)
+        // Giá gốc luôn = doanh thu
         const revenueNum = Number(form.revenue || 0) || 0;
         const listPriceAuto = revenueNum;
         fd.append('listPrice', String(listPriceAuto));
@@ -365,7 +388,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         fd.append('notes', form.notes || '');
 
         const res = await run(
-            approveServiceDealAction,
+            approveServiceDealAction,             // ✅ import đúng link, dùng action đã tương thích serviceDetailId
             [null, fd],
             {
                 successMessage: 'Duyệt đơn thành công.',
@@ -381,12 +404,14 @@ export default function DashboardClient({ initialData = [], users = [] }) {
     const submitReject = async () => {
         if (!selected) return;
         const reason = prompt('Lý do từ chối? (không bắt buộc)') || '';
+
         const fd = new FormData();
-        fd.append('customerId', selected._id);
+        fd.append('customerId', selected.customerId);
+        fd.append('serviceDetailId', selected.detail?._id); // ✅ phải truyền id chi tiết
         fd.append('reason', reason);
 
         const res = await run(
-            rejectServiceDealAction,
+            rejectServiceDealAction,             // ✅ import đúng link, dùng action đã tương thích serviceDetailId
             [null, fd],
             {
                 successMessage: 'Đã từ chối đơn.',
@@ -408,7 +433,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
     return (
         <div className="flex-1 space-y-6 py-4 pt-6 min-h-screen">
 
-            {/* ====== Filter Bar (đặt lên đầu) ====== */}
+            {/* ====== Filter Bar ====== */}
             <Card className="shadow-md">
                 <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -449,11 +474,11 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                 </CardContent>
             </Card>
 
-            {/* ====== Stats (4 ô) ====== */}
+            {/* ====== Stats ====== */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard title="Tổng Dịch vụ (đã duyệt)" value={stats.totalDeals} icon={ShoppingCart} description="Số đơn đã duyệt trong khoảng lọc" color="#16a34a" />
+                <StatCard title="Tổng Dịch vụ (đã duyệt)" value={stats.totalDeals} icon={ShoppingCart} description="Số đơn chi tiết đã duyệt trong khoảng lọc" color="#16a34a" />
                 <StatCard title="Tổng Doanh thu (đã duyệt)" value={stats.totalRevenue} icon={DollarSign} description="Không tính đơn chờ duyệt" color="#16a34a" />
-                <StatCard title="Doanh thu TB/DV" value={stats.avgRevenue} icon={UserCheck} description="Trung bình mỗi dịch vụ" color="#16a34a" />
+                <StatCard title="Doanh thu TB/DV" value={stats.avgRevenue} icon={UserCheck} description="Trung bình mỗi đơn đã duyệt" color="#16a34a" />
                 <StatCard title="Top Hoa hồng" value={topCommissions.length} icon={Percent} description="Số nhân sự hiện diện trong top" color="#f97316" />
             </div>
 
@@ -465,7 +490,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                             <LineChart className="w-5 h-5" />
                             Doanh thu theo năm
                         </CardTitle>
-                        <CardDescription>Tổng hợp các đơn <b>đã duyệt</b> (không phụ thuộc bộ lọc bên trên). Nếu chưa có dữ liệu, trục Y hiển thị bước 1&nbsp;triệu.</CardDescription>
+                        <CardDescription>Tổng hợp các đơn <b>đã duyệt</b>. Nếu chưa có dữ liệu, trục Y hiển thị bước 1&nbsp;triệu.</CardDescription>
                     </div>
                 </CardHeader>
                 <CardContent className="h-[480px]">
@@ -496,7 +521,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                                     <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có đơn cần duyệt</TableCell></TableRow>
                                 )}
                                 {pendingApprovals.map(row => (
-                                    <TableRow key={row._id}>
+                                    <TableRow key={row.detail?._id || `${row.customerId}-${row.name}`}>
                                         <TableCell className="font-medium">
                                             {row.name}
                                             <div className="text-xs text-muted-foreground">{row.phone}</div>
@@ -504,8 +529,8 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                                         <TableCell className="text-xs">
                                             {namesFromAssignees(row.assignees, userMap)}
                                         </TableCell>
-                                        <TableCell className="font-semibold">{fmtVND(row.serviceDetails?.revenue)}</TableCell>
-                                        <TableCell className="text-xs">{row.serviceDetails?.notes || '—'}</TableCell>
+                                        <TableCell className="font-semibold">{fmtVND(row.detail?.revenue)}</TableCell>
+                                        <TableCell className="text-xs">{row.detail?.notes || '—'}</TableCell>
                                         <TableCell className="text-right flex items-center justify-end gap-2">
                                             <Button size="sm" variant="outline" onClick={() => openDetailsFor(row)}><Eye className="w-4 h-4 mr-1" />Xem</Button>
                                             <Button size="sm" onClick={() => openApproveFor(row)}><Check className="w-4 h-4 mr-1" />Duyệt</Button>
@@ -522,7 +547,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="flex items-center"><PiggyBank className="mr-2 h-5 w-5" />Top nhân viên có hoa hồng cao</CardTitle>
-                    <CardDescription>Tính từ các đơn đã duyệt (dựa theo amount hoặc % * revenue).</CardDescription>
+                    <CardDescription>Tính từ các đơn chi tiết đã duyệt (dựa theo amount hoặc % * revenue).</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <Table>
@@ -546,9 +571,12 @@ export default function DashboardClient({ initialData = [], users = [] }) {
             </Card>
 
             {/* ====== Recent Deals (approved) ====== */}
-            <RecentDealsTable userMap={userMap} deals={[...approvedDeals].sort((a, b) => new Date(b.__dealDate) - new Date(a.__dealDate)).slice(0, 12)} />
+            <RecentDealsTable
+                userMap={userMap}
+                deals={[...approvedDeals].sort((a, b) => new Date(b.__dealDate) - new Date(a.__dealDate)).slice(0, 12)}
+            />
 
-            {/* ===== POPUP: DUYỆT (giá gốc = doanh thu; hoa hồng 1 trong 2) ===== */}
+            {/* ===== POPUP: DUYỆT ===== */}
             <Popup
                 open={openApprove}
                 onClose={() => setOpenApprove(false)}
@@ -576,7 +604,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                         </div>
                         <div>
                             <div className="text-xs text-muted-foreground">Ghi chú</div>
-                            <div className="text-sm truncate">{selected?.serviceDetails?.notes || '—'}</div>
+                            <div className="text-sm truncate">{selected?.detail?.notes || '—'}</div>
                         </div>
                     </div>
                 )}
@@ -587,12 +615,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div className="md:col-span-1">
                             <label className="block mb-1 text-sm">Giá gốc (listPrice)</label>
-                            {/* ReadOnly + luôn chạy theo revenue */}
-                            <Input
-                                value={form.listPrice}
-                                readOnly
-                                className="bg-muted/40"
-                            />
+                            <Input value={form.listPrice} readOnly className="bg-muted/40" />
                             <p className="text-[11px] text-muted-foreground mt-1">Tự động = Doanh thu (approved).</p>
                         </div>
                         <div className="md:col-span-1">
@@ -629,7 +652,6 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                                 value={form.revenue}
                                 onChange={e => {
                                     const v = e.target.value;
-                                    // ⬇️ Giá gốc luôn bằng doanh thu
                                     setForm(f => ({ ...f, revenue: v, listPrice: v }));
                                 }}
                             />
@@ -642,7 +664,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                     </div>
                 </section>
 
-                {/* 3) Hoa hồng (chỉ 1 cách nhập: % hoặc tiền) */}
+                {/* 3) Hoa hồng */}
                 <section className="mb-5 p-4 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                     <div className="flex items-center justify-between mb-3">
                         <h4 className="font-semibold">3) Hoa hồng</h4>
@@ -776,8 +798,8 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                                 </div>
                             </div>
                             <div>
-                                <div className="text-xs text-muted-foreground">Trạng thái nhập</div>
-                                <div className="text-sm">{detailsRow?.serviceDetails?.status || '—'}</div>
+                                <div className="text-xs text-muted-foreground">Trạng thái</div>
+                                <div className="text-sm">{detailsRow?.detail?.status || '—'}</div>
                             </div>
                         </div>
 
@@ -785,20 +807,20 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                                 <div className="text-xs text-muted-foreground mb-1">Ghi chú Sale</div>
-                                <div className="text-sm whitespace-pre-wrap">{detailsRow?.serviceDetails?.notes || '—'}</div>
+                                <div className="text-sm whitespace-pre-wrap">{detailsRow?.detail?.notes || '—'}</div>
                             </div>
                             <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                                 <div className="text-xs text-muted-foreground mb-1">Doanh thu Sale nhập</div>
-                                <div className="text-lg font-semibold text-green-600">{fmtVND(detailsRow?.serviceDetails?.revenue)}</div>
+                                <div className="text-lg font-semibold text-green-600">{fmtVND(detailsRow?.detail?.revenue)}</div>
                             </div>
                         </div>
 
-                        {/* Image Preview (invoice / hợp đồng) */}
+                        {/* Image Preview */}
                         <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                             <div className="text-xs text-muted-foreground mb-2">Hình ảnh đính kèm</div>
-                            {detailsRow?.serviceDetails?.invoiceDriveId ? (
+                            {detailsRow?.detail?.invoiceDriveId ? (
                                 <img
-                                    src={driveImage(detailsRow.serviceDetails.invoiceDriveId)}
+                                    src={driveImage(detailsRow.detail.invoiceDriveId)}
                                     alt="Invoice/Contract"
                                     className="w-full max-h-[420px] object-contain rounded-md border"
                                     style={{ borderColor: 'var(--border)' }}
@@ -818,7 +840,8 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                                         if (typeof t === 'string') return t.slice(-6);
                                         return 'DV';
                                     }).join(', ')
-                                    : (detailsRow?.serviceDetails?.service ? String(detailsRow.serviceDetails.service).slice(-6) : '—')}
+                                    : (detailsRow?.detail?.selectedService?.name
+                                        || (typeof detailsRow?.detail?.selectedService === 'string' ? detailsRow.detail.selectedService.slice(-6) : '—'))}
                             </div>
                         </div>
                     </div>
