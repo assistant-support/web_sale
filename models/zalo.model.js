@@ -22,6 +22,6 @@ const ZaloSchema = new Schema(
 );
 
 // Đổi tên model để nhất quán (thường import Zalo from '...')
-const Zalo = models.Zalo || model("Zalo", ZaloSchema);
+const Zalo = models.zalo || model("zalo", ZaloSchema);
 
 export default Zalo;

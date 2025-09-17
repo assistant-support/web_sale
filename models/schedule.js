@@ -27,7 +27,7 @@ const ScheduledJobSchema = new Schema(
         },
         zaloAccount: {
             type: Schema.Types.ObjectId,
-            ref: "zaloaccount",
+            ref: "zalo",
             required: true,
         },
 

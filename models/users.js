@@ -20,7 +20,7 @@ const postUser = new Schema({
     type: String,
   },
   zalo: {
-    type: Schema.Types.ObjectId, ref: 'zaloaccount'
+    type: Schema.Types.ObjectId, ref: 'zalo'
   },
   uid: {
     type: String,

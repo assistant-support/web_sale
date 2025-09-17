@@ -18,7 +18,7 @@ const logs = new Schema(
         createdAt: { type: Date, default: Date.now },
         createBy: { type: Schema.Types.ObjectId, ref: 'user', required: true },
         customer: { type: Schema.Types.ObjectId, ref: 'customer' },
-        zalo: { type: Schema.Types.ObjectId, ref: 'zaloaccount', required: true },
+        zalo: { type: Schema.Types.ObjectId, ref: 'zalo', required: true },
         schedule: { type: Schema.Types.ObjectId, ref: 'scheduledjob', default: null },
     },
     { timestamps: false, versionKey: false }
