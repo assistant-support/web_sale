@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 const GRAPH_VERSION = 'v19.0';
 const PAGE_ACCESS_TOKEN = 'EAAQhreP7u2QBPXkeSSaptdgsjE6o8h3YpLJX08QZCbTo3cl8ZCM7ZCSm1maAqITZAvrZCM5g09gEBjZBZAwgiJDl8K53vWAg2yNFcx77rl0ZCRIUG8zu7ZAEASQQDZBzIMlBbboURZCxKUuYyEYv0qIF8IegAcEZAFCqQhfixoxZB5ZAqEanZCtU7r71ZBqnZBB2BjSyOPjMc8ejbHvSp6wZDZD';
- 
+
 const WINDOW_SECONDS = 60;
 const CONVERSATION_LIMIT = 50;
 const MESSAGES_PER_CONVERSATION = 50;
@@ -41,27 +41,113 @@ function parseFbTimeToMs(s) {
 // ——— phone utils ———
 function normalizeVNPhone(digits) {
     if (!digits) return null;
+
+    // Loại bỏ tất cả ký tự không phải số và dấu +
     let cleaned = digits.replace(/[^\d+]/g, '');
-    if (/^\+?84\d{9,10}$/.test(cleaned)) cleaned = cleaned.replace(/^\+?84/, '0');
-    if (/^\d{9}$/.test(cleaned) && !cleaned.startsWith('0')) cleaned = '0' + cleaned;
-    if (/^0\d{9}$/.test(cleaned)) return cleaned;
-    if (/^0\d{10}$/.test(cleaned)) return cleaned; // nới lỏng
-    if (/^\d{9,11}$/.test(cleaned)) return cleaned; // fallback nới lỏng
+
+    // Xử lý các trường hợp đặc biệt
+    // 1. Số có mã quốc gia +84
+    if (/^\+?84\d{9,10}$/.test(cleaned)) {
+        cleaned = cleaned.replace(/^\+?84/, '0');
+    }
+
+    // 2. Số 9 chữ số không bắt đầu bằng 0 (thêm 0 vào đầu)
+    if (/^\d{9}$/.test(cleaned) && !cleaned.startsWith('0')) {
+        cleaned = '0' + cleaned;
+    }
+
+    // 3. Số 10 chữ số bắt đầu bằng 0 (format chuẩn VN)
+    if (/^0\d{9}$/.test(cleaned)) {
+        return cleaned;
+    }
+
+    // 4. Số 11 chữ số bắt đầu bằng 0 (một số trường hợp đặc biệt)
+    if (/^0\d{10}$/.test(cleaned)) {
+        return cleaned;
+    }
+
+    // 5. Số 10-11 chữ số không bắt đầu bằng 0 (có thể là số di động)
+    if (/^\d{10,11}$/.test(cleaned) && !cleaned.startsWith('0')) {
+        // Kiểm tra xem có phải số di động VN không
+        const firstDigit = cleaned.charAt(0);
+        if (['3', '5', '7', '8', '9'].includes(firstDigit)) {
+            return '0' + cleaned;
+        }
+    }
+
+    // 6. Fallback: chấp nhận số có 9-11 chữ số
+    if (/^\d{9,11}$/.test(cleaned)) {
+        return cleaned;
+    }
+
     return null;
 }
 function extractPhones(text) {
     if (typeof text !== 'string' || !text.trim()) return [];
     const out = new Set();
-    const re = /(?:\+?84|0)?(?:[\s.\-_]?\d){8,11}/g;
-    const matches = text.match(re) || [];
-    for (const raw of matches) {
-        const only = raw.replace(/[^\d+]/g, '');
-        const digitCount = (only.match(/\d/g) || []).length;
-        if (digitCount < 9 || digitCount > 11) continue;
-        const n = normalizeVNPhone(only);
-        if (n) out.add(n);
+
+    // Pattern 1: Số điện thoại có khoảng trắng, dấu gạch ngang, dấu chấm
+    // Ví dụ: "035 6421 460", "035-6421-460", "035.6421.460"
+    const pattern1 = /(?:\+?84|0)?[\s.\-_]*(?:\d[\s.\-_]*){8,10}\d/g;
+
+    // Pattern 2: Số điện thoại liền nhau
+    // Ví dụ: "0356421460", "0356421460"
+    const pattern2 = /(?:\+?84|0)?\d{9,11}/g;
+
+    // Pattern 3: Số điện thoại có chữ cái xen kẽ (như "laf035 6421   460")
+    // Tìm các chuỗi có ít nhất 9-11 chữ số với các ký tự khác xen kẽ
+    const pattern3 = /(?:\+?84|0)?[a-zA-Z\s.\-_]*(?:\d[a-zA-Z\s.\-_]*){8,10}\d[a-zA-Z\s.\-_]*/g;
+
+    // Pattern 4: Xử lý trường hợp có nhiều khoảng trắng liên tiếp
+    // Ví dụ: "035    6421    460" hoặc "035  6421  460"
+    const pattern4 = /(?:\+?84|0)?\s*(?:\d\s*){8,10}\d/g;
+
+    const allPatterns = [pattern1, pattern2, pattern3, pattern4];
+
+    for (const pattern of allPatterns) {
+        const matches = text.match(pattern) || [];
+        for (const raw of matches) {
+            // Loại bỏ tất cả ký tự không phải số và dấu +
+            const only = raw.replace(/[^\d+]/g, '');
+            const digitCount = (only.match(/\d/g) || []).length;
+
+            // Kiểm tra số lượng chữ số hợp lệ (9-11 chữ số)
+            if (digitCount < 9 || digitCount > 11) continue;
+
+            const n = normalizeVNPhone(only);
+            if (n) out.add(n);
+        }
     }
+
     return [...out];
+}
+
+// Hàm test để kiểm tra logic nhận diện số điện thoại
+// Để sử dụng: gọi testPhoneExtraction() trong console hoặc thêm vào đầu hàm GET()
+function testPhoneExtraction() {
+    const testCases = [
+        "số điện thoại laf035 6421   460",
+        "035 6421 460",
+        "035-6421-460",
+        "035.6421.460",
+        "0356421460",
+        "số của tôi là 035 6421 460 nhé",
+        "call me at 035 6421 460",
+        "+84 35 6421 460",
+        "84 35 6421 460",
+        "356421460",
+        "số điện thoại: 035 6421 460",
+        "liên hệ qua 035 6421 460",
+        "035 6421 460 - đây là số của tôi"
+    ];
+
+    console.log("=== TEST PHONE EXTRACTION ===");
+    testCases.forEach(testCase => {
+        const phones = extractPhones(testCase);
+        console.log(`Input: "${testCase}"`);
+        console.log(`Found phones: [${phones.join(', ')}]`);
+        console.log('---');
+    });
 }
 
 export async function GET() {
