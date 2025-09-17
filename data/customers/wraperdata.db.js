@@ -59,7 +59,7 @@ export async function closeServiceAction(prevState, formData) {
         return { success: false, error: 'Yêu cầu đăng nhập.' };
     }
     console.log('[closeServiceAction] formData:', formData);
-    
+
     const customerId = String(formData.get('customerId') || '');
     const subStatus = String(formData.get('status') || 'in_progress'); // 'completed' | 'in_progress' | 'new'
     const revenueRaw = formData.get('revenue');
@@ -126,8 +126,8 @@ export async function closeServiceAction(prevState, formData) {
             selectedService,                           // ObjectId dịch vụ
             // pricing/payments/... để mặc định, admin chỉnh/duyệt sau
         };
-        console.log(newServiceDetail,2);
-        
+        console.log(newServiceDetail, 2);
+
         customerDoc.serviceDetails.push(newServiceDetail);
 
         // 4) Cập nhật pipeline theo trạng thái

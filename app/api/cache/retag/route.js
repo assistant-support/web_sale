@@ -12,7 +12,7 @@ export async function POST(request) {
             return NextResponse.json({ message: 'Invalid secret token' }, { status: 401 });
         }
 
-        if (tag === 'customers') {
+        if (tag == 'customers') {
             await revalidateData();
         }
 
