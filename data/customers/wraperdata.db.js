@@ -92,8 +92,7 @@ export async function closeServiceAction(prevState, formData) {
         // 1) Upload ảnh (nếu có)
         let uploadedFile = null;
         if (invoiceImage && invoiceImage.size > 0) {
-            const folderId =
-                process.env.GOOGLE_DRIVE_INVOICE_FOLDER_ID || '1epl-LSIM-ZgrcOCk2PglkCRZwXOFnprb';
+            const folderId = '1wjg-eOTXIDhxc2ShNVN6AefdbKZmnH1h'
             uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
             if (!uploadedFile?.id) {
                 return { success: false, error: 'Tải ảnh lên không thành công. Vui lòng thử lại.' };
@@ -176,7 +175,7 @@ export async function saveCallResultAction(prevState, formData) {
         await connectDB();
 
         // SỬ DỤNG HÀM MỚI: Tải file ghi âm lên
-        const folderId = process.env.GOOGLE_DRIVE_RECORDING_FOLDER_ID; // Cần thêm biến này
+        const folderId = '1wjg-eOTXIDhxc2ShNVN6AefdbKZmnH1h'; // Cần thêm biến này
         const uploadedFile = await uploadFileToDrive(recordingFile, folderId);
 
         if (!uploadedFile?.id) {

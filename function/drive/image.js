@@ -31,6 +31,8 @@ async function setFilePermissionReader(drive, fileId) {
  * Trả về object chứa ID và link xem file, hoặc null nếu có lỗi.
  */
 export async function uploadFileToDrive(file, folderId) {
+    console.log(folderId);
+    
     if (!file || file.size === 0) {
         console.error("File không hợp lệ để tải lên.");
         return null;
