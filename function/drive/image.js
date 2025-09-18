@@ -32,7 +32,7 @@ async function setFilePermissionReader(drive, fileId) {
  */
 export async function uploadFileToDrive(file, folderId) {
     console.log(folderId);
-    
+
     if (!file || file.size === 0) {
         console.error("File không hợp lệ để tải lên.");
         return null;
@@ -40,7 +40,7 @@ export async function uploadFileToDrive(file, folderId) {
 
     try {
         const drive = await getDriveClient();
-        
+
         // Chuyển file buffer thành stream
         const fileBuffer = Buffer.from(await file.arrayBuffer());
         const readableStream = new Readable();
@@ -60,7 +60,8 @@ export async function uploadFileToDrive(file, folderId) {
         const response = await drive.files.create({
             requestBody: fileMetadata,
             media: media,
-            fields: 'id, webViewLink', // Lấy cả ID và link xem
+            fields: 'id, webViewLink',
+            supportsAllDrives: true
         });
 
         if (response.data?.id) {

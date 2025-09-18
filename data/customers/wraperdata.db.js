@@ -92,7 +92,7 @@ export async function closeServiceAction(prevState, formData) {
         // 1) Upload ảnh (nếu có)
         let uploadedFile = null;
         if (invoiceImage && invoiceImage.size > 0) {
-            const folderId = '1wjg-eOTXIDhxc2ShNVN6AefdbKZmnH1h'
+            const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm'
             uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
             if (!uploadedFile?.id) {
                 return { success: false, error: 'Tải ảnh lên không thành công. Vui lòng thử lại.' };
@@ -175,7 +175,7 @@ export async function saveCallResultAction(prevState, formData) {
         await connectDB();
 
         // SỬ DỤNG HÀM MỚI: Tải file ghi âm lên
-        const folderId = '1wjg-eOTXIDhxc2ShNVN6AefdbKZmnH1h'; // Cần thêm biến này
+        const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm'; // Cần thêm biến này
         const uploadedFile = await uploadFileToDrive(recordingFile, folderId);
 
         if (!uploadedFile?.id) {
@@ -297,8 +297,7 @@ export async function updateServiceDetailAction(prevState, formData) {
 
         // Upload lại invoice (nếu có file mới)
         if (invoiceImage && invoiceImage.size > 0) {
-            const folderId =
-                process.env.GOOGLE_DRIVE_INVOICE_FOLDER_ID || '1epl-LSIM-ZgrcOCk2PglkCRZwXOFnprb';
+            const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm';
             const uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
             if (!uploadedFile?.id)
                 return { success: false, error: 'Tải ảnh lên không thành công. Vui lòng thử lại.' };
