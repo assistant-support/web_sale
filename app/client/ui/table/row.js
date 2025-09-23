@@ -172,6 +172,7 @@ export default function CustomerRow({
                         noteState={noteState}
                         closeServiceAction={closeServiceActionFn}
                         closeState={closeState}
+                        currentUserId={user[0]?._id}
                     />
                 );
             case 'history':

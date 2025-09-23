@@ -12,9 +12,6 @@ import { unstable_cache as nextCache } from 'next/cache';
 export async function getRunningSchedulesAction() {
     try {
         const user = await checkAuthToken();
-        if (!user?.id || (!user.role.includes('Admin') && !user.role.includes('Sale'))) {
-            throw new Error("Không có quyền xem thông tin này.");
-        }
         const getSchedules = nextCache(async (currentUser) => {
             await connectToDatabase();
             const filter = {};

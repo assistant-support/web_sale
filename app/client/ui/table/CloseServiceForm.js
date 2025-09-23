@@ -1,249 +1,285 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
+import React, { useEffect, useRef } from 'react';
+import { FileImage, DollarSign, Percent, Tag, X, Plus } from 'lucide-react';
 
-// --- Icon Imports ---
-import {
-    Loader2, FileImage, DollarSign, Send, ShieldCheck
-} from 'lucide-react';
-
-// --- Action & Data Function Imports ---
-import { closeServiceAction } from '@/data/customers/wraperdata.db';
-
-// --- Hook thay cho sonner ---
-import { useActionFeedback as useAction } from '@/hooks/useAction';
-
-// --- Shadcn UI Component Imports ---
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormMessage, FormLabel } from '@/components/ui/form';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from '@/components/ui/badge';
 
-// =============================================================
-// == SCHEMA VALIDATION
-// =============================================================
-const closeServiceSchema = z.object({
-    status: z.enum(['completed', 'in_progress', 'rejected'], {
-        required_error: "Vui lòng chọn trạng thái chốt dịch vụ."
-    }),
-    revenue: z.string().optional(),
-    selectedService: z.string().optional(),
-    notes: z.string().optional(),
-    invoiceImage: z.any()
-}).superRefine((data, ctx) => {
-    // Ảnh hoá đơn bắt buộc nếu không phải rejected
-    if (data.status !== 'rejected' && (!data.invoiceImage || data.invoiceImage.length === 0)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['invoiceImage'],
-            message: "Ảnh hóa đơn/hợp đồng là bắt buộc khi chốt dịch vụ.",
-        });
-    }
-    // Dịch vụ chốt bắt buộc nếu không phải rejected
-    if (data.status !== 'rejected') {
-        if (!data.selectedService) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                path: ['selectedService'],
-                message: "Vui lòng chọn dịch vụ để chốt.",
-            });
-        } else if (!/^[0-9a-fA-F]{24}$/.test(data.selectedService)) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                path: ['selectedService'],
-                message: "Dịch vụ không hợp lệ.",
-            });
-        }
-    }
-});
+export default function CloseServiceForm({
+    form,
+    status,
+    services,
+    availableCourses,
+    listPrice,
+    finalRevenue,
+    discountType,
+    fileReg,                 // form.register('invoiceImage')
+    onImageChange,
+    existingImageUrls = [],
+    newImagePreviews = [],
+    onRemoveNewImage,
+    onSubmit,
+}) {
+    if (!form) return null;
 
-// =============================================================
-// == COMPONENT CHÍNH
-// =============================================================
-export default function CloseServiceCard({ customer, services = [] }) {
-    const [imagePreview, setImagePreview] = useState(null);
-    const { run, loading } = useAction(); // dùng hook overlay + toast DOM
+    const currencyVN = (n) => new Intl.NumberFormat('vi-VN').format(Number(n || 0));
 
-    const form = useForm({
-        resolver: zodResolver(closeServiceSchema),
-        defaultValues: {
-            status: 'completed',
-            revenue: '',
-            selectedService: '',
-            notes: '',
-            invoiceImage: null
-        },
-    });
-    const { isSubmitting } = form.formState;
-    const status = form.watch('status'); // để re-render bật/tắt select dịch vụ
+    // cập nhật cờ boolean cho Zod khi có ảnh cũ
+    useEffect(() => {
+        form.setValue('hasExistingInvoice', (existingImageUrls?.length ?? 0) > 0, { shouldValidate: true });
+    }, [existingImageUrls, form]);
 
-    const onSubmit = async (values) => {
-        const formData = new FormData();
-        formData.append('customerId', customer._id);
-        formData.append('status', values.status);
-        const cleanedRevenue = String(values.revenue ?? '')
-            .replace(/[^\d.-]/g, ''); // "1.500.000" -> "1500000"
-        formData.append('revenue', cleanedRevenue || '0');
-        formData.append('notes', values.notes || '');
-        if (values.selectedService) formData.append('selectedService', values.selectedService);
-        if (values.invoiceImage && values.invoiceImage.length > 0) {
-            formData.append('invoiceImage', values.invoiceImage[0]);
-        }
+    // input file ẩn + ref kép để click từ tile
+    const reg = fileReg || {};
+    const { ref: rhfRef = () => { }, name = 'invoiceImage', onBlur = () => { }, onChange: rhfOnChange } = reg;
+    const fileInputRef = useRef(null);
+    const attachRef = (el) => { fileInputRef.current = el; try { rhfRef(el); } catch (_) { } };
+    const openFileDialog = () => fileInputRef.current?.click();
 
-        await run(
-            closeServiceAction,
-            [null, formData],
-            {
-                successMessage: (res) => res?.message || 'Chốt dịch vụ thành công (chờ duyệt)!',
-                errorMessage: (res) => res?.error || 'Có lỗi xảy ra từ máy chủ.',
-                onSuccess: () => {
-                    form.reset();
-                    setImagePreview(null);
-                },
-            }
-        );
+    const handleFileChange = (e) => {
+        onImageChange?.(e);
+
+        // Cho phép chọn lại cùng file vẫn onChange
+        e.target.value = '';
     };
 
-    const fileRef = form.register('invoiceImage');
-
     return (
-        <Card className="shadow-lg">
-            <CardHeader>
-                <CardTitle className="flex items-center">
-                    <ShieldCheck className="mr-2 h-5 w-5 text-green-600" />
-                    <h4>Chốt Dịch Vụ & Lưu Trữ</h4>
-                </CardTitle>
-                <CardDescription>
-                    Xác nhận trạng thái cuối, doanh thu và tải lên hóa đơn/hợp đồng. Đơn sẽ chuyển sang <b>chờ duyệt</b>.
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        {/* Trạng thái Dịch vụ */}
-                        <FormField control={form.control} name="status" render={({ field }) => (
-                            <FormItem className="space-y-3">
-                                <FormLabel>Trạng thái cuối *</FormLabel>
-                                <FormControl>
-                                    <RadioGroup
-                                        onValueChange={field.onChange}
-                                        defaultValue={field.value}
-                                        className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4"
-                                    >
-                                        <FormItem className="flex items-center space-x-2">
-                                            <FormControl><RadioGroupItem value="completed" /></FormControl>
-                                            <FormLabel className="font-normal">Hoàn thành</FormLabel>
-                                        </FormItem>
-                                        <FormItem className="flex items-center space-x-2">
-                                            <FormControl><RadioGroupItem value="in_progress" /></FormControl>
-                                            <FormLabel className="font-normal">Còn liệu trình</FormLabel>
-                                        </FormItem>
-                                        <FormItem className="flex items-center space-x-2">
-                                            <FormControl><RadioGroupItem value="rejected" /></FormControl>
-                                            <FormLabel className="font-normal">Từ chối sau khám</FormLabel>
-                                        </FormItem>
-                                    </RadioGroup>
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
+        <Form {...form}>
+            <form
+                id="close-service-form"
+                className="space-y-6"
+                onSubmit={form.handleSubmit(onSubmit)}
+            >
+                {/* Hidden boolean cho zod (z.coerce.boolean) */}
+                <input type="hidden" {...form.register('hasExistingInvoice')} />
 
-                        {/* Dịch vụ chốt */}
-                        <FormField control={form.control} name="selectedService" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Dịch vụ chốt *</FormLabel>
-                                <FormControl>
-                                    <select
-                                        {...field}
-                                        className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                        disabled={status === 'rejected'}
-                                    >
-                                        <option value="">-- Chọn dịch vụ --</option>
-                                        {services.map((s) => (
-                                            <option key={s._id} value={s._id}>{s.name}</option>
-                                        ))}
-                                    </select>
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
+                {/* -------- Trạng thái cuối -------- */}
+                <FormField control={form.control} name="status" render={({ field }) => (
+                    <FormItem className="space-y-3">
+                        <FormLabel>Trạng thái cuối *</FormLabel>
+                        <FormControl>
+                            <RadioGroup
+                                onValueChange={field.onChange}
+                                value={field.value ?? 'completed'}
+                                className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4"
+                            >
+                                <FormItem className="flex items-center space-x-2">
+                                    <FormControl><RadioGroupItem value="completed" /></FormControl>
+                                    <FormLabel className="font-normal">Hoàn thành</FormLabel>
+                                </FormItem>
+                                <FormItem className="flex items-center space-x-2">
+                                    <FormControl><RadioGroupItem value="in_progress" /></FormControl>
+                                    <FormLabel className="font-normal">Còn liệu trình</FormLabel>
+                                </FormItem>
+                                <FormItem className="flex items-center space-x-2">
+                                    <FormControl><RadioGroupItem value="rejected" /></FormControl>
+                                    <FormLabel className="font-normal">Từ chối sau khám</FormLabel>
+                                </FormItem>
+                            </RadioGroup>
+                        </FormControl>
+                        <FormMessage />
+                    </FormItem>
+                )} />
 
-                        {/* Doanh thu */}
-                        <FormField control={form.control} name="revenue" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="flex items-center">
-                                    <DollarSign className="mr-1 h-4 w-4" /> Doanh thu (VND)
-                                </FormLabel>
-                                <FormControl>
-                                    <Input type="number" placeholder="0" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
+                {/* -------- Dịch vụ -------- */}
+                <FormField control={form.control} name="selectedService" render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Dịch vụ chốt *</FormLabel>
+                        <Select
+                            onValueChange={(val) => field.onChange(String(val))}
+                            value={field.value ? String(field.value) : undefined}
+                            disabled={status === 'rejected'}
+                        >
+                            <FormControl>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="-- Chọn dịch vụ --" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                {services?.map((s) => (
+                                    <SelectItem key={s._id} value={String(s._id)}>{s.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <FormMessage />
+                    </FormItem>
+                )} />
 
-                        {/* Ghi chú */}
-                        <FormField control={form.control} name="notes" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Ghi chú</FormLabel>
-                                <FormControl>
-                                    <Textarea placeholder="Ghi chú thêm về hợp đồng, thanh toán..." {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
+                {/* Liệu trình thực hiện */}
+                <FormField control={form.control} name="selectedCourseName" render={({ field }) => {
+                    console.log(field);
 
-                        {/* Tải ảnh */}
-                        <FormField control={form.control} name="invoiceImage" render={() => (
+                    return (
+                        <FormItem>
+                            <FormLabel>Liệu trình thực hiện *</FormLabel>
+                            <Select
+                                onValueChange={(val) => field.onChange(String(val))}
+                                value={field.value ? String(field.value) : undefined}
+                                disabled={status === 'rejected' || !form.getValues('selectedService') || (availableCourses?.length || 0) === 0}
+                            >
+                                <FormControl>
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="-- Chọn liệu trình --" />
+                                    </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                    {availableCourses?.map((c, idx) => (
+                                        <SelectItem key={`${c.name}-${idx}`} value={String(c.name)}>{c.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                    )
+                }} />
+
+                {/* -------- Giá & giảm giá -------- */}
+                <div className="space-y-3">
+                    <FormLabel>Giá &amp; Giảm giá</FormLabel>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 border rounded-md bg-muted/50 mt-3">
+                        <FormItem>
+                            <FormLabel className="text-xs">Giá gốc (VND)</FormLabel>
+                            <div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground">
+                                {currencyVN(listPrice)}
+                            </div>
+                        </FormItem>
+
+                        <FormField control={form.control} name="discountValue" render={({ field }) => (
                             <FormItem>
-                                <FormLabel className="flex items-center">
-                                    <FileImage className="mr-1 h-4 w-4" /> Ảnh minh chứng (Hóa đơn/Hợp đồng)
-                                </FormLabel>
+                                <FormLabel className="text-xs">Giá trị giảm</FormLabel>
                                 <FormControl>
                                     <Input
-                                        type="file"
-                                        accept="image/*"
-                                        {...fileRef}
+                                        type="text"
+                                        value={field.value ?? '0'}
                                         onChange={(e) => {
-                                            fileRef.onChange(e);
-                                            if (e.target.files && e.target.files[0]) {
-                                                setImagePreview(URL.createObjectURL(e.target.files[0]));
-                                            } else {
-                                                setImagePreview(null);
-                                            }
+                                            const digits = e.target.value.replace(/\D/g, '');
+                                            field.onChange(currencyVN(digits));
                                         }}
+                                        disabled={status === 'rejected' || (form.getValues('discountType') ?? 'none') === 'none'}
                                     />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>
                         )} />
 
-                        {/* Xem trước ảnh */}
-                        {imagePreview && (
-                            <img
-                                src={imagePreview}
-                                alt="Xem trước ảnh"
-                                className="mt-2 rounded-md max-h-40 w-auto border p-1"
-                            />
-                        )}
+                        <FormField control={form.control} name="discountType" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel className="text-xs">Đơn vị giảm</FormLabel>
+                                <FormControl>
+                                    <Select onValueChange={field.onChange} value={field.value ?? 'none'} disabled={status === 'rejected'}>
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Loại" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none"><Tag className="w-4 h-4 mr-2 inline-block" />Không</SelectItem>
+                                            <SelectItem value="amount"><DollarSign className="w-4 h-4 mr-2 inline-block" />VND</SelectItem>
+                                            <SelectItem value="percent"><Percent className="w-4 h-4 mr-2 inline-block" />%</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
 
-                        {/* Nút Submit */}
-                        <Button
-                            type="submit"
-                            className="w-full bg-green-600 hover:bg-green-700"
-                            disabled={isSubmitting || loading}
-                        >
-                            {(isSubmitting || loading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            <Send className="mr-2 h-4 w-4" />
-                            Xác nhận & Hoàn tất
-                        </Button>
-                    </form>
-                </Form>
-            </CardContent>
-        </Card>
+                        <FormItem>
+                            <FormLabel className="text-xs font-semibold">Thành tiền (VND)</FormLabel>
+                            <div className="flex h-10 w-full items-center rounded-md border border-input px-3 py-2 text-sm">
+                                {currencyVN(finalRevenue)}
+                            </div>
+                        </FormItem>
+                    </div>
+                </div>
+
+                {/* -------- Ghi chú -------- */}
+                <FormField control={form.control} name="notes" render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Ghi chú</FormLabel>
+                        <FormControl>
+                            <Textarea
+                                placeholder="Ghi chú thêm về hợp đồng, thanh toán..."
+                                value={field.value ?? ''}
+                                onChange={field.onChange}
+                                onBlur={field.onBlur}
+                            />
+                        </FormControl>
+                        <FormMessage />
+                    </FormItem>
+                )} />
+
+                {/* -------- Upload ảnh (gộp 1 chỗ) -------- */}
+                <FormField control={form.control} name="invoiceImage" render={() => (
+                    <FormItem>
+                        <FormLabel className="flex items-center">
+                            <FileImage className="mr-1 h-4 w-4" />
+                            Ảnh minh chứng (Hóa đơn/Hợp đồng)
+                            {form.getValues('_id') && form.getValues('hasExistingInvoice')
+                                ? ' (đang có ảnh đã lưu, có thể thêm ảnh mới)'
+                                : ' *'}
+                        </FormLabel>
+
+                        {/* input file ẩn */}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            name={name}
+                            onBlur={onBlur}
+                            ref={attachRef}
+                            onChange={handleFileChange}
+                            className="hidden"
+                        />
+
+                        {/* grid preview + tile Thêm ảnh */}
+                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-2">
+                            <button
+                                type="button"
+                                onClick={openFileDialog}
+                                className="aspect-square border-2 border-dashed rounded-md flex flex-col items-center justify-center text-sm hover:bg-muted/40"
+                                aria-label="Thêm ảnh"
+                            >
+                                <Plus className="w-6 h-6 mb-1" />
+                                Thêm ảnh
+                            </button>
+
+                            {/* Ảnh đã lưu (khi sửa) */}
+                            {existingImageUrls.map((url, index) => {
+                                console.log(url);
+
+                                return (
+                                    <div key={`existing-${index}`} className="relative aspect-square">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={url} alt={`Ảnh đã lưu ${index + 1}`} className="h-full w-full object-cover rounded-md border" />
+                                        <Badge variant="secondary" className="absolute top-1 left-1 text-xs">Đã lưu</Badge>
+                                    </div>
+                                )
+                            })}
+
+                            {/* Ảnh mới chọn */}
+                            {newImagePreviews.map((preview, index) => (
+                                <div key={`new-${index}`} className="relative aspect-square">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={preview.url} alt={`Xem trước ảnh ${index + 1}`} className="h-full w-full object-cover rounded-md border" />
+                                    <button
+                                        type="button"
+                                        onClick={() => onRemoveNewImage(index)}
+                                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                        aria-label="Xóa ảnh này"
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <FormMessage />
+                    </FormItem>
+                )} />
+            </form>
+        </Form>
     );
 }

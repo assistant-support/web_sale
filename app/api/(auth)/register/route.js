@@ -5,8 +5,12 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
 import PostUser from '@/models/users'; // Đảm bảo bạn import đúng model users
 import { reloadUser } from '@/data/actions/reload';
+import checkAuthToken from '@/utils/checktoken';
 
 export async function POST(req) {
+    const user = await checkAuthToken();
+    if (!user.role.includes('Admin') || !user.role.includes('Manager')) return jsonRes(403, { error: 'Bạn không có quyền thực hiện hành động này' });
+
     try {
         await connectDB();
         const {

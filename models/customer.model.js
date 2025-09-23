@@ -1,3 +1,4 @@
+// models/customers.model.js
 import { Schema, model, models } from 'mongoose';
 
 /* ====================== Sub-schemas cho serviceDetails ====================== */
@@ -32,6 +33,22 @@ const CommissionSchema = new Schema(
     { _id: false }
 );
 
+/**
+ * Sub-schema để lưu trữ bản sao của liệu trình đã chọn.
+ * Giúp dữ liệu không bị ảnh hưởng nếu liệu trình gốc trong model Service bị thay đổi.
+ */
+const SelectedCourseSchema = new Schema({
+    name: { type: String, required: true },
+    description: { type: String },
+    costs: {
+        basePrice: { type: Number, default: 0 },
+        fullMedication: { type: Number, default: 0 },
+        partialMedication: { type: Number, default: 0 },
+        otherFees: { type: Number, default: 0 },
+    }
+}, { _id: false });
+
+
 /** Mỗi phần tử trong mảng serviceDetails là 1 “đơn chốt / lịch chốt” */
 const ServiceDetailSchema = new Schema(
     {
@@ -41,12 +58,16 @@ const ServiceDetailSchema = new Schema(
         approvedAt: { type: Date },
 
         // Ghi chú & xử lý chung của đơn
-        status: { type: String, enum: ['new', 'in_progress', 'completed'], default: 'new' },
+        status: { type: String, enum: ['new', 'in_progress', 'completed', 'rejected'], default: 'new' },
         notes: { type: String, trim: true },
 
-        // Dịch vụ liên quan
+        // Dịch vụ và Liệu trình liên quan
         interestedServices: { type: [{ type: Schema.Types.ObjectId, ref: 'service' }], default: [] },
         selectedService: { type: Schema.Types.ObjectId, ref: 'service' },
+
+        // --- TRƯỜNG MỚI ---
+        // Lưu lại thông tin chi tiết của liệu trình đã chọn tại thời điểm chốt
+        selectedCourse: { type: SelectedCourseSchema },
 
         // Giá/giảm giá/chốt
         pricing: {
@@ -70,7 +91,7 @@ const ServiceDetailSchema = new Schema(
         // Thông tin kết sổ/invoice & doanh thu ghi nhận
         closedAt: { type: Date },
         closedBy: { type: Schema.Types.ObjectId, ref: 'user' },
-        invoiceDriveId: { type: String },
+        invoiceDriveIds: { type: [String], default: [] },
         revenue: { type: Number, default: 0, min: 0 },
     },
     { _id: true, versionKey: false }
@@ -99,9 +120,6 @@ ServiceDetailSchema.methods.recalcMoney = function () {
 
     const fp = Number(this?.pricing?.finalPrice || 0);
     this.outstandingAmount = Math.max(0, fp - paid);
-
-    // ❌ Không được auto-override revenue ở đây
-    // this.revenue = this.amountReceivedTotal;
 };
 
 ServiceDetailSchema.pre('validate', function (next) {
@@ -156,52 +174,25 @@ const FormSchema = new Schema(
         pipelineStatus: {
             type: [String],
             enum: [
-                'new_unconfirmed_1',
-                'missing_info_1',
-                'not_valid_1',
-                'msg_success_2',
-                'msg_error_2',
-                'duplicate_merged_1',
-                'rejected_immediate_1',
-                'valid_1',
-                'noikhoa_3',
-                'ngoaikhoa_3',
-                'undetermined_3',
-                'consulted_pending_4',
-                'scheduled_unconfirmed_4',
-                'callback_4',
-                'not_interested_4',
-                'no_contact_4',
-                'confirmed_5',
-                'postponed_5',
-                'canceled_5',
-                'serviced_completed_6',
-                'serviced_in_progress_6',
-                'rejected_after_consult_6',
+                'new_unconfirmed_1', 'missing_info_1', 'not_valid_1', 'msg_success_2', 'msg_error_2',
+                'duplicate_merged_1', 'rejected_immediate_1', 'valid_1', 'noikhoa_3', 'ngoaikhoa_3',
+                'undetermined_3', 'consulted_pending_4', 'scheduled_unconfirmed_4', 'callback_4',
+                'not_interested_4', 'no_contact_4', 'confirmed_5', 'postponed_5', 'canceled_5',
+                'serviced_completed_6', 'serviced_in_progress_6', 'rejected_after_consult_6',
             ],
-            // ✔ Kiểu là mảng => để mặc định là [] (bạn set .0/.6 trong actions)
             default: [],
         },
 
         zaloPhase: { type: String, enum: ['welcome', 'nurturing', 'pre_surgery', 'post_surgery', 'longterm'], default: null },
-
         tags: { type: [{ type: Schema.Types.ObjectId, ref: 'service' }], default: [] },
-
-        roles: {
-            type: [{ type: Schema.Types.ObjectId, ref: 'user', required: true }],
-            default: [],
-        },
-
+        roles: { type: [{ type: Schema.Types.ObjectId, ref: 'user', required: true }], default: [] },
         workflowTemplates: { type: [Schema.Types.ObjectId], ref: 'workflowtemplate', default: [] },
-
         assignee: { type: Schema.Types.ObjectId, ref: 'user', default: null },
         assignedBy: { type: Schema.Types.ObjectId, ref: 'user', default: null },
         assignedAt: { type: Date, default: null },
         isAutoAssigned: { type: Boolean, default: false },
 
-        /* ====================== CHỈ SỬA FIELD NÀY ====================== */
         serviceDetails: { type: [ServiceDetailSchema], default: [] },
-        /* =============================================================== */
     },
     { timestamps: false, versionKey: false }
 );

@@ -1,3 +1,4 @@
+// app/components/services/ServicesTable.client.jsx
 'use client';
 
 import { useMemo, useRef, useState, useEffect } from 'react';
@@ -15,18 +16,31 @@ import {
     ToggleRight,
     Users,
     CheckCircle2,
-    ChevronDown,
+    Package,
+    DollarSign,
 } from 'lucide-react';
 import Popup from '@/components/ui/popup';
 import ServiceEditorForm from './ServiceEditorForm.client';
+import CustomSelect from '@/components/ui/CustomSelect.client';
 import { useActionFeedback } from '@/hooks/useAction';
+
+// Helper để định dạng tiền tệ
+function formatCurrency(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '0 đ';
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value);
+}
+
+const TYPE_FILTER_ITEMS = [
+    { value: 'all', label: 'Tất cả loại' },
+    { value: 'noi_khoa', label: 'Nội khoa' },
+    { value: 'ngoai_khoa', label: 'Ngoại khoa' },
+];
 
 export default function ServicesTable({ initialData, actions }) {
     const { createService, updateService, setServiceActive, reloadServices } = actions;
 
     const [q, setQ] = useState('');
-    const [typeFilter, setTypeFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
-
+    const [typeFilter, setTypeFilter] = useState('all');
     const [openCreate, setOpenCreate] = useState(false);
     const [editing, setEditing] = useState(null);
 
@@ -70,9 +84,8 @@ export default function ServicesTable({ initialData, actions }) {
             {type === 'noi_khoa' ? <Pill className="w-3.5 h-3.5" /> : <Scissors className="w-3.5 h-3.5" />}
             {type === 'noi_khoa' ? 'Nội khoa' : 'Ngoại khoa'}
         </span>
-    ); 
+    );
 
-    // build cover URL từ Drive id hoặc giữ nguyên nếu là http(s)/data:
     const coverUrlOf = (cover) => {
         if (!cover) return null;
         if (typeof cover === 'string' && (cover.startsWith('http') || cover.startsWith('data:'))) return cover;
@@ -100,8 +113,8 @@ export default function ServicesTable({ initialData, actions }) {
                     />
                 </div>
 
-                {/* Type filter đặt giữa input & nút Thêm */}
-                <TypeSelect value={typeFilter} onChange={setTypeFilter} />
+                {/* Type filter */}
+                <CustomSelect value={typeFilter} onChange={setTypeFilter} items={TYPE_FILTER_ITEMS} />
 
                 <button
                     onClick={() => setOpenCreate(true)}
@@ -113,57 +126,112 @@ export default function ServicesTable({ initialData, actions }) {
                 </button>
             </div>
 
-            {/* “Bảng” dạng card — mỗi dòng là một card ngang: content trái, actions giữa, banner phải */}
+            {/* “Bảng” dạng card */}
             <div className="mt-2 space-y-4 flex-1 scroll p-1">
                 {data.map((svc) => {
                     const interest = svc.stats?.interest ?? 0;
                     const completed = svc.stats?.completed ?? 0;
                     const reviews = svc.stats?.reviews ?? 0;
+                    const courseCount = svc.treatmentCourses?.length || 0;
+                    // const totalBasePrice = (svc.treatmentCourses || []).reduce(
+                    //     (sum, course) => sum + (course.costs?.basePrice || 0),
+                    //     0,
+                    // );
+                    const totalBasePrice = (svc.treatmentCourses || []).reduce((totalSum, course) => {
+                        // 1. Lấy ra tất cả các giá trị số từ object 'costs' của liệu trình hiện tại.
+                        // Ví dụ: { basePrice: 100, otherFees: 20 } sẽ trở thành [100, 20]
+                        const allPricesForCourse = Object.values(course.costs || {});
 
+                        // 2. Tính tổng tất cả chi phí cho liệu trình này.
+                        const courseTotal = allPricesForCourse.reduce((courseSum, price) => courseSum + (price || 0), 0);
+
+                        // 3. Cộng tổng của liệu trình vào tổng chung.
+                        return totalSum + courseTotal;
+                    }, 0);
                     const coverUrl = coverUrlOf(svc.cover);
 
                     return (
                         <article
                             key={svc._id}
-                            className="rounded-[6px] border bg-[var(--bg-primary)] text-[var(--text)] hover:ring-2 transition-shadow"
+                            className="overflow-hidden rounded-[6px] border bg-[var(--bg-primary)] text-[var(--text)] hover:ring-2 transition-shadow"
                             style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--ring)' }}
                         >
-                            {/* Grid row: md = content(1fr) | actions(auto) | banner(260px) */}
-                            <div className="grid grid-cols-1 md:[grid-template-columns:1fr_auto_260px]">
+                            <div className="grid grid-cols-1 md:[grid-template-columns:1fr_260px]">
                                 {/* Content (left) */}
                                 <div className="p-4 md:p-5 flex flex-col justify-between">
                                     <div>
-                                        <p className="text-[18px] font-semibold leading-tight">{svc.name}</p>
-                                        <h5 className="mt-1 text-sm text-[var(--muted)] line-clamp-2">
-                                            {svc.description || '—'}
-                                        </h5>
+                                        <div className="text-[18px] font-semibold leading-tight flex gap-2">
+                                            <p className='text-sm'>{svc.name}</p>
+                                            <p className="inline-flex items-center gap-2 text-sm">
+                                                <TypePill type={svc.type} />
+                                            </p>
+                                        </div>
+                                        <h5 className="mt-1 text-sm text-[var(--muted)] line-clamp-2">{svc.description || '—'}</h5>
                                     </div>
+                                    {/* Actions (middle) */}
 
                                     {/* Meta row */}
-                                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                        <div className="inline-flex items-center gap-2 text-sm">
-                                            <TypePill type={svc.type} />
-                                        </div>
 
-                                        <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
-                                            <Users className="w-4 h-4" />
-                                            <span className="font-medium">{interest}</span>
-                                            <span>quan tâm</span>
-                                        </div>
+                                    <div className="hidden md:flex items-center justify-start pt-4 gap-16">
+                                        <div
+                                            className="inline-flex items-stretch rounded-[8px] border overflow-hidden bg-[var(--surface-2)]"
+                                            style={{ borderColor: 'var(--border)' }}
+                                        >
+                                            <button
+                                                onClick={() => setEditing(svc)}
+                                                className="px-3 py-2 text-xs font-medium hover:bg-[var(--primary-50)] border-r"
+                                                style={{ borderColor: 'var(--border)' }}
+                                                title="Sửa"
+                                            >
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <Pencil className="w-3.5 h-3.5" /> Sửa
+                                                </span>
+                                            </button>
 
-                                        <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
-                                            <CheckCircle2 className="w-4 h-4" />
-                                            <span className="font-medium">{completed}</span>
-                                            <span>đã chốt</span>
+                                            <button
+                                                onClick={() => toggleActive(svc)}
+                                                className={`px-3 py-2 text-xs font-medium hover:opacity-90 ${svc.isActive ? 'text-[var(--danger-700)]' : 'text-[var(--success-600)]'
+                                                    }`}
+                                                title={svc.isActive ? 'Tắt dịch vụ' : 'Bật dịch vụ'}
+                                            >
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    {svc.isActive ? (
+                                                        <ToggleRight className="w-4 h-4" />
+                                                    ) : (
+                                                        <ToggleLeft className="w-4 h-4" />
+                                                    )}
+                                                    {svc.isActive ? 'Tắt' : 'Bật'}
+                                                </span>
+                                            </button>
                                         </div>
+                                        <div className="flex-1 grid gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5">
 
-                                        <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
-                                            <Star className="w-4 h-4" />
-                                            <span className="font-medium">{reviews}</span>
-                                            <span>đánh giá</span>
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                                <Package className="w-4 h-4" />
+                                                <span className="font-medium">{courseCount}</span>
+                                                <span>liệu trình</span>
+                                            </div>
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                                <DollarSign className="w-4 h-4" />
+                                                <span className="font-medium">{formatCurrency(totalBasePrice)}</span>
+                                            </div>
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                                <Users className="w-4 h-4" />
+                                                <span className="font-medium">{interest}</span>
+                                                <span>quan tâm</span>
+                                            </div>
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                <span className="font-medium">{completed}</span>
+                                                <span>đã chốt</span>
+                                            </div>
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                                <Star className="w-4 h-4" />
+                                                <span className="font-medium">{reviews}</span>
+                                                <span>đánh giá</span>
+                                            </div>
                                         </div>
                                     </div>
-
                                     {/* Status (mobile) */}
                                     <div className="mt-3 md:hidden">
                                         {svc.isActive ? (
@@ -178,44 +246,11 @@ export default function ServicesTable({ initialData, actions }) {
                                     </div>
                                 </div>
 
-                                {/* Actions (middle) — nhóm nút đẹp hơn */}
-                                <div className="hidden md:flex items-end justify-end p-4 md:p-5">
-                                    <div
-                                        className="inline-flex items-stretch rounded-[8px] border overflow-hidden bg-[var(--surface-2)]"
-                                        style={{ borderColor: 'var(--border)' }}
-                                    >
-                                        <button
-                                            onClick={() => setEditing(svc)}
-                                            className="px-3 py-2 text-xs font-medium hover:bg-[var(--primary-50)] border-r"
-                                            style={{ borderColor: 'var(--border)' }}
-                                            title="Sửa"
-                                        >
-                                            <span className="inline-flex items-center gap-1.5">
-                                                <Pencil className="w-3.5 h-3.5" /> Sửa
-                                            </span>
-                                        </button>
 
-                                        <button
-                                            onClick={() => toggleActive(svc)}
-                                            className={`px-3 py-2 text-xs font-medium hover:opacity-90
-                        ${svc.isActive ? 'text-[var(--danger-700)]' : 'text-[var(--success-600)]'}`}
-                                            title={svc.isActive ? 'Tắt dịch vụ' : 'Bật dịch vụ'}
-                                        >
-                                            <span className="inline-flex items-center gap-1.5">
-                                                {svc.isActive ? (
-                                                    <ToggleRight className="w-4 h-4" />
-                                                ) : (
-                                                    <ToggleLeft className="w-4 h-4" />
-                                                )}
-                                                {svc.isActive ? 'Tắt' : 'Bật'}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
 
                                 {/* Banner (right) */}
-                                <div className="relative md:rounded-r-[6px] overflow-hidden bg-[var(--surface-2)] m-2">
-                                    <div className="aspect-[16/9]">
+                                <div className="relative md:rounded-r-[6px] overflow-hidden bg-[var(--surface-2)] m-2 md:m-0 md:ml-auto w-auto">
+                                    <div className="aspect-[16/9] h-full">
                                         {coverUrl ? (
                                             <img
                                                 src={coverUrl}
@@ -253,11 +288,12 @@ export default function ServicesTable({ initialData, actions }) {
                 )}
             </div>
 
-            {/* Create */}
+            {/* Create Popup */}
             <Popup
                 open={openCreate}
                 onClose={() => setOpenCreate(false)}
                 header="Thêm dịch vụ"
+                widthClass="max-w-3xl"
                 footer={
                     <button
                         form="service-editor-form"
@@ -282,11 +318,12 @@ export default function ServicesTable({ initialData, actions }) {
                 />
             </Popup>
 
-            {/* Edit */}
+            {/* Edit Popup */}
             <Popup
                 open={!!editing}
                 onClose={() => setEditing(null)}
                 header="Sửa dịch vụ"
+                widthClass="max-w-3xl"
                 footer={
                     <button
                         form="service-editor-form"
@@ -313,83 +350,6 @@ export default function ServicesTable({ initialData, actions }) {
                     />
                 )}
             </Popup>
-        </div>
-    );
-}
-
-/* =======================
-   Custom Select (Type)
-   ======================= */
-function TypeSelect({ value, onChange }) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-    const items = [
-        { value: 'all', label: 'Tất cả loại' },
-        { value: 'noi_khoa', label: 'Nội khoa' },
-        { value: 'ngoai_khoa', label: 'Ngoại khoa' },
-    ];
-    const current = items.find((i) => i.value === value) || items[0];
-
-    // close on outside / escape
-    useEffect(() => {
-        const onClick = (e) => {
-            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-        };
-        const onKey = (e) => {
-            if (e.key === 'Escape') setOpen(false);
-        };
-        window.addEventListener('mousedown', onClick);
-        window.addEventListener('keydown', onKey);
-        return () => {
-            window.removeEventListener('mousedown', onClick);
-            window.removeEventListener('keydown', onKey);
-        };
-    }, []);
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={open}
-                onClick={() => setOpen((v) => !v)}
-                className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
-                style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-            >
-                <h5>{current.label}</h5>
-                <ChevronDown fill='var(--text-primary)' className={` w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Dropdown với hiệu ứng trượt */}
-            <div
-                className={`
-          absolute left-0 mt-2 w-[200px] rounded-[6px] border bg-[var(--bg-primary)] shadow-lg overflow-hidden
-          transition-all duration-150 ease-out origin-top
-          ${open ? 'opacity-100 translate-y-0 scale-y-100 max-h-60' : 'opacity-0 -translate-y-1 scale-y-95 pointer-events-none max-h-0'}
-        `}
-                style={{ borderColor: 'var(--border)' }}
-                role="listbox"
-            >
-                {items.map((it) => {
-                    const active = it.value === value;
-                    return (
-                        <button
-                            key={it.value}
-                            role="option"
-                            aria-selected={active}
-                            onClick={() => {
-                                onChange?.(it.value);
-                                setOpen(false);
-                            }}
-                            className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer
-                 ${active ? 'bg-[var(--primary-100)]' : 'hover:bg-[var(--primary-50)]'}
-              `}
-                        >
-                            {it.label}
-                        </button>
-                    );
-                })}
-            </div>
         </div>
     );
 }

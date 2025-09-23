@@ -64,8 +64,8 @@ export default function Nav({ data }) {
     // Định nghĩa các quyền và danh sách `href` tương ứng
     const rolePermissions = {
       'Sale': ['/client', '/calendar'],
-      'Marketing': ['/workflow', '/service'],
-      'Sale Admin': ['/client', '/admin', '/calendar'],
+      'Docter': [],
+      'Admin Sale': ['/user', '/client', '/admin', '/calendar'],
     };
     // Nếu là Manager hoặc Admin thì trả về tất cả các mục
     if (userRole === 'Manager' || userRole === 'Admin') {

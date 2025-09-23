@@ -19,7 +19,7 @@ export default async function RootLayout({ children }) {
     const nav = <Nav data={user} />
     return (
         <div className={air.layout}>
-            {user.role.includes('Admin') ?
+            {user.role.includes('Admin') || user.role.includes('Manager') || user.role.includes('Admin Sale') ?
                 <>
                     {nav}
                     <div className={air.main}>

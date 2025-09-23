@@ -28,139 +28,72 @@ import { useActionFeedback } from '@/hooks/useAction';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-/* ================== Helpers ================== */
-const fmtVND = (n = 0) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
-const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
-const startOfWeek = (d) => { const x = startOfDay(d); const day = (x.getDay() + 6) % 7; x.setDate(x.getDate() - day); return x; };
-const endOfWeek = (d) => { const x = startOfWeek(d); x.setDate(x.getDate() + 6); return endOfDay(x); };
-const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
-const endOfMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0));
-const getQuarter = (d) => Math.floor(d.getMonth() / 3) + 1;
-const startOfQuarter = (d) => new Date(d.getFullYear(), (getQuarter(d) - 1) * 3, 1);
-const endOfQuarter = (d) => endOfDay(new Date(d.getFullYear(), (getQuarter(d) - 1) * 3 + 3, 0));
-const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
-const endOfYear = (d) => endOfDay(new Date(d.getFullYear(), 11, 31));
-const toYMD = (d) => { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; };
-
-// Lấy ngày “đơn chốt” cho 1 hàng chi tiết
-const resolveDetailDate = (row) => {
-    const d = row?.detail || {};
-    if (d.approvedAt) return new Date(d.approvedAt);
-    if (d.closedAt) return new Date(d.closedAt);
-    // fallback từ care logs (bước 6)
-    const logs = Array.isArray(row?.care) ? row.care : [];
-    const step6 = logs
-        .filter(n => n?.step === 6 || String(n?.content || '').includes('[Chốt dịch vụ]'))
-        .sort((a, b) => new Date(b.createAt) - new Date(a.createAt))[0];
-    return step6?.createAt ? new Date(step6.createAt) : null;
-};
-
-const nameFromUserId = (id, userMap) => {
-    if (!id) return '—';
-    const found = userMap.get(String(id));
-    return found?.name || (typeof id === 'string' ? `User (${id.slice(-6)})` : 'NV');
-};
-
-const namesFromAssignees = (assignees = [], userMap) => {
-    if (!Array.isArray(assignees) || assignees.length === 0) return '—';
-    return assignees.map(a => {
-        const u = a?.user;
-        if (!u) return 'NV';
-        if (typeof u === 'object' && u?._id) return u?.name || nameFromUserId(u._id, userMap);
-        return nameFromUserId(u, userMap);
-    }).join(', ');
-};
-
-/* ================== Sub Components ================== */
-const StatCard = ({ title, value, icon: Icon, description, color }) => (
-    <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border-l-4" style={{ borderLeftColor: color }}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{title}</CardTitle>
-            <Icon className="h-5 w-5 text-muted-foreground" style={{ color }} />
-        </CardHeader>
-        <CardContent>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="text-xs text-muted-foreground">{description}</p>
-        </CardContent>
-    </Card>
-);
-
-const RecentDealsTable = ({ deals, userMap }) => (
-    <Card className="shadow-lg col-span-1 lg:col-span-2">
-        <CardHeader>
-            <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Dịch vụ chốt (đã duyệt) gần đây</CardTitle>
-            <CardDescription>Chỉ hiển thị các ĐƠN CHI TIẾT đã duyệt.</CardDescription>
-        </CardHeader>
-        <CardContent>
-            <div className="max-h-[400px] overflow-y-auto">
-                <Table>
-                    <TableHeader className="sticky top-0 bg-secondary">
-                        <TableRow>
-                            <TableHead>Khách hàng</TableHead>
-                            <TableHead>Doanh thu</TableHead>
-                            <TableHead className="hidden md:table-cell">Trạng thái</TableHead>
-                            <TableHead className="hidden md:table-cell">Sale</TableHead>
-                            <TableHead className="text-right">Ngày chốt</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {deals.map(row => (
-                            <TableRow key={row.detail?._id || `${row.customerId}-${row.__dealDate || ''}`}>
-                                <TableCell className="font-medium">{row.name}</TableCell>
-                                <TableCell className="font-semibold text-green-600">
-                                    {fmtVND(row.detail?.revenue)}
-                                </TableCell>
-                                <TableCell className="hidden md:table-cell">
-                                    {row.detail?.status === 'completed'
-                                        ? <Badge>Hoàn thành</Badge>
-                                        : <Badge variant="secondary">Còn liệu trình</Badge>}
-                                </TableCell>
-                                <TableCell className="hidden md:table-cell text-xs">
-                                    {namesFromAssignees(row.assignees, userMap)}
-                                </TableCell>
-                                <TableCell className="text-right text-xs">
-                                    {row.__dealDate ? new Date(row.__dealDate).toLocaleDateString('vi-VN') : '—'}
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </div>
-        </CardContent>
-    </Card>
-);
-
-const YearlyRevenueChart = ({ data }) => {
-    const values = Array.isArray(data?.datasets?.[0]?.data) ? data.datasets[0].data : [];
-    const maxVal = values.length ? Math.max(...values.map(v => Number(v) || 0)) : 0;
-    const noData = !values.length || maxVal === 0;
-
-    const options = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            title: { display: true, text: 'Biểu đồ Doanh thu theo Năm', font: { size: 18 } },
-            tooltip: { callbacks: { label: ctx => fmtVND(ctx.parsed.y) } }
-        },
-        scales: {
-            y: {
-                suggestedMin: 0,
-                suggestedMax: noData ? 1_000_000 : undefined,
-                ticks: {
-                    stepSize: noData ? 1_000_000 : undefined,
-                    callback: (v) => (v / 1_000_000) + 'tr'
-                }
-            }
-        }
-    };
-    return <Bar data={data} options={options} />;
-};
-
-/* ================== Main ================== */
+/* ================== Component ================== */
 export default function DashboardClient({ initialData = [], users = [] }) {
-    /* ---------- User map (id -> user) ---------- */
+    /* ===== Helpers đặt TRONG component như yêu cầu ===== */
+    const { openDetails, setOpenDetails, detailsRow, setDetailsRow } = useDetailsState();
+    const fmtVND = (n = 0) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
+
+    const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+    const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+    const startOfWeek = (d) => { const x = startOfDay(d); const day = (x.getDay() + 6) % 7; x.setDate(x.getDate() - day); return x; };
+    const endOfWeek = (d) => { const x = startOfWeek(d); x.setDate(x.getDate() + 6); return endOfDay(x); };
+    const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+    const endOfMonth = (d) => endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    const getQuarter = (d) => Math.floor(d.getMonth() / 3) + 1;
+    const startOfQuarter = (d) => new Date(d.getFullYear(), (getQuarter(d) - 1) * 3, 1);
+    const endOfQuarter = (d) => endOfDay(new Date(d.getFullYear(), (getQuarter(d) - 1) * 3 + 3, 0));
+    const startOfYear = (d) => new Date(d.getFullYear(), 0, 1);
+    const endOfYear = (d) => endOfDay(new Date(d.getFullYear(), 11, 31));
+    const toYMD = (d) => { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0"); return `${y}-${m}-${day}`; };
+
+    // Đọc pricing an toàn
+    const readPricing = (detail = {}) => {
+        const p = detail?.pricing || {};
+        const discountType = ['none', 'amount', 'percent'].includes(p.discountType) ? p.discountType : 'none';
+        return {
+            listPrice: Number(p.listPrice) || 0,
+            discountType,
+            discountValue: Number(p.discountValue) || 0,
+            finalPrice: Number(p.finalPrice) || 0,
+        };
+    };
+
+    const discountLabel = ({ discountType, discountValue }) => {
+        if (discountType === 'amount') return fmtVND(discountValue);
+        if (discountType === 'percent') return `${discountValue}%`;
+        return '0';
+    };
+
+    // Lấy “ngày đơn” để lọc/thống kê
+    const resolveDetailDate = (row) => {
+        const d = row?.detail || {};
+        if (d.approvedAt) return new Date(d.approvedAt);
+        if (d.closedAt) return new Date(d.closedAt);
+        const logs = Array.isArray(row?.care) ? row.care : [];
+        const step6 = logs
+            .filter(n => n?.step === 6 || String(n?.content || '').includes('[Chốt dịch vụ]'))
+            .sort((a, b) => new Date(b.createAt) - new Date(a.createAt))[0];
+        return step6?.createAt ? new Date(step6.createAt) : null;
+    };
+
+    const nameFromUserId = (id, userMap) => {
+        if (!id) return '—';
+        const found = userMap.get(String(id));
+        return found?.name || (typeof id === 'string' ? `User (${id.slice(-6)})` : 'NV');
+    };
+
+    const namesFromAssignees = (assignees = [], userMap) => {
+        if (!Array.isArray(assignees) || assignees.length === 0) return '—';
+        return assignees.map(a => {
+            const u = a?.user;
+            if (!u) return 'NV';
+            if (typeof u === 'object' && u?._id) return u?.name || nameFromUserId(u._id, userMap);
+            return nameFromUserId(u, userMap);
+        }).join(', ');
+    };
+
+    /* ---------- User map ---------- */
     const userMap = useMemo(() => {
         const m = new Map();
         for (const u of Array.isArray(users) ? users : []) m.set(String(u._id), u);
@@ -190,7 +123,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         }
     }, [rangePreset, startDate, endDate]);
 
-    /* ---------- Chuẩn hoá dữ liệu: flatten serviceDetails[] -> rows ---------- */
+    /* ---------- Chuẩn hoá dữ liệu ---------- */
     const allRows = useMemo(() => {
         const list = Array.isArray(initialData) ? initialData : [];
         const rows = [];
@@ -206,7 +139,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                     assignees: c.assignees,
                     tags: c.tags,
                     care: c.care,
-                    detail: d, // subdoc
+                    detail: d,
                 });
             }
         }
@@ -303,31 +236,32 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
     const { run } = useActionFeedback();
 
+    // ✅ NẠP GIÁ ĐÚNG TỪ pricing hiện có (không ép = revenue)
     const openApproveFor = (row) => {
         setSelected(row);
-        const current = row?.detail || {};
+        const d = row?.detail || {};
+        const p = readPricing(d);
 
-        // Chuẩn hóa commissions
-        const preparedCommissions = (current?.commissions?.length
-            ? current.commissions
+        const preparedCommissions = (d?.commissions?.length
+            ? d.commissions
             : [{ user: (row.assignees?.[0]?.user?._id || row.assignees?.[0]?.user || ''), role: 'sale', percent: '', amount: '' }]
         ).map(x => {
             const uid = String((typeof x.user === 'object' && x.user?._id) ? x.user._id : x.user || '');
-            const pct = x.percent ?? '';
-            const amt = x.amount ?? '';
-            const mode = Number(amt) > 0 ? 'amount' : 'percent';
+            const amt = Number(x.amount) || 0;
+            const pct = Number(x.percent) || 0;
+            const mode = amt > 0 ? 'amount' : 'percent';
             return { user: uid, role: x.role || 'sale', mode, percent: mode === 'percent' ? pct : '', amount: mode === 'amount' ? amt : '' };
         });
 
-        const revenueInit = current?.revenue ?? '';
         setForm({
-            listPrice: revenueInit,                 // Giá gốc = doanh thu (quy ước phê duyệt)
-            discountType: current?.pricing?.discountType ?? 'none',
-            discountValue: current?.pricing?.discountValue ?? '',
-            revenue: revenueInit,
+            listPrice: p.listPrice || d.revenue || '',
+            discountType: p.discountType || 'none',
+            discountValue: p.discountValue || '',
+            revenue: d.revenue ?? p.finalPrice ?? p.listPrice ?? '',
             commissions: preparedCommissions.length ? preparedCommissions : [{ user: '', role: 'sale', mode: 'percent', percent: '', amount: '' }],
-            notes: current?.notes || ''
+            notes: d.notes || ''
         });
+
         setOpenApprove(true);
     };
 
@@ -366,16 +300,16 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
         const fd = new FormData();
         fd.append('customerId', selected.customerId);
-        fd.append('serviceDetailId', selected.detail?._id); // ✅ truyền đúng id chi tiết
+        fd.append('serviceDetailId', selected.detail?._id);
 
-        // Giá gốc luôn = doanh thu
-        const revenueNum = Number(form.revenue || 0) || 0;
-        const listPriceAuto = revenueNum;
-        fd.append('listPrice', String(listPriceAuto));
-
+        // ✅ GIỮ nguyên listPrice người duyệt thấy/chỉnh
+        fd.append('listPrice', String(Number(form.listPrice) || 0));
         fd.append('discountType', form.discountType || 'none');
-        fd.append('discountValue', String(form.discountValue || 0));
+        fd.append('discountValue', String(Number(form.discountValue) || 0));
         fd.append('finalPrice', String(calcFinalPrice()));
+
+        // Doanh thu ghi nhận (approved)
+        const revenueNum = Number(form.revenue || 0) || 0;
         fd.append('revenue', String(revenueNum));
 
         const cleanCommissions = form.commissions.map(x => ({
@@ -388,7 +322,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         fd.append('notes', form.notes || '');
 
         const res = await run(
-            approveServiceDealAction,             // ✅ import đúng link, dùng action đã tương thích serviceDetailId
+            approveServiceDealAction,
             [null, fd],
             {
                 successMessage: 'Duyệt đơn thành công.',
@@ -407,11 +341,11 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
         const fd = new FormData();
         fd.append('customerId', selected.customerId);
-        fd.append('serviceDetailId', selected.detail?._id); // ✅ phải truyền id chi tiết
+        fd.append('serviceDetailId', selected.detail?._id);
         fd.append('reason', reason);
 
         const res = await run(
-            rejectServiceDealAction,             // ✅ import đúng link, dùng action đã tương thích serviceDetailId
+            rejectServiceDealAction,
             [null, fd],
             {
                 successMessage: 'Đã từ chối đơn.',
@@ -424,10 +358,94 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         if (res?.success) setOpenApprove(false);
     };
 
-    /* ---------- DETAILS POPUP ---------- */
-    const [openDetails, setOpenDetails] = useState(false);
-    const [detailsRow, setDetailsRow] = useState(null);
-    const openDetailsFor = (row) => { setDetailsRow(row); setOpenDetails(true); };
+    /* ---------- Sub components (dùng helpers ở trên) ---------- */
+    const StatCard = ({ title, value, icon: Icon, description, color }) => (
+        <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border-l-4" style={{ borderLeftColor: color }}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{title}</CardTitle>
+                <Icon className="h-5 w-5 text-muted-foreground" style={{ color }} />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">{value}</div>
+                <p className="text-xs text-muted-foreground">{description}</p>
+            </CardContent>
+        </Card>
+    );
+
+    const RecentDealsTable = ({ deals, userMap }) => (
+        <Card className="shadow-lg col-span-1 lg:col-span-2">
+            <CardHeader>
+                <CardTitle className="flex items-center"><History className="mr-2 h-5 w-5" />Dịch vụ chốt (đã duyệt) gần đây</CardTitle>
+                <CardDescription>Chỉ hiển thị các ĐƠN CHI TIẾT đã duyệt.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="max-h-[400px] overflow-y-auto">
+                    <Table>
+                        <TableHeader className="sticky top-0 bg-secondary">
+                            <TableRow>
+                                <TableHead>Khách hàng</TableHead>
+                                <TableHead>Doanh thu</TableHead>
+                                <TableHead className="hidden md:table-cell">Trạng thái</TableHead>
+                                <TableHead className="hidden md:table-cell">Sale</TableHead>
+                                <TableHead className="text-right">Ngày chốt</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {deals.map(row => (
+                                <TableRow key={row.detail?._id || `${row.customerId}-${row.__dealDate || ''}`}>
+                                    <TableCell className="font-medium">{row.name}</TableCell>
+                                    <TableCell className="font-semibold text-green-600">
+                                        {fmtVND(row.detail?.revenue)}
+                                        <div className="text-[11px] text-muted-foreground">
+                                            (Final: {fmtVND(readPricing(row.detail).finalPrice)})
+                                        </div>
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                        {row.detail?.status === 'completed'
+                                            ? <Badge>Hoàn thành</Badge>
+                                            : <Badge variant="secondary">Còn liệu trình</Badge>}
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell text-xs">
+                                        {namesFromAssignees(row.assignees, userMap)}
+                                    </TableCell>
+                                    <TableCell className="text-right text-xs">
+                                        {row.__dealDate ? new Date(row.__dealDate).toLocaleDateString('vi-VN') : '—'}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </CardContent>
+        </Card>
+    );
+
+    const YearlyRevenueChart = ({ data }) => {
+        const values = Array.isArray(data?.datasets?.[0]?.data) ? data.datasets[0].data : [];
+        const maxVal = values.length ? Math.max(...values.map(v => Number(v) || 0)) : 0;
+        const noData = !values.length || maxVal === 0;
+
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                title: { display: true, text: 'Biểu đồ Doanh thu theo Năm', font: { size: 18 } },
+                tooltip: { callbacks: { label: ctx => fmtVND(ctx.parsed.y) } }
+            },
+            scales: {
+                y: {
+                    suggestedMin: 0,
+                    suggestedMax: noData ? 1_000_000 : undefined,
+                    ticks: {
+                        stepSize: noData ? 1_000_000 : undefined,
+                        callback: (v) => (v / 1_000_000) + 'tr'
+                    }
+                }
+            }
+        };
+        return <Bar data={data} options={options} />;
+    };
 
     /* ---------- UI ---------- */
     return (
@@ -510,33 +528,39 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                             <TableHeader className="sticky top-0 bg-secondary">
                                 <TableRow>
                                     <TableHead>Khách hàng</TableHead>
-                                    <TableHead>Sale liên quan</TableHead>
-                                    <TableHead>Doanh thu (Sale nhập)</TableHead>
+                                    <TableHead>Giá & Doanh thu</TableHead>
                                     <TableHead>Ghi chú</TableHead>
                                     <TableHead className="text-right">Thao tác</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {pendingApprovals.length === 0 && (
-                                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có đơn cần duyệt</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Không có đơn cần duyệt</TableCell></TableRow>
                                 )}
-                                {pendingApprovals.map(row => (
-                                    <TableRow key={row.detail?._id || `${row.customerId}-${row.name}`}>
-                                        <TableCell className="font-medium">
-                                            {row.name}
-                                            <div className="text-xs text-muted-foreground">{row.phone}</div>
-                                        </TableCell>
-                                        <TableCell className="text-xs">
-                                            {namesFromAssignees(row.assignees, userMap)}
-                                        </TableCell>
-                                        <TableCell className="font-semibold">{fmtVND(row.detail?.revenue)}</TableCell>
-                                        <TableCell className="text-xs">{row.detail?.notes || '—'}</TableCell>
-                                        <TableCell className="text-right flex items-center justify-end gap-2">
-                                            <Button size="sm" variant="outline" onClick={() => openDetailsFor(row)}><Eye className="w-4 h-4 mr-1" />Xem</Button>
-                                            <Button size="sm" onClick={() => openApproveFor(row)}><Check className="w-4 h-4 mr-1" />Duyệt</Button>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
+                                {pendingApprovals.map(row => {
+                                    const p = readPricing(row.detail);
+                                    return (
+                                        <TableRow key={row.detail?._id || `${row.customerId}-${row.name}`}>
+                                            <TableCell className="font-medium">
+                                                {row.name}
+                                                <div className="text-xs text-muted-foreground">{row.phone}</div>
+                                            </TableCell>
+                                            <TableCell className="font-semibold">
+                                                <div className="leading-tight">
+                                                    <div>Giá gốc: <b>{fmtVND(p.listPrice)}</b></div>
+                                                    <div className="text-[12px] text-muted-foreground">
+                                                        Giảm: {discountLabel(p)} → Final: <b>{fmtVND(p.finalPrice)}</b>
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-xs">{row.detail?.notes || '—'}</TableCell>
+                                            <TableCell className="text-right flex items-center justify-end gap-2">
+                                                <Button size="sm" variant="outline" onClick={() => setOpenDetails(true) || setDetailsRow(row)}><Eye className="w-4 h-4 mr-1" />Xem</Button>
+                                                <Button size="sm" onClick={() => openApproveFor(row)}><Check className="w-4 h-4 mr-1" />Duyệt</Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })}
                             </TableBody>
                         </Table>
                     </div>
@@ -615,15 +639,18 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                         <div className="md:col-span-1">
                             <label className="block mb-1 text-sm">Giá gốc (listPrice)</label>
-                            <Input value={form.listPrice} readOnly className="bg-muted/40" />
-                            <p className="text-[11px] text-muted-foreground mt-1">Tự động = Doanh thu (approved).</p>
+                            <Input
+                                type="number"
+                                value={form.listPrice}
+                                onChange={e => setForm(f => ({ ...f, listPrice: e.target.value }))}
+                            />
                         </div>
                         <div className="md:col-span-1">
                             <label className="block mb-1 text-sm">Kiểu giảm</label>
                             <select
                                 className="w-full border rounded px-3 py-2 text-sm"
                                 value={form.discountType}
-                                onChange={e => setForm(f => ({ ...f, discountType: e.target.value }))}
+                                onChange={(e) => setForm(f => ({ ...f, discountType: e.target.value }))}
                             >
                                 <option value="none">Không</option>
                                 <option value="amount">Theo tiền</option>
@@ -643,22 +670,9 @@ export default function DashboardClient({ initialData = [], users = [] }) {
 
                 {/* 2) Doanh thu */}
                 <section className="mb-5 p-4 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
-                    <h4 className="font-semibold mb-3">2) Doanh thu & Ghi chú</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <h4 className="font-semibold mb-3">2) Ghi chú</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
                         <div>
-                            <label className="block mb-1 text-sm">Doanh thu (approved)</label>
-                            <Input
-                                type="number"
-                                value={form.revenue}
-                                onChange={e => {
-                                    const v = e.target.value;
-                                    setForm(f => ({ ...f, revenue: v, listPrice: v }));
-                                }}
-                            />
-                            <p className="text-xs text-muted-foreground mt-1">Tổng tiền thu cuối cùng ghi nhận. Giá gốc sẽ tự bằng giá trị này.</p>
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-sm">Ghi chú</label>
                             <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                         </div>
                     </div>
@@ -774,7 +788,7 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                 </section>
             </Popup>
 
-            {/* ===== POPUP: XEM CHI TIẾT HỒ SƠ ===== */}
+            {/* ===== POPUP: XEM CHI TIẾT ===== */}
             <Popup
                 open={openDetails}
                 onClose={() => setOpenDetails(false)}
@@ -804,45 +818,47 @@ export default function DashboardClient({ initialData = [], users = [] }) {
                         </div>
 
                         {/* Notes & Revenue */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
                             <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                                 <div className="text-xs text-muted-foreground mb-1">Ghi chú Sale</div>
                                 <div className="text-sm whitespace-pre-wrap">{detailsRow?.detail?.notes || '—'}</div>
                             </div>
-                            <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
-                                <div className="text-xs text-muted-foreground mb-1">Doanh thu Sale nhập</div>
-                                <div className="text-lg font-semibold text-green-600">{fmtVND(detailsRow?.detail?.revenue)}</div>
-                            </div>
                         </div>
 
-                        {/* Image Preview */}
+                        {/* Image Preview — hiển thị mảng invoiceDriveIds */}
                         <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
                             <div className="text-xs text-muted-foreground mb-2">Hình ảnh đính kèm</div>
-                            {detailsRow?.detail?.invoiceDriveId ? (
-                                <img
-                                    src={driveImage(detailsRow.detail.invoiceDriveId)}
-                                    alt="Invoice/Contract"
-                                    className="w-full max-h-[420px] object-contain rounded-md border"
-                                    style={{ borderColor: 'var(--border)' }}
-                                />
+                            {Array.isArray(detailsRow?.detail?.invoiceDriveIds) && detailsRow.detail.invoiceDriveIds.length > 0 ? (
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    {detailsRow.detail.invoiceDriveIds.map((id, i) => (
+                                        <img
+                                            key={id || i}
+                                            src={driveImage(id)}
+                                            alt={`Invoice ${i + 1}`}
+                                            className="w-full max-h-[240px] object-cover rounded-md border"
+                                            style={{ borderColor: 'var(--border)' }}
+                                        />
+                                    ))}
+                                </div>
                             ) : (
                                 <div className="text-sm text-muted-foreground">Chưa có hình ảnh</div>
                             )}
                         </div>
 
-                        {/* Dịch vụ / Tags */}
+                        {/* Giá & Giảm giá (tóm tắt) */}
                         <div className="p-3 rounded-[8px] border" style={{ borderColor: 'var(--border)' }}>
-                            <div className="text-xs text-muted-foreground mb-1">Dịch vụ / Tags</div>
-                            <div className="text-sm">
-                                {Array.isArray(detailsRow?.tags) && detailsRow.tags.length > 0
-                                    ? detailsRow.tags.map(t => {
-                                        if (typeof t === 'object' && t?.name) return t.name;
-                                        if (typeof t === 'string') return t.slice(-6);
-                                        return 'DV';
-                                    }).join(', ')
-                                    : (detailsRow?.detail?.selectedService?.name
-                                        || (typeof detailsRow?.detail?.selectedService === 'string' ? detailsRow.detail.selectedService.slice(-6) : '—'))}
-                            </div>
+                            <div className="text-xs text-muted-foreground mb-2">Giá & Giảm giá</div>
+                            {(() => {
+                                const p = readPricing(detailsRow?.detail);
+                                return (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                        <div>Giá gốc: <b>{fmtVND(p.listPrice)}</b></div>
+                                        <div>Giảm: <b>{discountLabel(p)}</b></div>
+                                        <div>Final: <b>{fmtVND(p.finalPrice)}</b></div>
+                                        <div className="md:col-span-3">Doanh thu ghi nhận: <b className="text-green-600">{fmtVND(detailsRow?.detail?.revenue)}</b></div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 )}
@@ -850,3 +866,11 @@ export default function DashboardClient({ initialData = [], users = [] }) {
         </div>
     );
 }
+
+/* ===== local state dành cho popup “Xem” ===== */
+function useDetailsState() {
+    const [openDetails, setOpenDetails] = useState(false);
+    const [detailsRow, setDetailsRow] = useState(null);
+    return { openDetails, setOpenDetails, detailsRow, setDetailsRow };
+}
+// dùng: const {openDetails, setOpenDetails, detailsRow, setDetailsRow} = useDetailsState();

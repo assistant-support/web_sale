@@ -3,7 +3,7 @@
 import { revalidateTag } from 'next/cache';
 import mongoose from 'mongoose';
 import Customer from '@/models/customer.model';
-// THAY ĐỔI: Import hàm upload file chung từ file action trên Canvas
+import Service from '@/models/services.model';
 import { uploadFileToDrive } from '@/function/drive/image';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
@@ -47,110 +47,151 @@ export async function reloadCustomers() {
 
 /* ============================================================
  * ACTION CHO BƯỚC 6 - CHỐT DỊCH VỤ (Chờ duyệt)
- * Yêu cầu:
- * - Lưu vào mảng serviceDetails (PUSH item mới) với approvalStatus='pending'
- * - Cho phép sửa/xóa khi còn pending
- * - Không cho sửa/xóa khi đã approved
  * ============================================================ */
 export async function closeServiceAction(prevState, formData) {
-    const session = await checkAuthToken();
+    console.log(formData, 2);
 
+    const session = await checkAuthToken();
     if (!session?.id) {
         return { success: false, error: 'Yêu cầu đăng nhập.' };
     }
-    console.log('[closeServiceAction] formData:', formData);
 
+    // 1. Lấy dữ liệu từ FormData
     const customerId = String(formData.get('customerId') || '');
-    const subStatus = String(formData.get('status') || 'in_progress'); // 'completed' | 'in_progress' | 'new'
-    const revenueRaw = formData.get('revenue');
-    // Parse mạnh tay: loại bỏ mọi ký tự không phải số, dấu chấm hoặc dấu âm
-    const revenueNum = Number(String(revenueRaw ?? '').replace(/[^\d.-]/g, ''));
+    const status = String(formData.get('status') || 'completed');
     const notes = String(formData.get('notes') || '');
-    const invoiceImage = formData.get('invoiceImage');
-    const selectedService = String(formData.get('selectedService') || '');
+    const invoiceImages = formData.getAll('invoiceImage');
+    const selectedServiceId = String(formData.get('selectedService') || '');
+    const selectedCourseName = String(formData.get('selectedCourseName') || '');
+    const discountType = String(formData.get('discountType') || 'none');
+    const discountValue = Number(formData.get('discountValue') || 0);
 
-    if (!customerId || !subStatus) {
-        return { success: false, error: 'Trạng thái và ID khách hàng là bắt buộc.' };
+    // 2. Validation cơ bản
+    if (!customerId || !isValidObjectId(customerId)) {
+        return { success: false, error: 'ID khách hàng không hợp lệ.' };
     }
-    if (!isValidObjectId(customerId)) {
-        return { success: false, error: 'customerId không hợp lệ.' };
+    if (!['completed', 'in_progress', 'rejected'].includes(status)) {
+        return { success: false, error: 'Trạng thái không hợp lệ.' };
     }
-    if (!allowedServiceStatus.has(subStatus)) {
-        return { success: false, error: 'Trạng thái không hợp lệ (new|in_progress|completed).' };
-    }
-    // Yêu cầu ảnh + dịch vụ hợp lệ (theo logic hiện tại của bạn)
-    if (!invoiceImage || invoiceImage.size === 0) {
-        return { success: false, error: 'Ảnh hóa đơn/hợp đồng là bắt buộc khi chốt dịch vụ.' };
-    }
-    if (!isValidObjectId(selectedService)) {
-        return { success: false, error: 'Vui lòng chọn dịch vụ chốt hợp lệ.' };
+
+    // Validation cho các trường hợp không phải "Từ chối"
+    if (status !== 'rejected') {
+        if (!invoiceImages || invoiceImages.length === 0 || invoiceImages[0].size === 0) {
+            return { success: false, error: 'Ảnh hóa đơn/hợp đồng là bắt buộc.' };
+        }
+        if (!selectedServiceId || !isValidObjectId(selectedServiceId)) {
+            return { success: false, error: 'Vui lòng chọn dịch vụ hợp lệ.' };
+        }
+        if (!selectedCourseName) {
+            return { success: false, error: 'Vui lòng chọn một liệu trình để chốt.' };
+        }
     }
 
     try {
         await connectDB();
 
-        // 1) Upload ảnh (nếu có)
-        let uploadedFile = null;
-        if (invoiceImage && invoiceImage.size > 0) {
-            const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm'
-            uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
-            if (!uploadedFile?.id) {
-                return { success: false, error: 'Tải ảnh lên không thành công. Vui lòng thử lại.' };
+        let listPrice = 0;
+        let finalPrice = 0;
+        let courseSnapshot = null;
+
+        // 3. Tìm liệu trình và tính toán giá (nếu cần)
+        if (status !== 'rejected') {
+            const serviceDoc = await Service.findById(selectedServiceId).lean();
+            if (!serviceDoc) {
+                return { success: false, error: 'Không tìm thấy dịch vụ đã chọn.' };
+            }
+
+            const course = serviceDoc.treatmentCourses.find(c => c.name === selectedCourseName);
+            if (!course) {
+                return { success: false, error: 'Không tìm thấy liệu trình trong dịch vụ đã chọn.' };
+            }
+
+            const costs = course.costs || {};
+            listPrice = (costs.basePrice || 0) + (costs.fullMedication || 0) + (costs.partialMedication || 0) + (costs.otherFees || 0);
+
+            // Tính giá cuối cùng dựa trên giảm giá
+            if (discountType === 'amount') {
+                finalPrice = Math.max(0, listPrice - discountValue);
+            } else if (discountType === 'percent') {
+                finalPrice = Math.max(0, Math.round(listPrice * (1 - discountValue / 100)));
+            } else {
+                finalPrice = listPrice;
+            }
+
+            courseSnapshot = {
+                name: course.name,
+                description: course.description,
+                costs: course.costs,
+            };
+        }
+
+        // 4. Upload nhiều ảnh lên Drive
+        const uploadedFileIds = [];
+        if (invoiceImages.length > 0 && invoiceImages[0].size > 0) {
+            const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm'; // Thay bằng ID folder Drive của bạn
+            for (const image of invoiceImages) {
+                const uploadedFile = await uploadFileToDrive(image, folderId);
+                if (uploadedFile?.id) {
+                    uploadedFileIds.push(uploadedFile.id);
+                }
+            }
+            // Nếu có file nhưng không upload được file nào thì báo lỗi
+            if (uploadedFileIds.length === 0) {
+                return { success: false, error: 'Tải ảnh lên không thành công, vui lòng thử lại.' };
             }
         }
 
-        // 2) Nạp customer, CHUẨN HOÁ serviceDetails thành MẢNG (fix legacy)
+        // 5. Nạp thông tin khách hàng
         const customerDoc = await Customer.findById(customerId);
         if (!customerDoc) return { success: false, error: 'Không tìm thấy khách hàng.' };
 
         if (!Array.isArray(customerDoc.serviceDetails)) {
-            const legacy = customerDoc.serviceDetails;
-            if (legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0) {
-                // bọc object cũ thành 1 phần tử trong mảng
-                customerDoc.serviceDetails = [legacy];
-            } else {
-                customerDoc.serviceDetails = [];
-            }
+            customerDoc.serviceDetails = [];
         }
 
-        // 3) Tạo service detail mới (pending)
+        // 6. Tạo object service detail mới
         const newServiceDetail = {
             approvalStatus: 'pending',
-            status: subStatus,                         // 'new' | 'in_progress' | 'completed'
-            revenue: Number.isFinite(revenueNum) ? revenueNum : 0,
-            invoiceDriveId: uploadedFile ? uploadedFile.id : null,
+            status: status,
+            revenue: finalPrice, // Doanh thu chính là giá cuối cùng
+            invoiceDriveIds: uploadedFileIds, // Lưu mảng ID ảnh
             notes: notes || '',
             closedAt: new Date(),
             closedBy: session.id,
-            selectedService,                           // ObjectId dịch vụ
-            // pricing/payments/... để mặc định, admin chỉnh/duyệt sau
+            selectedService: selectedServiceId || null,
+            selectedCourse: courseSnapshot,
+            pricing: {
+                listPrice: listPrice,
+                discountType: discountType,
+                discountValue: discountValue,
+                finalPrice: finalPrice,
+            },
         };
-        console.log(newServiceDetail, 2);
 
         customerDoc.serviceDetails.push(newServiceDetail);
 
-        // 4) Cập nhật pipeline theo trạng thái
-        const newPipelineStatus = pipelineFromServiceStatus(subStatus);
-        customerDoc.pipelineStatus = customerDoc.pipelineStatus || [];
-        customerDoc.pipelineStatus[0] = newPipelineStatus;
-        customerDoc.pipelineStatus[6] = newPipelineStatus;
+        // 7. Cập nhật pipeline
+        const newPipelineStatus = pipelineFromServiceStatus(status);
+        if (newPipelineStatus) {
+            customerDoc.pipelineStatus = customerDoc.pipelineStatus || [];
+            customerDoc.pipelineStatus[6] = newPipelineStatus; // Giả sử step 6
+        }
 
-        // 5) Ghi care log
-        const logContent = `[Chốt dịch vụ] Trạng thái: ${subStatus}. ${selectedService ? `Dịch vụ: ${selectedService}. ` : ''}Ghi chú: ${notes || 'Không có'}`;
+        // 8. Ghi care log
+        const logContent = `[Chốt dịch vụ] Trạng thái: ${status}. ${selectedCourseName ? `Liệu trình: ${selectedCourseName}. ` : ''}Ghi chú: ${notes || 'Không có'}`;
         customerDoc.care = customerDoc.care || [];
         customerDoc.care.push({ content: logContent, createBy: session.id, createAt: new Date(), step: 6 });
 
-        // 6) Lưu — sẽ trigger validate/recalc cho subdocs
+        // 9. Lưu vào DB
         await customerDoc.save();
 
-        revalidateData();
+        revalidateData(); // Hàm revalidate của bạn
         return { success: true, message: 'Chốt dịch vụ thành công! Đơn đang chờ duyệt.' };
     } catch (error) {
         console.error('Lỗi khi chốt dịch vụ: ', error);
         return { success: false, error: 'Đã xảy ra lỗi phía máy chủ.' };
     }
 }
-
 /* ============================================================
  * ACTION CHO BƯỚC 4 - LƯU KẾT QUẢ CUỘC GỌI (Đã cập nhật)
  * ============================================================ */
@@ -242,7 +283,11 @@ export async function updateServiceDetailAction(prevState, formData) {
         formData.get('discountValue') != null ? Number(formData.get('discountValue')) : undefined;
     const finalPrice = formData.get('finalPrice') != null ? Number(formData.get('finalPrice')) : undefined;
 
-    const invoiceImage = formData.get('invoiceImage');
+    // 🧩 ĐỌC MẢNG FILES ĐÚNG CÁCH
+    const invoiceImagesRaw = formData.getAll('invoiceImage') || [];
+    const invoiceImages = invoiceImagesRaw.filter(
+        (f) => f && typeof f === 'object' && 'size' in f && Number(f.size) > 0
+    );
 
     if (!isValidObjectId(customerId) || !isValidObjectId(serviceDetailId)) {
         return { success: false, error: 'customerId/serviceDetailId không hợp lệ.' };
@@ -266,10 +311,12 @@ export async function updateServiceDetailAction(prevState, formData) {
             return { success: false, error: 'Đơn đã duyệt. Không thể chỉnh sửa.' };
         }
 
+        // Cập nhật các field cơ bản
         if (typeof statusRaw !== 'undefined') detail.status = statusRaw;
         if (typeof notes !== 'undefined') detail.notes = notes;
         if (typeof selectedService !== 'undefined') detail.selectedService = selectedService;
 
+        // Cập nhật pricing nếu có
         if (
             typeof listPrice !== 'undefined' ||
             typeof discountType !== 'undefined' ||
@@ -295,19 +342,24 @@ export async function updateServiceDetailAction(prevState, formData) {
             detail.pricing = next;
         }
 
-        // Upload lại invoice (nếu có file mới)
-        if (invoiceImage && invoiceImage.size > 0) {
+        // 📸 Upload thêm invoice (nếu có file mới)
+        if (invoiceImages.length > 0) {
             const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm';
-            const uploadedFile = await uploadFileToDrive(invoiceImage, folderId);
-            if (!uploadedFile?.id)
+            const uploaded = [];
+            for (const f of invoiceImages) {
+                const up = await uploadFileToDrive(f, folderId);
+                if (up?.id) uploaded.push(up.id);
+            }
+            if (uploaded.length === 0) {
                 return { success: false, error: 'Tải ảnh lên không thành công. Vui lòng thử lại.' };
-            detail.invoiceDriveId = uploadedFile.id;
+            }
+            detail.invoiceDriveIds = [...(detail.invoiceDriveIds || []), ...uploaded]; // append
         }
 
-        // Lưu để trigger validate hooks của subdoc (recalcMoney)
+        // Lưu subdoc
         await customer.save();
 
-        // Cập nhật pipeline (nếu status thay đổi)
+        // Cập nhật pipeline theo status hiện tại của detail
         const finalStatus = detail.status;
         const newPipeline = pipelineFromServiceStatus(finalStatus);
         await Customer.updateOne(
@@ -410,10 +462,8 @@ export async function approveServiceDetailAction(prevState, formData) {
         detail.approvedBy = session.id;
         detail.approvedAt = new Date();
 
-        // Lưu để trigger validate hooks của subdoc (recalcMoney)
         await customer.save();
 
-        // Cập nhật pipeline theo status của đơn
         const newPipeline = pipelineFromServiceStatus(detail.status);
         await Customer.updateOne(
             { _id: customerId },
@@ -440,12 +490,8 @@ export async function approveServiceDetailAction(prevState, formData) {
 }
 
 /* ============================================================
- * CÁC HÀM DUYỆT/REJECT CŨ (TƯƠNG THÍCH UI CŨ)
- * - ĐÃ ĐIỀU CHỈNH để làm việc theo serviceDetailId, serviceDetails[] và approvalStatus.
- * - Vui lòng truyền kèm serviceDetailId trong formData.
+ * APPROVE DEAL (legacy-compatible): dùng serviceDetailId
  * ============================================================ */
-
-// ============= APPROVE DEAL (legacy-compatible) =============
 export async function approveServiceDealAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
@@ -481,7 +527,7 @@ export async function approveServiceDealAction(prevState, formData) {
         if (detail.approvalStatus === 'approved')
             return { success: false, error: 'Đơn đã duyệt trước đó.' };
 
-        // Cập nhật dữ liệu đơn
+        // cập nhật pricing theo form duyệt
         detail.notes = notes;
         detail.revenue = Number.isFinite(revenue) ? revenue : 0;
         detail.pricing = {
@@ -527,6 +573,7 @@ export async function approveServiceDealAction(prevState, formData) {
         return { success: false, error: 'Lỗi server khi duyệt đơn.' };
     }
 }
+
 
 // ============= REJECT DEAL (legacy-compatible) =============
 export async function rejectServiceDealAction(prevState, formData) {

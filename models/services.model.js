@@ -34,6 +34,53 @@ const serviceSchema = new Schema({
         reviews: { type: Number, default: 0 }, // số đánh giá
         completed: { type: Number, default: 0 }, // số khách đã chốt hoàn thành
     },
+
+    // =================================================================
+    // CÁC TRƯỜNG MỚI ĐƯỢC THÊM VÀO
+    // =================================================================
+
+    /**
+     * Trường 1: Quy định các liệu trình và chi phí tương ứng
+     * Mảng các liệu trình, mỗi liệu trình có tên, mô tả và cấu trúc chi phí linh hoạt.
+     */
+    treatmentCourses: [{
+        name: { type: String, required: true, trim: true },
+        description: { type: String },
+        costs: {
+            basePrice: { type: Number, required: true, default: 0 },
+            fullMedication: { type: Number, default: 0 },
+            partialMedication: { type: Number, default: 0 },
+            otherFees: { type: Number, default: 0 },
+        }
+    }],
+
+    /**
+     * Trường 2: Lưu trữ tin nhắn gửi trước phẫu thuật
+     * Mảng các tin nhắn, mỗi tin nhắn gắn với một liệu trình cụ thể.
+     */
+    preSurgeryMessages: [{
+        /** Tên của liệu trình trong mảng treatmentCourses mà tin nhắn này áp dụng */
+        appliesToCourse: { type: String, required: true },
+        /** Nội dung tin nhắn */
+        content: { type: String, required: true }
+    }],
+
+    /**
+     * Trường 3: Lưu trữ tin nhắn tự động gửi sau phẫu thuật
+     * Mảng các tin nhắn được lên lịch gửi sau một khoảng thời gian nhất định.
+     */
+    postSurgeryMessages: [{
+        /** Tên của liệu trình trong mảng treatmentCourses mà tin nhắn này áp dụng */
+        appliesToCourse: { type: String, required: true },
+        /** Thời gian gửi sau khi liệu trình hoàn tất */
+        sendAfter: {
+            value: { type: Number, required: true },
+            unit: { type: String, required: true, enum: ['days', 'hours', 'weeks', 'months'] }
+        },
+        /** Nội dung tin nhắn */
+        content: { type: String, required: true }
+    }],
+
 }, { timestamps: true });
 
 serviceSchema.pre('validate', function (next) {

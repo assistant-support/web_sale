@@ -131,7 +131,7 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
                 </select>
             </div>
             <div className={styles.formActions}>
-                <button type="button" className='btn_s' onClick={onClose}>Hủy</button>
+                <button type="button" className='btn_s' onClick={onClose}><h5>Hủy</h5></button>
                 <button type="submit" className='btn_s_b' disabled={isLoading}>
                     <h5 style={{ color: 'white' }}> {isLoading ? 'Đang lưu...' : 'Lưu thay đổi'}</h5>
                 </button>
@@ -294,7 +294,7 @@ const Main = ({ initialTeachers }) => {
                                         <p className='text_6_400'><strong>SĐT:</strong> {teacher.phone}</p>
                                         <p className='text_6_400'><strong>Địa chỉ:</strong> {teacher.address}</p>
                                         {/* MỚI: Hiển thị thông tin nhóm */}
-                                        <p className='text_6_400'><strong>Nhóm:</strong> {teacher.group === 'noi_khoa' ? 'Nội khoa' : 'Ngoại khoa'}</p>
+                                        <p className='text_6_400'><strong>Nhóm:</strong> {teacher.group === 'noi_khoa' ? 'Nội khoa' : teacher.group === 'ngoai_khoa' ? 'Ngoại khoa' : 'Tất cả'}</p>
                                     </div>
                                 </div>
                             </div>
