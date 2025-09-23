@@ -74,7 +74,7 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
-
+  --main_b: #0285ff;
   --primary: #6667AB;
   --primary-50: color-mix(in oklab, var(--primary) 10%, white);
   --primary-100: color-mix(in oklab, var(--primary) 20%, white);
