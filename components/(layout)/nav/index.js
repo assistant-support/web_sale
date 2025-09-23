@@ -23,13 +23,14 @@ import { driveImage } from '@/function';
 // Import icon từ thư viện react-icons
 import { FaBusinessTime } from "react-icons/fa6";
 import { RiServiceFill } from "react-icons/ri";
-
+import { IoChatbubbles } from "react-icons/io5";
 // Hằng số định nghĩa chiều cao của mỗi mục nav, dùng để tính toán hiệu ứng highlight
 const ITEM_HEIGHT = 82;
 
 // Mảng chứa TẤT CẢ các mục điều hướng có thể có trong ứng dụng.
 // Việc định nghĩa trước giúp dễ quản lý và phân quyền.
 const ALL_NAV_ITEMS = [
+  { href: '/admin', icon: <Svg_Chart h={20} w={20} c={'var(--text-secondary)'} />, content: 'Thống kê' },
   {
     href: '/client',
     icon: (
@@ -43,9 +44,10 @@ const ALL_NAV_ITEMS = [
   },
   { href: '/calendar', icon: <Svg_Canlendar h={20} w={20} c={'var(--text-secondary)'} />, content: 'Lịch hẹn' },
   { href: '/user', icon: <Svg_Profile h={20} w={20} c={'var(--text-secondary)'} />, content: 'Nhân sự' },
-  { href: '/admin', icon: <Svg_Chart h={20} w={20} c={'var(--text-secondary)'} />, content: 'Thống kê' },
+  { href: '/pancake', icon: <IoChatbubbles h={20} w={20} c={'var(--text-secondary)'} />, content: 'Nhắn tin' },
   { href: '/workflow', icon: <FaBusinessTime style={{ width: 22 }} />, content: 'Quy trình' },
-  { href: '/service', icon: <RiServiceFill style={{ width: 22, height: 22 }} />, content: 'Dịch vụ' }
+  { href: '/service', icon: <RiServiceFill style={{ width: 22, height: 22 }} />, content: 'Dịch vụ' },
+
 ];
 
 // Định nghĩa component Nav, nhận prop `data` chứa thông tin người dùng (bao gồm cả `role`)
