@@ -68,7 +68,6 @@ async function getMessagesAction(conversationId) {
 
 async function sendMessageAction(formData) {
     'use server';
-    console.log(formData);
     const conversationId = formData.get('conversationId');
     const message = formData.get('message');
     if (!conversationId || !message) return { success: false, error: 'Missing required fields' };
@@ -100,6 +99,8 @@ export default async function PancakePage() {
         const response = await axios.get(`${PANCAKE_CONFIG.baseURL}/public_api/v2/pages/${PANCAKE_CONFIG.pageId}/conversations`, {
             params: { page_access_token: PANCAKE_CONFIG.pageAccessToken }
         });
+        console.log(response);
+        
         initialConversations = response.data.conversations || [];
     } catch (e) {
         error = 'Không thể tải danh sách hội thoại.';

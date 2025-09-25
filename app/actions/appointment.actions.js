@@ -11,60 +11,102 @@ import { revalidateData } from '@/app/actions/customer.actions';
  * Action để tạo lịch hẹn mới.
  * Đồng thời cập nhật pipelineStatus của khách hàng.
  */
+
+function calculateSendTime(baseTime, sendAfter) {
+    const now = new Date(baseTime);
+    const { value, unit } = sendAfter;
+    switch (unit) {
+        case 'hours': now.setHours(now.getHours() + value); break;
+        case 'days': now.setDate(now.getDate() + value); break;
+        case 'weeks': now.setDate(now.getDate() + (value * 7)); break;
+        case 'months': now.setMonth(now.getMonth() + value); break;
+        default: break; // Không làm gì nếu unit không hợp lệ
+    }
+    return now;
+}
+
 export async function createAppointmentAction(prevState, formData) {
     const user = await checkAuthToken();
     if (!user || !user.id) {
-        return { status: false, message: 'Bạn cần đăng nhập để thực hiện chức năng này' };
+        // SỬA ĐỔI: Trả về { success: false, error: '...' }
+        return { success: false, error: 'Bạn cần đăng nhập để thực hiện chức năng này.' };
     }
 
     const customerId = formData.get('customerId');
-    const title = formData.get('title');
+    const serviceId = formData.get('serviceId');
+    const treatmentCourse = formData.get('treatmentCourse');
+    const appointmentType = formData.get('appointmentType') || 'interview';
     const appointmentDate = formData.get('appointmentDate');
     const notes = formData.get('notes');
-    // Nếu bạn có field appointmentType trong form, lấy thêm:
-    const appointmentType = formData.get('appointmentType'); // 'interview' | 'surgery' (optional)
 
-    if (!customerId || !title || !appointmentDate) {
-        return { status: false, message: 'Vui lòng điền đầy đủ thông tin lịch hẹn' };
+    if (!customerId || !serviceId || !treatmentCourse || !appointmentDate) {
+        // SỬA ĐỔI: Trả về { success: false, error: '...' }
+        return { success: false, error: 'Vui lòng điền đầy đủ thông tin dịch vụ, liệu trình và ngày hẹn.' };
+    }
+
+    const appointmentDateTime = new Date(appointmentDate);
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - 2);
+
+    if (appointmentDateTime < now) {
+        // SỬA ĐỔI: Trả về { success: false, error: '...' }
+        return { success: false, error: 'Không thể tạo lịch hẹn trong quá khứ. Vui lòng chọn một thời điểm trong tương lai.' };
     }
 
     try {
         await connectDB();
 
-        // 1. Tạo lịch hẹn mới
         const newAppointment = await Appointment.create({
             customer: customerId,
-            title,
-            appointmentDate: new Date(appointmentDate),
+            service: serviceId,
+            treatmentCourse,
+            appointmentType,
+            appointmentDate: appointmentDateTime,
             notes,
-            status: 'pending', // Trạng thái ban đầu của lịch hẹn
+            status: 'pending',
             createdBy: user.id,
-            ...(appointmentType ? { appointmentType } : {}), // nếu có
         });
 
-        // 1.1 Lên lịch job nhắc hẹn (Agenda)
-        // -----------------------------------
-        // Thời điểm nhắc = 24h trước lịch hẹn; nếu đã <24h thì gửi sau 1 phút
+        // Lên lịch job nhắc hẹn (Agenda)
         const { default: initAgenda } = await import('@/config/agenda');
         const agenda = await initAgenda();
+        const apptTime = appointmentDateTime.getTime();
+        const nowForScheduling = new Date();
 
-        const apptTime = new Date(newAppointment.appointmentDate).getTime();
-        const remindAt = new Date(apptTime - 24 * 60 * 60 * 1000);
-        const now = new Date();
-        const scheduledTime = remindAt > now ? remindAt : new Date(now.getTime() + 60 * 1000); // Phương án A
+        // 1. Đặt lịch nhắc hẹn chung (trước 1 ngày)
+        const remindAt1Day = new Date(apptTime - 24 * 60 * 60 * 1000);
+        // Nếu thời gian nhắc đã qua, lên lịch để gửi ngay. Nếu chưa, lên lịch đúng thời điểm.
+        const scheduledTime1Day = remindAt1Day > nowForScheduling
+            ? remindAt1Day
+            : new Date(nowForScheduling.getTime() + 30 * 1000); // Gửi sau 30 giây
 
-        await agenda.schedule(scheduledTime, 'appointmentReminder', {
+        await agenda.schedule(scheduledTime1Day, 'appointmentReminder', {
             appointmentId: newAppointment._id.toString(),
             customerId: customerId.toString(),
         });
-        // -----------------------------------
+        console.log(`[Agenda] Đã lên lịch nhắc hẹn (1 ngày) cho Appointment: ${newAppointment._id} vào lúc: ${scheduledTime1Day}`);
 
-        // 2. Cập nhật khách hàng: Thêm care log và cập nhật pipelineStatus
-        const newPipelineStatus = 'scheduled_unconfirmed_4'; // Trạng thái pipeline khi mới đặt lịch
+        // 2. Nếu là lịch phẫu thuật, đặt thêm lịch gửi dặn dò (trước 3 ngày)
+        if (appointmentType === 'surgery') {
+            const remindAt3Days = new Date(apptTime - 3 * 24 * 60 * 60 * 1000);
+            // Tương tự, nếu thời gian dặn dò đã qua, gửi ngay
+            const scheduledTime3Days = remindAt3Days > nowForScheduling
+                ? remindAt3Days
+                : new Date(nowForScheduling.getTime() + 30 * 1000); // Gửi sau 30 giây
+
+            await agenda.schedule(scheduledTime3Days, 'preSurgeryReminder', {
+                appointmentId: newAppointment._id.toString(),
+                customerId: customerId.toString(),
+            });
+            console.log(`[Agenda] Đã lên lịch gửi dặn dò (3 ngày) cho Appointment: ${newAppointment._id} vào lúc: ${scheduledTime3Days}`);
+        }
+
+        // Cập nhật Customer
+        const newPipelineStatus = 'scheduled_unconfirmed_4';
         const careEntry = {
-            content: `Đặt lịch hẹn: ${title} vào ${new Date(appointmentDate).toLocaleString('vi-VN')}`,
+            content: `Đặt lịch hẹn (${appointmentType}): ${treatmentCourse} vào ${appointmentDateTime.toLocaleString('vi-VN')}`,
             createBy: user.id,
-            step: 5, // Giai đoạn 5: Nhắc lịch & Xác nhận
+            step: 5,
             createAt: new Date()
         };
 
@@ -76,17 +118,19 @@ export async function createAppointmentAction(prevState, formData) {
             }
         });
 
-        // 3. Revalidate data để làm mới giao diện
+        // Revalidate data
         await reloadAppointments();
         await revalidateData();
 
-        return { status: true, message: 'Đã tạo lịch hẹn thành công!' };
+        // SỬA ĐỔI: Trả về { success: true, message: '...' }
+        return { success: true, message: 'Đã tạo lịch hẹn thành công!' };
+
     } catch (error) {
         console.error('Lỗi khi tạo lịch hẹn:', error);
-        return { status: false, message: 'Đã xảy ra lỗi khi tạo lịch hẹn' };
+        // SỬA ĐỔI: Trả về { success: false, error: '...' }
+        return { success: false, error: 'Đã xảy ra lỗi phía máy chủ khi tạo lịch hẹn.' };
     }
 }
-
 
 /**
  * Action để cập nhật trạng thái lịch hẹn.
@@ -95,45 +139,68 @@ export async function createAppointmentAction(prevState, formData) {
 export async function updateAppointmentStatusAction(prevState, formData) {
     const user = await checkAuthToken();
     if (!user || !user.id) {
-        return { status: false, message: 'Bạn cần đăng nhập để thực hiện chức năng này' };
+        return { success: false, error: 'Bạn cần đăng nhập để thực hiện chức năng này' };
     }
 
     const appointmentId = formData.get('appointmentId');
-    const newStatus = formData.get('newStatus'); // e.g., 'completed', 'missed', 'confirmed'
+    const newStatus = formData.get('newStatus');
 
     if (!appointmentId || !newStatus) {
-        return { status: false, message: 'Thiếu thông tin cần thiết để cập nhật' };
+        return { success: false, error: 'Thiếu thông tin cần thiết để cập nhật' };
     }
 
     try {
         await connectDB();
 
-        // 1. Lấy thông tin lịch hẹn để sử dụng
-        const appointment = await Appointment.findById(appointmentId).lean();
+        // Lấy thông tin lịch hẹn và populate đầy đủ service
+        const appointment = await Appointment.findById(appointmentId)
+            .populate('service') // Lấy toàn bộ object service
+            .lean();
+
         if (!appointment) {
-            return { status: false, message: 'Không tìm thấy lịch hẹn' };
+            return { success: false, error: 'Không tìm thấy lịch hẹn' };
         }
 
-        // 2. Cập nhật trạng thái lịch hẹn
-        await Appointment.findByIdAndUpdate(appointmentId, {
-            status: newStatus,
-            updatedBy: user.id,
-            updatedAt: new Date()
-        });
+        // Cập nhật trạng thái lịch hẹn
+        await Appointment.findByIdAndUpdate(appointmentId, { status: newStatus });
 
-        // 3. Mapping trạng thái lịch hẹn sang pipelineStatus và care log
+        // Mapping trạng thái sang pipelineStatus và care log
+        const appointmentTitleForLog = `${appointment.treatmentCourse} (${appointment.service?.name || 'N/A'})`;
         const statusMap = {
-            completed: { pipeline: 'serviced_completed_6', care: `Hoàn thành lịch hẹn: ${appointment.title}` },
-            confirmed: { pipeline: 'confirmed_5', care: `Xác nhận lịch hẹn thành công: ${appointment.title}` },
-            missed: { pipeline: 'canceled_5', care: `Khách vắng mặt trong lịch hẹn: ${appointment.title}` }, // Giả định vắng mặt tương đương hủy cho pipeline
-            postponed: { pipeline: 'postponed_5', care: `Hoãn lịch hẹn: ${appointment.title}` },
+            completed: { pipeline: 'serviced_completed_6', care: `Hoàn thành lịch hẹn: ${appointmentTitleForLog}` },
+            confirmed: { pipeline: 'confirmed_5', care: `Xác nhận lịch hẹn thành công: ${appointmentTitleForLog}` },
+            missed: { pipeline: 'canceled_5', care: `Khách vắng mặt trong lịch hẹn: ${appointmentTitleForLog}` },
+            postponed: { pipeline: 'postponed_5', care: `Hoãn lịch hẹn: ${appointmentTitleForLog}` },
         };
 
         const updateInfo = statusMap[newStatus];
+
+        // Logic đặt lịch gửi tin nhắn sau phẫu thuật
+        if (newStatus === 'completed' && appointment.appointmentType === 'surgery' && appointment.service) {
+            const messagesToSchedule = appointment.service.postSurgeryMessages.filter(
+                msg => msg.appliesToCourse === appointment.treatmentCourse
+            );
+
+            if (messagesToSchedule.length > 0) {
+                const { default: initAgenda } = await import('@/config/agenda');
+                const agenda = await initAgenda();
+                const completionTime = new Date(); // Lấy thời điểm hoàn thành là "bây giờ"
+
+                for (const message of messagesToSchedule) {
+                    const sendAt = calculateSendTime(completionTime, message.sendAfter);
+                    await agenda.schedule(sendAt, 'postSurgeryMessage', {
+                        customerId: appointment.customer.toString(),
+                        appointmentId: appointment._id.toString(),
+                        messageContent: message.content,
+                    });
+                    console.log(`[Agenda] Đã lên lịch gửi tin sau PT cho KH ${appointment.customer} vào lúc: ${sendAt}`);
+                }
+            }
+        }
+
         if (!updateInfo) {
-            // Nếu không có mapping, chỉ revalidate và trả về
             await reloadAppointments();
-            return { status: true, message: 'Cập nhật thành công nhưng không thay đổi pipeline.' };
+            return { success: true, message: 'Cập nhật thành công nhưng không thay đổi pipeline.' };
         }
 
         const careEntry = {
@@ -143,7 +210,7 @@ export async function updateAppointmentStatusAction(prevState, formData) {
             createAt: new Date()
         };
 
-        // 4. Cập nhật khách hàng
+        // Cập nhật khách hàng
         await Customer.findByIdAndUpdate(appointment.customer, {
             $push: { care: careEntry },
             $set: {
@@ -152,14 +219,14 @@ export async function updateAppointmentStatusAction(prevState, formData) {
             }
         });
 
-        // 5. Revalidate data
+        // Revalidate data
         await reloadAppointments();
         await revalidateData();
 
-        return { status: true, message: 'Đã cập nhật trạng thái lịch hẹn thành công!' };
+        return { success: true, message: 'Đã cập nhật trạng thái lịch hẹn thành công!' };
     } catch (error) {
         console.error('Lỗi khi cập nhật trạng thái lịch hẹn:', error);
-        return { status: false, message: 'Đã xảy ra lỗi khi cập nhật trạng thái' };
+        return { success: false, error: 'Đã xảy ra lỗi khi cập nhật trạng thái' };
     }
 }
 
@@ -181,23 +248,19 @@ export async function cancelAppointmentAction(prevState, formData) {
     try {
         await connectDB();
 
-        // 1. Lấy thông tin lịch hẹn
-        const appointment = await Appointment.findById(appointmentId).lean();
+        // CẬP NHẬT: Lấy thông tin lịch hẹn và populate service
+        const appointment = await Appointment.findById(appointmentId).populate('service', 'name').lean();
         if (!appointment) {
             return { status: false, message: 'Không tìm thấy lịch hẹn' };
         }
 
-        // 2. Cập nhật trạng thái lịch hẹn
-        await Appointment.findByIdAndUpdate(appointmentId, {
-            status: 'cancelled',
-            updatedBy: user.id,
-            updatedAt: new Date()
-        });
+        await Appointment.findByIdAndUpdate(appointmentId, { status: 'cancelled' });
 
-        // 3. Cập nhật khách hàng
+        // CẬP NHẬT: Nội dung care log
+        const appointmentTitleForLog = `${appointment.treatmentCourse} (${appointment.service.name})`;
         const newPipelineStatus = 'canceled_5';
         const careEntry = {
-            content: `Đã hủy lịch hẹn: ${appointment.title} (${new Date(appointment.appointmentDate).toLocaleString('vi-VN')})`,
+            content: `Đã hủy lịch hẹn: ${appointmentTitleForLog} (${new Date(appointment.appointmentDate).toLocaleString('vi-VN')})`,
             createBy: user.id,
             step: 5,
             createAt: new Date()
@@ -211,7 +274,6 @@ export async function cancelAppointmentAction(prevState, formData) {
             }
         });
 
-        // 4. Revalidate data
         await reloadAppointments();
         await revalidateData();
 

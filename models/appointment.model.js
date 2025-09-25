@@ -4,8 +4,15 @@ import mongoose, { Schema, model, models } from "mongoose";
 
 const AppointmentSchema = new Schema(
     {
-        // Tiêu đề hoặc mục đích của cuộc hẹn
-        title: {
+        // Dịch vụ được chọn cho cuộc hẹn (liên kết tới model Service)
+        service: {
+            type: Schema.Types.ObjectId,
+            ref: 'service',
+            required: true,
+            index: true,
+        },
+        // Tên của liệu trình được chọn từ dịch vụ
+        treatmentCourse: {
             type: String,
             required: true,
             trim: true,
@@ -15,14 +22,15 @@ const AppointmentSchema = new Schema(
             type: Schema.Types.ObjectId,
             ref: 'customer',
             required: true,
-            index: true, // Thêm index để tối ưu truy vấn theo customer
+            index: true,
         },
+        // Loại cuộc hẹn: tư vấn (interview) hay phẫu thuật (surgery)
         appointmentType: {
             type: String,
             required: true,
-            enum: ['interview', 'surgery'], // 'interview' = phỏng vấn, 'surgery' = phẫu thuật
+            enum: ['interview', 'surgery'],
             default: 'interview',
-            index: true, // thường sẽ lọc theo loại
+            index: true,
         },
         // Thời gian diễn ra cuộc hẹn
         appointmentDate: {
@@ -39,7 +47,7 @@ const AppointmentSchema = new Schema(
         status: {
             type: String,
             required: true,
-            enum: ['pending', 'completed', 'cancelled', 'missed'], // ['Chưa diễn ra', 'Hoàn thành', 'Đã hủy', 'Vắng mặt']
+            enum: ['pending', 'completed', 'cancelled', 'missed'],
             default: 'pending',
         },
         // Người tạo lịch hẹn (nhân viên, liên kết tới model User)
