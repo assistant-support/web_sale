@@ -38,6 +38,18 @@ const nextConfig = {
                 port: '',
                 pathname: '/**',
             },
+            {
+                protocol: 'https',
+                hostname: 'scontent.cdninstagram.com',
+                port: '',
+                pathname: '/**',
+            },
+            {
+                protocol: 'https',
+                hostname: 'content.pancake.vn',
+                port: '',
+                pathname: '/**',
+            },
         ],
     },
     output: 'standalone',
