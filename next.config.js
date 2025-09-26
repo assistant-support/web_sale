@@ -26,6 +26,18 @@ const nextConfig = {
                 port: '',
                 pathname: '/**',
             },
+            {
+                protocol: 'https',
+                hostname: 'placehold.co',
+                port: '',
+                pathname: '/**',
+            },
+            {
+                protocol: 'https',
+                hostname: 'pancake.vn',
+                port: '',
+                pathname: '/**',
+            },
         ],
     },
     output: 'standalone',

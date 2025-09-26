@@ -391,12 +391,11 @@ function ReceptionLogTable({ logs, visibleCount, onReachEnd, onRowClick }) {
 
 export default function DataReceptionClient({ initialData, service = [] }) {
     const [data] = useState(initialData);
-
     // Filters
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
     const [tagFilter, setTagFilter] = useState('all');     // 'all' | service.name
     const [startDate, setStartDate] = useState(() => {
-        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 7);
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 30);
         return toYMD(d);
     });
     const [endDate, setEndDate] = useState(() => {

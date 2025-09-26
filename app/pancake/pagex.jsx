@@ -1,5 +1,5 @@
 import axios from 'axios';
-import PancakeChatClient from './PancakeChatClient';
+import PancakeChatClient from './PancakeChatClientx';
 
 // --- CONFIGURATION ---
 const PANCAKE_CONFIG = {
