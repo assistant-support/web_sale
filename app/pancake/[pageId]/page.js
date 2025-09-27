@@ -23,7 +23,6 @@ export default async function ChatPage({ params }) {
     pageConfig = pageConfig.find(p => p.id === pageId)
     if (!pageConfig) notFound()
     const { data: initialConversations, error } = await getInitialConversations(pageId, pageConfig.accessToken);
-    console.log(initialConversations);
     
     return (
         <ChatClient
