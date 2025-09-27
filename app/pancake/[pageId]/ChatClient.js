@@ -276,7 +276,7 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                                         <div key={msg.id} className={`flex flex-col my-1 ${msg.senderType === 'page' ? 'items-end' : 'items-start'}`}>
                                             <div className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page' ? 'bg-blue-500 text-white items-end' : 'bg-white text-gray-800'}`}>
                                                 <MessageContent content={msg.content} />
-                                                <h6 className={`text-xs mt-1`} style={{ color: msg.senderType === 'page' ? 'rgba(255, 255, 255, 0.7) text-right' : 'rgba(0, 0, 0, 0.5)  text-left' }}>
+                                                <h6 className={`text-xs mt-1 ${msg.senderType === 'page' ? 'text-right' : 'text-left'}`} style={{ color: msg.senderType == 'page' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.5)' }}>
                                                     {new Date(msg.inserted_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                                                 </h6>
                                             </div>
