@@ -37,22 +37,6 @@ const ALL_COLUMNS = [
 const INITIAL_VISIBLE_COLUMNS = ['name', 'phonex', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
 const MAX_VISIBLE_COLUMNS = 6;
 
-const PIPELINE_STATUS_TEXT = {
-    'new_unconfirmed': 'Mới', 'missing_info': 'Thiếu TT', 'valid_waiting_msg': 'Chờ nhắn',
-    'valid': 'Hợp lệ', 'assigned': 'Đã phân bổ', 'consulted': 'Đã tư vấn', 'appointed': 'Đã đặt lịch',
-    'serviced': 'Đã chốt', 'rejected': 'Từ chối', 'duplicate_merged': 'Trùng',
-    'rejected_immediate': 'Từ chối ngay'
-};
-
-const STEP_TEXT = {
-    1: '1. Tiếp nhận',
-    2: '2. Nhắn tin',
-    3: '3. Phân bổ',
-    4: '4. Tư vấn',
-    5: '5. Nhắc lịch',
-    6: '6. Chốt Dịch vụ'
-};
-
 const useBreakpoint = () => {
     const [breakpoint, setBreakpoint] = useState('lg');
     useEffect(() => {
@@ -142,6 +126,11 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
             case 'currentStep': {
                 const status = customer.pipelineStatus.length - 1;
                 return <h6>Bước {status}</h6>;
+            }
+            case 'phonex': {
+                console.log(customer.phone, value == undefined);
+
+                return <h6>{value != undefined ? String(value) : customer.phone}</h6>;
             }
             default: return <h6 className="truncate">{String(value)}</h6>;
         }
