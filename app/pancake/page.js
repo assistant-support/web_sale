@@ -1,16 +1,10 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { getPagesFromAPI } from '@/lib/pancake-api';
-import { PAGES_CONFIG as fallbackPages } from '@/config/pages';
 
 export default async function HomePage() {
     let pages = await getPagesFromAPI();
     let dataSource = 'Dữ liệu từ API';
-    if (!pages || pages.length === 0) {
-        console.log("Using fallback pages list.");
-        pages = fallbackPages;
-        dataSource = 'Dữ liệu dự phòng';
-    }
 
     return (
         <div className="w-full h-full bg-gray-100 flex">
