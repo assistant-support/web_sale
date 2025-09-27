@@ -225,6 +225,9 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                     {filteredConversations.map((convo) => {
                         const avatarUrl = avatar({ idpage: pageConfig.id, iduser: convo.page_customer.psid });
                         const customerName = convo.customers?.[0]?.name || 'Khách hàng ẩn';
+                        let date = new Date(convo.updated_at);
+                        date = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+                        let formattedTime = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                         return (
                             <li key={convo.id} onClick={() => handleSelectConvo(convo)}
                                 className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 ${selectedConvo?.id === convo.id ? 'bg-blue-50' : ''}`}>
@@ -242,7 +245,7 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                                     <h4 className="font-semibold truncate text-gray-800">{customerName}</h4>
                                     <h5 className="text-sm text-gray-500 truncate">{convo.snippet}</h5>
                                 </div>
-                                <div className="text-xs text-gray-400">{new Date(convo.updated_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</div>
+                                <div className="text-xs text-gray-400">{formattedTime}</div>
                             </li>
                         );
                     })}
@@ -270,6 +273,9 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                             {isLoadingMessages && <h5 className="text-center text-gray-500">Đang tải tin nhắn...</h5>}
                             {messages.map((msg, index) => {
                                 if (!msg) return null;
+                                let date = new Date(msg.inserted_at);
+                                date = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+                                let formattedTime = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
                                 return (
                                     msg.content?.type === 'system' ?
                                         <MessageContent key={msg.id} content={msg.content} /> :
@@ -277,7 +283,7 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                                             <div className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page' ? 'bg-blue-500 text-white items-end' : 'bg-white text-gray-800'}`}>
                                                 <MessageContent content={msg.content} />
                                                 <h6 className={`text-xs mt-1 ${msg.senderType === 'page' ? 'text-right' : 'text-left'}`} style={{ color: msg.senderType == 'page' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.5)' }}>
-                                                    {new Date(msg.inserted_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                    {formattedTime}
                                                 </h6>
                                             </div>
                                             {msg.senderType === 'page' && index === messages.length - 1 && (
