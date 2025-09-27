@@ -25,7 +25,7 @@ import { getStatusInVietnamese } from '@/function/index'
 
 const ALL_COLUMNS = [
     { key: 'name', header: 'Tên Khách Hàng' },
-    { key: 'phone', header: 'Số Điện Thoại' },
+    { key: 'phonex', header: 'Số Điện Thoại' },
     { key: 'currentStep', header: 'Bước Hiện Tại' },
     { key: 'pipelineStatus', header: 'Trạng Thái' },
     { key: 'tags', header: 'Dịch Vụ Quan Tâm' },
@@ -34,7 +34,7 @@ const ALL_COLUMNS = [
     { key: 'createAt', header: 'Ngày Tiếp Nhận' },
 ];
 
-const INITIAL_VISIBLE_COLUMNS = ['name', 'phone', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
+const INITIAL_VISIBLE_COLUMNS = ['name', 'phonex', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
 const MAX_VISIBLE_COLUMNS = 6;
 
 const PIPELINE_STATUS_TEXT = {

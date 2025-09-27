@@ -50,7 +50,8 @@ export default async function Page({ searchParams }) {
         initialResult.data = filteredData;
         initialResult.total = filteredData.length;
     }
-
+    console.log(initialResult);
+    
     return (
         <Suspense fallback={<PageSkeleton />}>
             <CustomerView
