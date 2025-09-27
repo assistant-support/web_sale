@@ -74,7 +74,7 @@ export default function ChatClient({ initialConversations, initialError, pageCon
     const [selectedConvo, setSelectedConvo] = useState(null);
     const [messages, setMessages] = useState([]);
     const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-
+    const [searchQuery, setSearchQuery] = useState('');
     const formRef = useRef(null);
     const messagesEndRef = useRef(null);
 
@@ -173,7 +173,22 @@ export default function ChatClient({ initialConversations, initialError, pageCon
     if (initialError) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-100 text-red-500">{initialError}</div>;
     }
+    const filteredConversations = conversations.filter(convo => {
+        // Lấy từ khóa tìm kiếm và chuẩn hóa (bỏ khoảng trắng, viết thường)
+        const query = searchQuery.toLowerCase().trim();
+        if (!query) return true; // Nếu không có từ khóa, hiển thị tất cả
 
+        // Lấy tên khách hàng và chuẩn hóa
+        const customerName = (convo.customers?.[0]?.name || '').toLowerCase();
+
+        // Kiểm tra xem tên có chứa từ khóa tìm kiếm không
+        const nameMatches = customerName.includes(query);
+
+        // Lấy danh sách số điện thoại
+        const phoneNumbers = convo.recent_phone_numbers?.map(p => p.phone_number) || [];
+        const phoneMatches = phoneNumbers.some(phone => phone.includes(query));
+        return nameMatches || phoneMatches;
+    });
     return (
         <div className="flex h-full w-full bg-white rounded-md border border-gray-200">
             {/* === Cột 1: Danh sách hội thoại === */}
@@ -197,11 +212,17 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                     </div>
                     <div className="relative mt-2">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                        <input type="text" placeholder="Tìm kiếm hội thoại..." className="w-full bg-gray-100 rounded-md pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                        <input
+                            type="text"
+                            placeholder="Tìm kiếm theo tên hoặc SĐT..."
+                            className="w-full bg-gray-100 rounded-md pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
                     </div>
                 </div>
                 <ul className="flex-1 overflow-y-auto">
-                    {conversations.map((convo) => {
+                    {filteredConversations.map((convo) => {
                         const avatarUrl = avatar({ idpage: pageConfig.id, iduser: convo.page_customer.psid });
                         const customerName = convo.customers?.[0]?.name || 'Khách hàng ẩn';
                         return (
