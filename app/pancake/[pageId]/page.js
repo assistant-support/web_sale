@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { PANCAKE_API_BASE_URL } from '@/config/pages';
 import ChatClient from './ChatClient';
 import { getPagesFromAPI } from '@/lib/pancake-api';
+import { getLabelData } from '@/app/(setting)/label/page'
 
 // Lấy danh sách hội thoại ban đầu để hiển thị khi người dùng truy cập trang.
 async function getInitialConversations(pageId, accessToken) {
@@ -23,12 +24,15 @@ export default async function ChatPage({ params }) {
     pageConfig = pageConfig.find(p => p.id === pageId)
     if (!pageConfig) notFound()
     const { data: initialConversations, error } = await getInitialConversations(pageId, pageConfig.accessToken);
+    const label = await getLabelData()
+    console.log(initialConversations);
     
     return (
         <ChatClient
             initialConversations={initialConversations}
             initialError={error}
             pageConfig={pageConfig}
+            label={label}
         />
     );
 }
