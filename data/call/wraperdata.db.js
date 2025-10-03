@@ -82,7 +82,7 @@ export async function saveCallAction(prevState, formData) {
     await connectDB();
 
     // 1) Upload audio lên Drive
-    const folderId = '1Dp95BcDzOPKVIU4sIEKkZGtJPCEbWyRO';
+    const folderId = '1-pN5irPRLbiBhwER4O1tNhYzMllpga-v';
     const uploadedFile = await uploadFileToDrive(recordingFile, folderId);
     if (!uploadedFile?.id) {
       throw new Error('Tải file ghi âm lên Drive thất bại.');

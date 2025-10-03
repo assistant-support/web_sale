@@ -190,7 +190,7 @@ export default function OMICallClient({ customer, user }) {
     const acceptedAtRef = useRef(0);
 
     // hotline (sipNumber)
-    const hotlineNumber = '842471233474';
+    const hotlineNumber = '842471238879';
 
     // ====== console log gọn ======
     const clog = (...args) => null;
@@ -291,9 +291,9 @@ export default function OMICallClient({ customer, user }) {
             setConnectionStatus({ status: 'connecting', text: 'Đang kết nối...' });
             clog('register() start');
             const registerStatus = await sdkRef.current.register({
-                sipRealm: 'thanhnth',
+                sipRealm: 'info268',
                 sipUser: '100',
-                sipPassword: 'LCJw1HK8i2',
+                sipPassword: 'Ws9nsNEClG',
             });
             clog('register() result:', registerStatus);
             if (!registerStatus?.status) throw new Error(registerStatus?.error || 'register failed');
