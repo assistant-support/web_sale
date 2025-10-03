@@ -138,7 +138,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
 
     const approvedTotalReceived = useMemo(
         () => details.filter(d => d.approvalStatus === 'approved')
-            .reduce((sum, d) => sum + (Number(d.amountReceivedTotal) || 0), 0),
+            .reduce((sum, d) => sum + (Number(d.pricing.finalPrice) || 0), 0),
         [details]
     );
 
@@ -478,7 +478,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         form.trigger('invoiceImage'); // revalidate lại trường ảnh
     };
 
-    
+
     return (
         <div className="p-4 max-h-[calc(100vh-150px)] overflow-y-auto">
             <Accordion type="single" collapsible defaultValue={`item-${currentStageIndex}`} className="w-full">

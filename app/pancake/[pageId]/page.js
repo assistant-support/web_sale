@@ -25,8 +25,7 @@ export default async function ChatPage({ params }) {
     if (!pageConfig) notFound()
     const { data: initialConversations, error } = await getInitialConversations(pageId, pageConfig.accessToken);
     const label = await getLabelData()
-    console.log(initialConversations);
-    
+
     return (
         <ChatClient
             initialConversations={initialConversations}

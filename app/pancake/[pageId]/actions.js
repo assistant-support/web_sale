@@ -136,12 +136,9 @@ async function sendViaFacebookGraph(conversationId, message) {
         recipient: { id: userId },
         message: { text: message },
         messaging_type: 'MESSAGE_TAG',
-        tag: 'POST_PURCHASE_UPDATE' // Tag này cho phép gửi tin ngoài cửa sổ 24h cho các cập nhật sau mua hàng
+        tag: 'POST_PURCHASE_UPDATE'
     };
-
-    console.log('[FB] Sending via Graph API', { recipient: userId, tag: 'POST_PURCHASE_UPDATE' });
     const response = await axios.post(url, payload, { params: { access_token: pageToken } });
-    console.log('[FB] Graph API response', response.status, response.data);
     return response.data;
 }
 
@@ -174,8 +171,6 @@ export async function sendMessageAction(pageId, accessToken, conversationId, mes
         });
 
         // Log data thật sự trả về từ API
-        console.log('[PANCAKE] Send response data:', response.data);
-
         if (response.data?.e_code === 10) {
             console.warn('[PANCAKE] e_code=10 → Fallback to Facebook Graph API');
             await sendViaFacebookGraph(conversationId, messageToSend);

@@ -279,11 +279,11 @@ export default function SettingData({ data, service, customer }) {
                             <div className={styles.inputGroup}>
                                 <h5>Đường dẫn tới form</h5>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', borderRadius: 3, border: ' thin solid var(--border-color)', alignItems: 'center', padding: 3, paddingLeft: 8 }}>
-                                    <h5> {`https://demosale.s4h.edu.vn/form?id=${editingItem._id}`}</h5>
+                                    <h5> {`https://crm.blingkim.com/form?id=${editingItem._id}`}</h5>
                                     <div style={{ display: 'flex', gap: 4 }}>
                                         <WrapIcon
                                             icon={<Svg_Coppy w={'var(--font-size-base)'} h={'var(--font-size-base)'} c={'var(--text-primary)'} />}
-                                            click={() => handleCopyToClipboard(`https://demosale.s4h.edu.vn/form?id=${editingItem._id}`)}
+                                            click={() => handleCopyToClipboard(`https://crm.blingkim.com/form?id=${editingItem._id}`)}
                                             className='mainIcon'
                                             content={copyStatus === 'copied' ? 'Đã sao chép!' : copyStatus === 'error' ? 'Sao chép lỗi!' : 'Sao chép đường dẫn'}
                                         />
