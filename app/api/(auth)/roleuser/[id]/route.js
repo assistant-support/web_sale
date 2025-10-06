@@ -23,7 +23,7 @@ function jsonRes(status, body) {
 
 export async function PATCH(req, { params }) {
     const user = await checkAuthToken();
-    if (!user.role.includes('Admin') || !user.role.includes('Manager')) return jsonRes(403, { error: 'Bạn không có quyền thực hiện hành động này' });
+    if (!user.role.includes('Admin') && !user.role.includes('Manager')) return jsonRes(403, { error: 'Bạn không có quyền thực hiện hành động này' });
 
 
     try {
