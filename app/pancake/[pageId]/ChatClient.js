@@ -411,10 +411,10 @@ export default function ChatClient({
     useEffect(() => {
         const s = io(SOCKET_URL, {
             path: '/socket.io',
-            transports: ['websocket'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 3000,
+            withCredentials: true,
         });
         socketRef.current = s;
 
