@@ -7,8 +7,7 @@ import '@/styles/all.css'
 import '@/styles/font.css';
 import air from '@/app/layout.module.css'
 import { NotificationProvider } from '@/contexts/page_pancake';
-import { Toaster } from '@/components/ui/sonner';
-import { NotificationHandler } from '@/components/NotificationHandler';
+import RealtimeGate from '@/components/RealtimeGate'
 
 export const metadata = {
     title: "CRM Sale",
@@ -22,6 +21,7 @@ export default async function RootLayout({ children }) {
     }
     return (
         <NotificationProvider>
+            <RealtimeGate />
             <div className={air.layout}>
                 <div className={air.nav}>
                     <Nav data={user} />

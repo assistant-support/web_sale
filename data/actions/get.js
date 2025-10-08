@@ -78,8 +78,6 @@ export async function history_data(id, type) {
             .populate('customer', 'name')
             .sort({ createdAt: -1 })
             .lean();
-        console.log(history);
-        
         const plainHistory = JSON.parse(JSON.stringify(history));
 
         return {

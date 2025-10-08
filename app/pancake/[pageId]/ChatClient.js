@@ -1,23 +1,153 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X } from 'lucide-react';
+import { io } from 'socket.io-client';
+import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon } from 'lucide-react';
+import { sendMessageAction, uploadImageToDriveAction, sendImageAction } from './actions';
 import { Toaster, toast } from 'sonner';
-import { getMessagesAction, sendMessageAction } from './actions';
-import { toggleLabelForCustomer } from '@/app/(setting)/label/actions';
+
 
 import Image from 'next/image';
 import Link from 'next/link';
 import FallbackAvatar from '@/components/FallbackAvatar';
 
-// ... (Các component LabelDropdown, MessageContent, MessageStatus không thay đổi từ trước)
+// ======================= Cấu hình nhỏ =======================
+const VN_TZ = 'Asia/Ho_Chi_Minh';
+const PAGE_SIZE = 40; // mỗi lần load thêm 40
+const SOCKET_URL = process.env.NEXT_PUBLIC_REALTIME_URL || 'http://localhost:3001';
+
+// ======================= Helper =======================
+const isInbox = (convo) => convo?.type === 'INBOX';
+const getConvoPsid = (convo) => convo?.from_psid || null;
+const getConvoAvatarId = (convo) =>
+    convo?.from_psid || convo?.customers?.[0]?.fb_id || convo?.from?.id || null;
+const getConvoDisplayName = (convo) =>
+    convo?.customers?.[0]?.name || convo?.from?.name || 'Khách hàng ẩn';
+const avatarUrlFor = ({ idpage, iduser }) =>
+    iduser ? `https://pancake.vn/api/v1/pages/${idpage}/avatar/${iduser}` : undefined;
+
+const fmtDateTimeVN = (dateLike) => {
+    try {
+        if (!dateLike) return 'Thời gian không xác định';
+        const d = new Date(dateLike);
+        return d.toLocaleString('vi-VN', {
+            timeZone: VN_TZ,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    } catch {
+        return 'Thời gian không xác định';
+    }
+};
+
+// === Helpers cho messages ===
+const getSenderType = (msg, pageId) => {
+    // Ưu tiên trường bạn đã gán khi gửi lạc quan
+    if (msg?.senderType) return msg.senderType;
+    const fromId = String(msg?.from?.id || '');
+    return fromId === String(pageId) ? 'page' : 'customer';
+};
+
+const htmlToPlainText = (html) => {
+    if (!html) return '';
+    // bóc nhanh <div>…</div> -> text; bạn có thể thay bằng DOMPurify nếu cần an toàn XSS
+    return html.replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/div>\s*<div>/gi, '\n')
+        .replace(/<\/?[^>]+(>|$)/g, '')
+        .trim();
+};
+
+// Chuẩn hoá 1 message của Pancake thành cấu trúc UI bạn dùng
+const normalizePancakeMessage = (raw, pageId) => {
+    const senderType = getSenderType(raw, pageId);
+    const ts = raw.inserted_at;
+
+    // 1) Nếu có attachments -> trả theo loại
+    const atts = Array.isArray(raw.attachments) ? raw.attachments : [];
+
+    // gom ảnh
+    const imageAtts = atts.filter(a => a?.type === 'photo' && a?.url);
+    if (imageAtts.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'images',
+                images: imageAtts.map(a => ({ url: a.url, width: a?.image_data?.width, height: a?.image_data?.height }))
+            }
+        };
+    }
+
+    // file / các loại khác
+    const fileAtts = atts.filter(a => a?.type && a?.type !== 'photo');
+    if (fileAtts.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'files',
+                files: fileAtts.map(a => ({
+                    url: a.url,
+                    kind: a.type,
+                    // nếu API có thêm filename/mime -> map thêm ở đây
+                }))
+            }
+        };
+    }
+
+    // 2) Text: dùng original_message (thuần) – fallback từ html "message"
+    const text =
+        (typeof raw.original_message === 'string' && raw.original_message.trim().length > 0)
+            ? raw.original_message.trim()
+            : htmlToPlainText(raw.message || '');
+
+    return {
+        id: raw.id,
+        inserted_at: ts,
+        senderType,
+        status: raw.status || 'sent',
+        content: text ? { type: 'text', content: text } : { type: 'system', content: '' }
+    };
+};
+
+
+// Hợp nhất danh sách hội thoại theo id, giữ item mới hơn (updated_at lớn hơn)
+const mergeConversations = (prevList, incoming) => {
+    const map = new Map();
+    prevList.forEach((c) => map.set(c.id, c));
+    (incoming || []).forEach((c) => {
+        const old = map.get(c.id);
+        if (!old) map.set(c.id, c);
+        else {
+            const newer = new Date(c.updated_at).getTime() > new Date(old.updated_at).getTime();
+            map.set(c.id, newer ? c : old);
+        }
+    });
+    return Array.from(map.values());
+};
+
+// Lấy phần sau dấu "_" nếu có (theo API messages của Pancake)
+const extractConvoKey = (cid) => {
+    if (!cid) return cid;
+    const idx = String(cid).indexOf('_');
+    return idx >= 0 ? String(cid).slice(idx + 1) : String(cid);
+};
+
+// ======================= Subcomponents =======================
 const LabelDropdown = ({
     labels = [],
     selectedLabelIds = [],
     onLabelChange,
     trigger,
-    manageLabelsLink = "/label",
-    style = 'left'
+    manageLabelsLink = '/label',
+    style = 'left',
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -33,17 +163,21 @@ const LabelDropdown = ({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const filteredLabels = labels.filter(label =>
-        label.name.toLowerCase().includes(searchTerm.toLowerCase())
+    const filteredLabels = useMemo(
+        () => labels.filter((label) => (label?.name || '').toLowerCase().includes(searchTerm.toLowerCase())),
+        [labels, searchTerm]
     );
 
     return (
         <div className="relative" ref={dropdownRef}>
-            <div onClick={() => setIsOpen(!isOpen)}>{trigger}</div>
+            <div onClick={() => setIsOpen((v) => !v)}>{trigger}</div>
             {isOpen && (
-                <div style={{ right: style === 'right' ? 0 : 'auto', left: style === 'left' ? 0 : 'auto' }} className="absolute top-full mt-2 w-72 bg-blue-50 text-gray-900 rounded-md border border-gray-200 shadow-lg z-50 overflow-hidden">
+                <div
+                    style={{ right: style === 'right' ? 0 : 'auto', left: style === 'left' ? 0 : 'auto' }}
+                    className="absolute top-full mt-2 w-72 bg-blue-50 text-gray-900 rounded-md border border-gray-200 shadow-lg z-50 overflow-hidden"
+                >
                     <div className="p-3">
-                        <h4 className="font-semibold text-gray-800" style={{ marginBottom: 4 }}>Theo thẻ phân loại</h4>
+                        <h4 className="font-semibold text-gray-800 mb-1">Theo thẻ phân loại</h4>
                         <div className="relative">
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <input
@@ -56,8 +190,11 @@ const LabelDropdown = ({
                         </div>
                     </div>
                     <div className="max-h-60 overflow-y-auto px-3">
-                        {filteredLabels.map(label => (
-                            <label key={label._id} className="flex items-center gap-3 p-2.5 hover:bg-blue-100 rounded-md cursor-pointer">
+                        {filteredLabels.map((label) => (
+                            <label
+                                key={label._id}
+                                className="flex items-center gap-3 p-2.5 hover:bg-blue-100 rounded-md cursor-pointer"
+                            >
                                 <input
                                     type="checkbox"
                                     className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -70,7 +207,10 @@ const LabelDropdown = ({
                         ))}
                     </div>
                     <div className="border-t border-gray-200 mt-1">
-                        <Link href={manageLabelsLink} className="block w-full text-center p-3 hover:bg-blue-100 text-sm text-blue-600 font-medium">
+                        <Link
+                            href={manageLabelsLink}
+                            className="block w-full text-center p-3 hover:bg-blue-100 text-sm text-blue-600 font-medium"
+                        >
                             Quản lý thẻ phân loại
                         </Link>
                     </div>
@@ -79,32 +219,77 @@ const LabelDropdown = ({
         </div>
     );
 };
+
 const MessageContent = ({ content }) => {
-    if (!content) return <h5 className="italic text-gray-400 " style={{ textAlign: 'end' }}> Nội dung không hợp lệ</h5>;
+    if (!content) return (
+        <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
+            Nội dung không hợp lệ
+        </h5>
+    );
 
     switch (content.type) {
         case 'text':
-            return <h5 className="w" style={{ color: 'inherit', whiteSpace: 'wrap' }}>{content.content}</h5>;
-        case 'image':
-            return <img src={content.url} alt="Attachment" className="max-w-xs rounded-lg mt-1" />;
-        case 'receipt':
             return (
-                <div className="border-t border-gray-500/30 mt-2 pt-2">
-                    <h5 className="font-bold">{content.title}</h5>
-                    <h5 className="text-sm">Sản phẩm: {content.items}</h5>
-                    <h5 className="text-sm font-semibold">Tổng cộng: {content.total}</h5>
+                <h5 className="w" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
+                    {content.content}
+                </h5>
+            );
+
+        case 'images':
+            return (
+                <div className="flex flex-wrap gap-2 mt-1">
+                    {content.images.map((img, i) => (
+                        <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                            <img
+                                src={img.url}
+                                alt={`Attachment ${i + 1}`}
+                                className="max-w-[240px] max-h-[240px] rounded-lg object-cover"
+                                loading="lazy"
+                            />
+                        </a>
+                    ))}
                 </div>
             );
+
+        case 'files':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {content.files.map((f, i) => (
+                        <a
+                            key={i}
+                            href={f.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
+                            title={f.kind ? `Tệp ${f.kind}` : 'Tệp đính kèm'}
+                        >
+                            {/* Bạn có thể thay icon theo f.kind */}
+                            <svg width="16" height="16" viewBox="0 0 24 24" className="shrink-0">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" />
+                                <path d="M14 2v6h6" fill="none" stroke="currentColor" />
+                            </svg>
+                            <span className="truncate max-w-[280px]">
+                                {f.kind ? `${f.kind.toUpperCase()} file` : 'Tệp đính kèm'}
+                            </span>
+                        </a>
+                    ))}
+                </div>
+            );
+
         case 'system':
             return (
                 <div className="w-full text-center my-2">
-                    <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded-full">{content.content}</span>
+                    <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded-full">
+                        {content.content || '—'}
+                    </span>
                 </div>
             );
+
         default:
             return <h5 className="italic text-gray-400">Tin nhắn không được hỗ trợ</h5>;
     }
 };
+
 const MessageStatus = ({ status, error }) => {
     switch (status) {
         case 'sending':
@@ -136,157 +321,453 @@ const MessageStatus = ({ status, error }) => {
                 </div>
             );
     }
-}
-const avatar = ({ idpage, iduser }) => `https://pancake.vn/api/v1/pages/${idpage}/avatar/${iduser}`;
+};
 
+// ====================== Component chính (full socket) ======================
+export default function ChatClient({
+    pageConfig,
+    label: initialLabels,
+    token
+}) {
+    // 1) State hội thoại: KHỞI TẠO RỖNG
+    const [conversations, setConversations] = useState([]);
+    const [loadedCount, setLoadedCount] = useState(0);
 
-export default function ChatClient({ initialConversations, initialError, pageConfig, label: initialLabels }) {
-    const [conversations] = useState(initialConversations);
-    const [allLabels, setAllLabels] = useState(initialLabels);
+    const [allLabels, setAllLabels] = useState(initialLabels || []);
     const [selectedConvo, setSelectedConvo] = useState(null);
+    const selectedConvoRef = useRef(null);
+    useEffect(() => { selectedConvoRef.current = selectedConvo }, [selectedConvo]);
+
+    // 2) Messages detail cho hội thoại đang chọn
     const [messages, setMessages] = useState([]);
     const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
+    console.log(messages);
+
+    // 3) Search
+    const [searchInput, setSearchInput] = useState('');
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState([]);
+
+    // 4) Lọc theo nhãn
     const [selectedFilterLabelIds, setSelectedFilterLabelIds] = useState([]);
 
+    // 5) Refs UI
     const formRef = useRef(null);
     const messagesEndRef = useRef(null);
+    const sidebarRef = useRef(null);
+    const fileInputRef = useRef(null);
 
-    // ... (Toàn bộ logic hooks và handlers không thay đổi)
+    // Ảnh đang chọn (đã upload lên Drive) để gửi cùng tin nhắn
+    // Mỗi phần tử: { id, url, localId }
+    const [pendingImages, setPendingImages] = useState([]);
+    const [isUploadingImage, setIsUploadingImage] = useState(false);
+    // 6) Ước lượng “chưa rep” từ hội thoại
+    const isLastFromPage = useCallback(
+        (convo) => {
+            const last = convo?.last_sent_by;
+            const pageId = String(pageConfig?.id ?? '');
+            if (!last) return false;
+            const lastId = String(last.id ?? '');
+            const lastEmail = String(last.email ?? '');
+            const lastName = String(last.name ?? '');
+            return (
+                lastId === pageId ||
+                (lastEmail && lastEmail.startsWith(`${pageId}@`)) ||
+                lastName === pageConfig?.name
+            );
+        },
+        [pageConfig?.id, pageConfig?.name]
+    );
+    const estimateUnrepliedCount = useCallback(
+        (convo) => (isLastFromPage(convo) ? 0 : 1),
+        [isLastFromPage]
+    );
+
+    // 7) Auto scroll cuối khi messages đổi
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // ============== SOCKET.IO: kết nối + handlers ==============
+    const socketRef = useRef(null);
+
+    // applyPatch cho conv:patch
+    const applyPatch = useCallback((prev, patch) => {
+        if (!patch || !patch.type) return prev;
+        if (patch.type === 'replace' && Array.isArray(patch.items)) {
+            return (patch.items || []).filter(isInbox);
+        }
+        if (patch.type === 'upsert' && Array.isArray(patch.items)) {
+            const incoming = (patch.items || []).filter(isInbox);
+            return mergeConversations(prev, incoming);
+        }
+        if (patch.type === 'remove' && Array.isArray(patch.ids)) {
+            const set = new Set(patch.ids);
+            return prev.filter(c => !set.has(c.id));
+        }
+        return prev;
+    }, []);
+
     useEffect(() => {
-        if (!selectedConvo) return;
-        const eventSource = new EventSource(
-            `/api/messages/${selectedConvo.id}/stream?pageId=${pageConfig.id}&accessToken=${pageConfig.accessToken}`
-        );
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'new-message') {
-                const newMessage = data.payload;
-                setMessages(prevMessages => {
-                    const filteredMessages = prevMessages.filter(msg => !msg.id.toString().startsWith('optimistic-'));
-                    if (!filteredMessages.some(msg => msg.id === newMessage.id)) {
-                        return [...filteredMessages, { ...newMessage, status: 'sent' }];
-                    }
-                    return filteredMessages;
+        const s = io(SOCKET_URL, {
+            path: '/socket.io',
+            transports: ['websocket'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 3000,
+        });
+        socketRef.current = s;
+
+        s.on('connect', () => console.log('[socket] connected', s.id));
+        s.on('disconnect', (r) => console.warn('[socket] disconnected:', r));
+        s.on('connect_error', (e) => console.error('[socket] error:', e?.message || e));
+
+        // Realtime: patch hội thoại
+        s.on('conv:patch', (patch) => {
+            if (patch?.pageId && String(patch.pageId) !== String(pageConfig.id)) return;
+            setConversations(prev => {
+                const next = applyPatch(prev, patch);
+                return next.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            });
+        });
+
+        // Realtime: tin nhắn mới
+        s.on('msg:new', (msg) => {
+            const current = selectedConvoRef.current;
+            const targetId = msg?.conversationId || msg?.conversation?.id;
+            if (current && (targetId === current.id || extractConvoKey(targetId) === extractConvoKey(current.id))) {
+                setMessages(prev => [...prev, normalizePancakeMessage(msg, pageConfig.id)]);
+            }
+            if (targetId) {
+                setConversations(prev => {
+                    const conv = prev.find(c => c.id === targetId) || prev.find(c => extractConvoKey(c.id) === extractConvoKey(targetId)) || { id: targetId, type: 'INBOX' };
+                    const updated = {
+                        ...conv,
+                        snippet: (() => {
+                            const n = normalizePancakeMessage(msg, pageConfig.id);
+                            if (n?.content?.type === 'text') return n.content.content;
+                            if (n?.content?.type === 'images') return '[Ảnh]';
+                            if (n?.content?.type === 'files') return '[Tệp]';
+                            return conv.snippet;
+                        })(),
+                        updated_at: msg?.inserted_at || new Date().toISOString(),
+                    };
+                    const merged = mergeConversations(prev, [updated]);
+                    return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
                 });
             }
-        };
-        eventSource.onerror = (err) => {
-            console.error('Lỗi EventSource:', err);
-            eventSource.close();
-        };
+        });
+
+        // Yêu cầu danh sách ban đầu + bật poll phía server (KHÔNG FETCH PANCAKE Ở CLIENT)
+        s.emit('conv:get', { pageId: pageConfig.id, token, current_count: 0 }, (res) => {
+            if (res?.ok && Array.isArray(res.items)) {
+                const incoming = res.items.filter(isInbox);
+                setConversations(prev => {
+                    const merged = mergeConversations(prev, incoming);
+                    return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                });
+                setLoadedCount(incoming.length);
+            } else if (res?.error) {
+                console.error('[conv:get] error:', res.error);
+            }
+        });
+
         return () => {
-            eventSource.close();
+            if (selectedConvoRef.current?.id) {
+                try {
+                    s.emit('msg:watchStop', { pageId: pageConfig.id, conversationId: selectedConvoRef.current.id })
+                } catch (_) { }
+            }
+            s.off('conv:patch');
+            s.off('msg:new');
+            s.disconnect();
+            socketRef.current = null;
         };
-    }, [selectedConvo, pageConfig.id, pageConfig.accessToken]);
-    const handleSelectConvo = useCallback(async (conversation) => {
-        if (selectedConvo?.id === conversation.id) return;
-        setSelectedConvo(conversation);
-        setMessages([]);
-        setIsLoadingMessages(true);
-        const result = await getMessagesAction(pageConfig.id, pageConfig.accessToken, conversation.id);
-        if (result.success) {
-            const messagesWithStatus = result.data.map(m => ({ ...m, status: 'sent' }));
-            setMessages(messagesWithStatus);
-        } else {
-            alert(`Error: ${result.error}`);
-        }
-        setIsLoadingMessages(false);
-    }, [pageConfig, selectedConvo?.id]);
-    const handleSendMessage = async (formData) => {
-        const messageText = formData.get('message');
-        if (!messageText?.trim() || !selectedConvo) return;
-        const optimisticId = `optimistic-${Date.now()}`;
-        const optimisticMessage = {
-            id: optimisticId,
-            inserted_at: new Date().toISOString(),
-            senderType: 'page',
-            content: { type: 'text', content: messageText.trim() },
-            status: 'sending',
-            error: null,
-        };
-        setMessages(prev => [...prev, optimisticMessage]);
-        formRef.current?.reset();
-        const result = await sendMessageAction(pageConfig.id, pageConfig.accessToken, selectedConvo.id, messageText);
-        if (result.success) {
-            setMessages(prev => prev.map(msg => msg.id === optimisticId ? { ...msg, status: 'sent' } : msg));
-        } else {
-            setMessages(prev => prev.map(msg => msg.id === optimisticId ? { ...msg, status: 'failed', error: result.error || 'Gửi thất bại' } : msg));
-        }
-    };
-    const handleFilterLabelChange = (labelId, isChecked) => {
-        setSelectedFilterLabelIds(prev =>
-            isChecked ? [...prev, labelId] : prev.filter(id => id !== labelId)
-        );
-    };
-    const handleAssignLabelChange = async (labelId) => {
-        if (!selectedConvo) return;
-        const psid = selectedConvo.page_customer.psid;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pageConfig.id, token]);
 
-        const originalLabels = JSON.parse(JSON.stringify(allLabels));
+    // ===================== Load more (qua socket) =====================
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-        setAllLabels(prevLabels =>
-            prevLabels.map(label => {
-                if (label._id === labelId) {
-                    const customerExists = label.customer.includes(psid);
-                    const newCustomerList = customerExists
-                        ? label.customer.filter(cId => cId !== psid)
-                        : [...label.customer, psid];
-                    return { ...label, customer: newCustomerList };
+    const onSidebarScroll = useCallback(async () => {
+        if (isSearching) return;
+        const el = sidebarRef.current;
+        if (!el || isLoadingMore) return;
+        const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 200;
+        if (!nearBottom) return;
+
+        try {
+            setIsLoadingMore(true);
+            const nextCount = loadedCount + PAGE_SIZE;
+            const s = socketRef.current;
+            if (!s) return;
+            s.emit('conv:loadMore', { pageId: pageConfig.id, token, current_count: nextCount }, (ack) => {
+                if (ack?.ok && Array.isArray(ack.items)) {
+                    const incoming = ack.items.filter(isInbox);
+                    setConversations(prev => {
+                        const merged = mergeConversations(prev, incoming);
+                        return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                    });
+                    setLoadedCount(nextCount);
+                } else if (ack?.error) {
+                    console.error('[conv:loadMore] error:', ack.error);
                 }
-                return label;
+            });
+        } finally {
+            setIsLoadingMore(false);
+        }
+    }, [isSearching, isLoadingMore, loadedCount, pageConfig.id, token]);
+
+    useEffect(() => {
+        const el = sidebarRef.current;
+        if (!el) return;
+        const handler = () => onSidebarScroll();
+        el.addEventListener('scroll', handler);
+        return () => el.removeEventListener('scroll', handler);
+    }, [onSidebarScroll]);
+
+    // ===================== Handlers =====================
+    const handleSelectConvo = useCallback(
+        async (conversation) => {
+            if (selectedConvo?.id === conversation.id) return;
+
+            const s = socketRef.current;
+            if (!s) return;
+
+            // dừng watcher cũ (nếu có)
+            if (selectedConvo?.id) {
+                s.emit('msg:watchStop', { pageId: pageConfig.id, conversationId: selectedConvo.id });
+            }
+
+            // set UI & tải messages 1 lần
+            setSelectedConvo(conversation);
+            setMessages([]);
+            setIsLoadingMessages(true);
+
+            const convoKey = extractConvoKey(conversation.id);
+            const customerId = conversation?.customers?.[0]?.id || '';
+            s.emit(
+                'msg:get',
+                { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0 },
+                (res) => {
+                    if (res?.ok && Array.isArray(res.items)) {
+                        setMessages(res.items.map((m) => normalizePancakeMessage(m, pageConfig.id)));
+                    } else if (res?.error) {
+                        alert(`Error: ${res.error}`);
+                    }
+                    setIsLoadingMessages(false);
+                }
+            );
+
+            // bật watcher realtime cho hội thoại này
+            s.emit(
+                'msg:watchStart',
+                // count: 0 => server poll theo cursor từ đầu, sau đó tự nối tiếp
+                { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0, intervalMs: 2500 },
+                (ack) => {
+                    if (!ack?.ok) console.error('[msg:watchStart] error:', ack?.error);
+                }
+            );
+        },
+        [pageConfig.id, token, selectedConvo?.id]
+    );
+    // Click nút chọn ảnh
+    const triggerPickImage = useCallback(() => {
+        if (!selectedConvo) {
+            toast.warning('Hãy chọn một hội thoại trước khi đính kèm ảnh.');
+            return;
+        }
+        fileInputRef.current?.click();
+    }, [selectedConvo]);
+
+    // Upload ảnh lên Drive => thêm vào pendingImages để gửi
+    const onPickImage = useCallback(async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        setIsUploadingImage(true);
+        try {
+            for (const f of files) {
+                const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                // Upload lên Drive (server action)
+                const res = await uploadImageToDriveAction(f);
+                if (!res?.success) {
+                    toast.error(`Tải ảnh thất bại: ${res?.error || ''}`);
+                    continue;
+                }
+                setPendingImages(prev => [...prev, { id: res.id, url: res.url, localId }]);
+            }
+            // reset input để có thể chọn lại cùng 1 file
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        } finally {
+            setIsUploadingImage(false);
+        }
+    }, []);
+
+    const removePendingImage = useCallback((localId) => {
+        setPendingImages(prev => prev.filter(x => x.localId !== localId));
+    }, []);
+
+    const handleSendMessage = async (formData) => {
+        if (!selectedConvo) return;
+        const text = (formData.get('message') || '').trim();
+        const hasImages = pendingImages.length > 0;
+        if (!text && !hasImages) return;
+
+        // 1) Optimistic UI
+        const now = new Date().toISOString();
+        const optimisticEntries = [];
+        if (hasImages) {
+            // Gom tất cả ảnh thành 1 bubble ảnh (nhẹ giao diện hơn)
+            const optimisticIdImages = `optimistic-img-${Date.now()}`;
+            optimisticEntries.push({
+                id: optimisticIdImages,
+                inserted_at: now,
+                senderType: 'page',
+                status: 'sending',
+                content: {
+                    type: 'images',
+                    images: pendingImages.map(p => ({ url: p.url }))
+                }
+            });
+        }
+        if (text) {
+            const optimisticIdText = `optimistic-text-${Date.now()}`;
+            optimisticEntries.push({
+                id: optimisticIdText,
+                inserted_at: now,
+                senderType: 'page',
+                status: 'sending',
+                content: { type: 'text', content: text }
+            });
+        }
+        if (optimisticEntries.length) {
+            setMessages(prev => [...prev, ...optimisticEntries]);
+        }
+
+        // 2) Gửi lên Pancake
+        let overallOk = true;
+        let lastError = null;
+        try {
+            // Quy ước: nếu có >=1 ảnh, gửi ảnh đầu tiên kèm message (để “gửi chung hình và chữ”)
+            if (hasImages) {
+                const first = pendingImages[0];
+                const res1 = await sendImageAction(
+                    pageConfig.id,
+                    pageConfig.accessToken,
+                    selectedConvo.id,
+                    first.id,
+                    text || ''
+                );
+                if (!res1?.success) { overallOk = false; lastError = res1?.error || 'SEND_IMAGE_FAILED'; }
+
+                // Các ảnh còn lại (nếu có) → gửi không kèm message
+                for (let i = 1; i < pendingImages.length; i++) {
+                    const it = pendingImages[i];
+                    const r = await sendImageAction(pageConfig.id, pageConfig.accessToken, selectedConvo.id, it.id, '');
+                    if (!r?.success) { overallOk = false; lastError = r?.error || 'SEND_IMAGE_FAILED'; }
+                }
+            } else if (text) {
+                // Chỉ có text
+                const r = await sendMessageAction(
+                    pageConfig.id,
+                    pageConfig.accessToken,
+                    selectedConvo.id,
+                    text
+                );
+                if (!r?.success) { overallOk = false; lastError = r?.error || 'SEND_TEXT_FAILED'; }
+            }
+        } catch (e) {
+            overallOk = false;
+            lastError = e?.message || 'SEND_FAILED';
+        }
+
+        // 3) Cập nhật optimistic status + snippet sidebar
+        setMessages(prev =>
+            prev.map(m => {
+                if (optimisticEntries.find(o => o.id === m.id)) {
+                    return { ...m, status: overallOk ? 'sent' : 'failed', error: overallOk ? null : lastError };
+                }
+                return m;
             })
         );
 
-        const result = await toggleLabelForCustomer({ labelId, psid });
-
-        if (result.success) {
-            toast.success(result.message);
+        if (overallOk) {
+            setConversations(prev => {
+                const updated = {
+                    ...selectedConvo,
+                    snippet: text ? text : '[Ảnh]',
+                    updated_at: new Date().toISOString(),
+                    last_sent_by: { id: pageConfig.id, name: pageConfig.name, email: `${pageConfig.id}@pancake` },
+                };
+                const merged = mergeConversations(prev, [updated]);
+                return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            });
+            // Reset khung soạn
+            setPendingImages([]);
+            formRef.current?.reset();
         } else {
-            toast.error(result.error || 'Có lỗi xảy ra');
-            setAllLabels(originalLabels);
+            toast.error(lastError || 'Gửi thất bại');
         }
     };
-    const assignedLabelsForSelectedConvo = useMemo(() => {
-        if (!selectedConvo) return [];
-        const psid = selectedConvo.page_customer.psid;
-        return allLabels.filter(label => label.customer?.includes(psid));
-    }, [selectedConvo, allLabels]);
-    const filteredConversations = useMemo(() => {
-        return conversations.filter(convo => {
-            const query = searchQuery.toLowerCase().trim();
-            if (query) {
-                const customerName = (convo.customers?.[0]?.name || '').toLowerCase();
-                const phoneNumbers = convo.recent_phone_numbers?.map(p => p.phone_number) || [];
-                const searchMatches = customerName.includes(query) || phoneNumbers.some(phone => phone.includes(query));
-                if (!searchMatches) return false;
-            }
 
+    // ===================== Search (qua socket) =====================
+    const runSearch = useCallback(() => {
+        const q = (searchInput || '').trim();
+        if (!q) return;
+        const s = socketRef.current;
+        if (!s) return;
+        setIsSearching(true);
+        s.emit('conv:search', { pageId: pageConfig.id, token, q }, (ack) => {
+            if (ack?.ok && Array.isArray(ack.items)) {
+                setSearchResults(ack.items.filter(isInbox));
+            } else if (ack?.error) {
+                toast.error('Tìm kiếm thất bại');
+                console.error('[conv:search] error:', ack.error);
+            }
+        });
+    }, [searchInput, pageConfig.id, token]);
+
+    const clearSearch = useCallback(() => {
+        setIsSearching(false);
+        setSearchInput('');
+        setSearchResults([]);
+    }, []);
+
+    // ===================== Dữ liệu hiển thị =====================
+    const listForSidebar = isSearching ? searchResults : conversations;
+
+    const filteredSortedConversations = useMemo(() => {
+        const list = (listForSidebar || []).filter((convo) => {
             if (selectedFilterLabelIds.length > 0) {
-                const psid = convo.page_customer.psid;
+                const psid = getConvoPsid(convo);
+                if (!psid) return false;
                 const customerLabelIds = allLabels
-                    .filter(label => label.customer?.includes(psid))
-                    .map(label => label._id);
-
-                const hasAllLabels = selectedFilterLabelIds.every(filterId => customerLabelIds.includes(filterId));
-                if (!hasAllLabels) return false;
+                    .filter((label) => Array.isArray(label.customer) && label.customer.includes(psid))
+                    .map((label) => label._id);
+                const hasAll = selectedFilterLabelIds.every((id) => customerLabelIds.includes(id));
+                if (!hasAll) return false;
             }
-
             return true;
         });
-    }, [conversations, searchQuery, selectedFilterLabelIds, allLabels]);
+        return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    }, [listForSidebar, selectedFilterLabelIds, allLabels]);
 
+    const assignedLabelsForSelectedConvo = useMemo(() => {
+        if (!selectedConvo) return [];
+        const psid = getConvoPsid(selectedConvo);
+        if (!psid) return [];
+        return allLabels.filter((label) => Array.isArray(label.customer) && label.customer.includes(psid));
+    }, [selectedConvo, allLabels]);
 
+    // ===================== Render =====================
     return (
-        <div className='flex h-full w-full bg-white rounded-md border border-gray-200 flex-col p-2 gap-2'>
+        <div className="flex h-full w-full bg-white rounded-md border border-gray-200 flex-col p-2 gap-2">
             <Toaster richColors position="top-right" />
-            <div className='flex'>
-                {/* ... (Phần Header không thay đổi) */}
-                <div className='flex items-center gap-3 justify-between w-full'>
-                    <div className='flex-1 gap-2 flex items-center'>
+
+            {/* Header */}
+            <div className="flex">
+                <div className="flex items-center gap-3 justify-between w-full">
+                    <div className="flex-1 gap-2 flex items-center">
                         <Link
                             href="/pancake"
                             className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent pr-4 pl-2 py-2 text-sm font-semibold text-[--main_b] transition-colors duration-200 ease-in-out hover:bg-[--main_b] hover:text-white active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[--main_b]"
@@ -298,12 +779,14 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                         <LabelDropdown
                             labels={allLabels}
                             selectedLabelIds={selectedFilterLabelIds}
-                            onLabelChange={handleFilterLabelChange}
-                            style='left'
+                            onLabelChange={(labelId, checked) =>
+                                setSelectedFilterLabelIds(prev => checked ? [...prev, labelId] : prev.filter(id => id !== labelId))
+                            }
+                            style="left"
                             trigger={
                                 <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
                                     {selectedFilterLabelIds.length > 0 ? (
-                                        <span className='bg-blue-500 text-white rounded-full px-2 py-0.5 text-xs'>
+                                        <span className="bg-blue-500 text-white rounded-full px-2 py-0.5 text-xs">
                                             {selectedFilterLabelIds.length}
                                         </span>
                                     ) : (
@@ -315,44 +798,92 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                             }
                         />
 
+                        {/* Tìm kiếm */}
                         <div className="relative flex-grow">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <Search
+                                className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 cursor-pointer"
+                                onClick={() => runSearch()}
+                                title="Tìm kiếm"
+                            />
                             <input
                                 type="text"
                                 placeholder="Tìm kiếm theo tên hoặc SĐT..."
-                                className="w-full bg-gray-100 rounded-md pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full bg-gray-100 rounded-md pl-10 pr-10 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                value={searchInput}
+                                onChange={(e) => setSearchInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        runSearch();
+                                    }
+                                }}
+                                autoComplete="off"
                             />
+                            {isSearching && (
+                                <button
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                    onClick={clearSearch}
+                                    title="Xoá tìm kiếm"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            )}
                         </div>
                     </div>
-                    <div className=' flex gap-2 items-center'>
-                        <div className='flex flex-col items-end'>
-                            <h5 className='font-semibold'>{pageConfig.name}</h5>
-                            <h6 className='text-xs text-gray-500'>{pageConfig.platform === 'facebook' ? 'Page Facebook' : pageConfig.platform === 'instagram_official' ? 'Instagram Official' : pageConfig.platform === 'tiktok_business_messaging' ? 'TikTok Business Messaging' : null}</h6>
+
+                    <div className="flex gap-2 items-center">
+                        <div className="flex flex-col items-end">
+                            <h5 className="font-semibold">{pageConfig.name}</h5>
+                            <h6 className="text-xs text-gray-500">
+                                {pageConfig.platform === 'facebook'
+                                    ? 'Page Facebook'
+                                    : pageConfig.platform === 'instagram_official'
+                                        ? 'Instagram Official'
+                                        : pageConfig.platform === 'tiktok_business_messaging'
+                                            ? 'TikTok Business Messaging'
+                                            : null}
+                            </h6>
                         </div>
-                        <Image src={pageConfig.avatar} alt={pageConfig.name} width={36} height={36} className="rounded-md object-cover" />
+                        <Image
+                            src={pageConfig.avatar}
+                            alt={pageConfig.name}
+                            width={36}
+                            height={36}
+                            className="rounded-md object-cover"
+                        />
                     </div>
                 </div>
             </div>
-            <div className="flex-1 flex overflow-hidden bg-white rounded-md border border-gray-200">
-                <div className="w-full max-w-sm border-r border-gray-200 flex flex-col">
-                    <ul className="flex-1 overflow-y-auto">
-                        {/* CẬP NHẬT PHẦN HIỂN THỊ NHÃN TRONG DANH SÁCH */}
-                        {filteredConversations.map((convo) => {
-                            const avatarUrl = avatar({ idpage: pageConfig.id, iduser: convo.page_customer.psid });
-                            const customerName = convo.customers?.[0]?.name || 'Khách hàng ẩn';
-                            let date = new Date(convo.updated_at);
-                            let formattedTime = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
-                            // Tìm các nhãn được gán cho conversation này
-                            const assignedLabels = allLabels.filter(label =>
-                                label.customer?.includes(convo.page_customer.psid)
-                            );
+            {/* Body */}
+            <div className="flex-1 flex overflow-hidden bg-white rounded-md border border-gray-200">
+                {/* Sidebar hội thoại */}
+                <div className="w-full max-w-sm border-r border-gray-200 flex flex-col">
+                    <ul className="flex-1 overflow-y-auto" ref={sidebarRef}>
+                        {filteredSortedConversations.map((convo) => {
+                            const idUserForAvatar = getConvoAvatarId(convo);
+                            const avatarUrl = avatarUrlFor({ idpage: pageConfig.id, iduser: idUserForAvatar });
+                            const customerName = getConvoDisplayName(convo);
+                            const formattedDateTime = fmtDateTimeVN(convo.updated_at);
+
+                            const psid = getConvoPsid(convo);
+                            const assignedLabels = psid
+                                ? allLabels.filter(
+                                    (label) => Array.isArray(label.customer) && label.customer.includes(psid)
+                                )
+                                : [];
+
+                            const lastFromPage = isLastFromPage(convo);
+                            const snippetPrefix = lastFromPage ? 'Bạn: ' : `${customerName}: `;
+                            const unrepliedCount = (lastFromPage ? 0 : 1);
 
                             return (
-                                <li key={convo.id} onClick={() => handleSelectConvo(convo)}
-                                    className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 ${selectedConvo?.id === convo.id ? 'bg-blue-50' : ''}`}>
+                                <li
+                                    key={convo.id}
+                                    onClick={() => handleSelectConvo(convo)}
+                                    className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 ${selectedConvo?.id === convo.id ? 'bg-blue-50' : ''
+                                        }`}
+                                >
                                     <div className="relative mr-3">
                                         <FallbackAvatar
                                             src={avatarUrl}
@@ -362,106 +893,198 @@ export default function ChatClient({ initialConversations, initialError, pageCon
                                             height={48}
                                             className="rounded-full object-cover"
                                         />
+                                        {unrepliedCount > 0 && (
+                                            <span
+                                                className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center"
+                                                title="Tin nhắn chưa rep"
+                                            >
+                                                {unrepliedCount == 1 ? '!' : null}
+                                            </span>
+                                        )}
                                     </div>
-                                    <div className="flex-1 overflow-hidden">
-                                        <h6 style={{ fontWeight: 600 }} className="font-semibold truncate text-gray-800">{customerName}</h6>
-                                        <h6 className="text-sm text-gray-500 truncate">{convo.snippet}</h6>
 
-                                        {/* Thêm phần hiển thị chip nhãn */}
+                                    <div className="flex-1 overflow-hidden">
+                                        <h6 className="font-semibold truncate text-gray-800">{customerName}</h6>
+                                        <h6 className="text-sm text-gray-600 truncate">
+                                            {snippetPrefix}
+                                            {convo.snippet}
+                                        </h6>
+
                                         {assignedLabels.length > 0 && (
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                                {assignedLabels.map(label => (
-                                                    <h6 key={label._id}
-                                                        className=" rounded-full px-2 py-0.5"
-                                                        style={{ backgroundColor: label.color, color: 'white' }}>
+                                                {assignedLabels.map((label) => (
+                                                    <span
+                                                        key={label._id}
+                                                        className="rounded-full px-2 py-0.5 text-xs"
+                                                        style={{ backgroundColor: label.color, color: 'white' }}
+                                                    >
                                                         {label.name}
-                                                    </h6>
+                                                    </span>
                                                 ))}
                                             </div>
                                         )}
                                     </div>
-                                    <div className="text-xs text-gray-400">{formattedTime}</div>
+
+                                    <div className="text-right ml-2 whitespace-nowrap">
+                                        <div className="text-xs text-gray-500">{formattedDateTime}</div>
+                                    </div>
                                 </li>
                             );
                         })}
                     </ul>
+
+                    {isLoadingMore && (
+                        <div className="p-2 text-center text-xs text-gray-400">Đang tải thêm…</div>
+                    )}
                 </div>
-                {/* ... (Phần còn lại của component không thay đổi) */}
+
+                {/* Panel chi tiết */}
                 <div className="flex-1 flex flex-col bg-gray-50">
                     {selectedConvo ? (
                         <>
                             <div className="flex items-center p-3 border-b border-gray-200 bg-white justify-between">
-                                <div className='flex items-center'>
+                                <div className="flex items-center">
                                     <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center font-bold mr-3">
                                         <FallbackAvatar
-                                            src={avatar({ idpage: pageConfig.id, iduser: selectedConvo.page_customer.psid })}
-                                            alt={selectedConvo.customers?.[0]?.name || 'Khách hàng'}
-                                            name={selectedConvo.customers?.[0]?.name || 'Khách hàng'}
+                                            src={avatarUrlFor({
+                                                idpage: pageConfig.id,
+                                                iduser: getConvoAvatarId(selectedConvo),
+                                            })}
+                                            alt={getConvoDisplayName(selectedConvo)}
+                                            name={getConvoDisplayName(selectedConvo)}
                                             width={40}
                                             height={40}
                                             className="rounded-full object-cover"
                                         />
                                     </div>
-                                    <h4 className="font-bold text-lg text-gray-900">{selectedConvo.customers?.[0]?.name || 'Khách hàng'}</h4>
+                                    <h4 className="font-bold text-lg text-gray-900">
+                                        {getConvoDisplayName(selectedConvo)}
+                                    </h4>
                                 </div>
+
                                 <div>
-                                    <LabelDropdown
-                                        labels={allLabels}
-                                        selectedLabelIds={assignedLabelsForSelectedConvo.map(l => l._id)}
-                                        style='right'
-                                        onLabelChange={(labelId) => handleAssignLabelChange(labelId)}
-                                        trigger={
-                                            <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
-                                                <Tag className="h-4 w-4 text-gray-500" />
-                                                <span>Thêm nhãn</span>
-                                            </button>
-                                        }
-                                    />
+                                    {getConvoPsid(selectedConvo) ? (
+                                        <LabelDropdown
+                                            labels={allLabels}
+                                            selectedLabelIds={(allLabels || [])
+                                                .filter(l => Array.isArray(l.customer) && l.customer.includes(getConvoPsid(selectedConvo)))
+                                                .map(l => l._id)}
+                                            style="right"
+                                            onLabelChange={(labelId) => handleAssignLabelChange(labelId)}
+                                            trigger={
+                                                <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
+                                                    <Tag className="h-4 w-4 text-gray-500" />
+                                                    <span>Thêm nhãn</span>
+                                                </button>
+                                            }
+                                        />
+                                    ) : (
+                                        <button
+                                            disabled
+                                            className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+                                            title="Hội thoại không có PSID, không thể gán nhãn"
+                                        >
+                                            <Tag className="h-4 w-4" />
+                                            <span>Không thể gán nhãn</span>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-
-                            {assignedLabelsForSelectedConvo.length > 0 && (
-                                <div className="px-3 py-2 flex flex-wrap gap-2 border-b border-gray-200 bg-white">
-                                    {assignedLabelsForSelectedConvo.map(label => (
-                                        <div key={label._id} className="flex items-center text-xs font-medium text-white rounded-full pl-2 pr-1 py-0.5" style={{ backgroundColor: label.color }}>
-                                            {label.name}
-                                            <button onClick={() => handleAssignLabelChange(label._id)} className="ml-1 opacity-70 hover:opacity-100">
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
 
                             <div className="flex-1 p-6 space-y-1 overflow-y-auto">
-                                {isLoadingMessages && <div className="text-center text-gray-500">Đang tải tin nhắn...</div>}
+                                {isLoadingMessages && (
+                                    <div className="text-center text-gray-500">Đang tải tin nhắn...</div>
+                                )}
+
                                 {messages.map((msg, index) => {
                                     if (!msg) return null;
-                                    let date = new Date(msg.inserted_at);
-                                    let formattedTime = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-                                    return (
-                                        msg.content?.type === 'system' ?
-                                            <MessageContent key={msg.id || `msg-${index}`} content={msg.content} /> :
-                                            <div key={msg.id || `msg-${index}`} className={`flex flex-col my-1 ${msg.senderType === 'page' ? 'items-end' : 'items-start'}`}>
-                                                <div className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page' ? 'bg-blue-500 text-white items-end' : 'bg-white text-gray-800'}`}>
-                                                    <MessageContent content={msg.content} />
-                                                    <div className={`text-xs mt-1 ${msg.senderType === 'page' ? 'text-right text-blue-100/80' : 'text-left text-gray-500'}`}>
-                                                        {formattedTime}
-                                                    </div>
+                                    const formattedTime = fmtDateTimeVN(msg.inserted_at);
+                                    return msg.content?.type === 'system' ? (
+                                        <MessageContent key={msg.id || `msg-${index}`} content={msg.content} />
+                                    ) : (
+                                        <div
+                                            key={msg.id || `msg-${index}`}
+                                            className={`flex flex-col my-1 ${msg.senderType === 'page' ? 'items-end' : 'items-start'
+                                                }`}
+                                        >
+                                            <div
+                                                className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page'
+                                                    ? 'bg-blue-500 text-white items-end'
+                                                    : 'bg-white text-gray-800'
+                                                    }`}
+                                            >
+                                                <MessageContent content={msg.content} />
+                                                <div
+                                                    className={`text-xs mt-1 ${msg.senderType === 'page'
+                                                        ? 'text-right text-blue-100/80'
+                                                        : 'text-left text-gray-500'
+                                                        }`}
+                                                >
+                                                    {formattedTime}
                                                 </div>
-                                                {msg.senderType === 'page' && index === messages.length - 1 && (
-                                                    <MessageStatus status={msg.status} error={msg.error} />
-                                                )}
                                             </div>
+                                            {msg.senderType === 'page' && index === messages.length - 1 && (
+                                                <MessageStatus status={msg.status} error={msg.error} />
+                                            )}
+                                        </div>
                                     );
                                 })}
+
                                 <div ref={messagesEndRef} />
                             </div>
+
                             <form ref={formRef} action={handleSendMessage} className="p-4 border-t border-gray-200 bg-white">
-                                <input type="hidden" name="conversationId" value={selectedConvo.id} />
-                                <div className="flex items-center space-x-3 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
-                                    <input name="message" placeholder="Nhập tin nhắn..." required className="flex-1 bg-transparent text-sm focus:outline-none" autoComplete="off" />
-                                    <button type="submit" className="text-blue-500 hover:text-blue-700">
+                                {/* Preview ảnh đang chờ gửi */}
+                                {!!pendingImages.length && (
+                                    <div className="mb-2 flex flex-wrap gap-2">
+                                        {pendingImages.map(img => (
+                                            <div key={img.localId} className="relative">
+                                                <img
+                                                    src={img.url}
+                                                    alt="preview"
+                                                    className="h-20 w-20 rounded object-cover border"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removePendingImage(img.localId)}
+                                                    className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5 shadow hover:bg-gray-50"
+                                                    title="Xoá ảnh"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                                    <button
+                                        type="button"
+                                        className="text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                                        onClick={triggerPickImage}
+                                        disabled={isUploadingImage}
+                                        title="Đính kèm ảnh"
+                                    >
+                                        <ImageIcon className="h-5 w-5" />
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        multiple
+                                        className="hidden"
+                                        onChange={onPickImage}
+                                    />
+
+                                    <input
+                                        name="message"
+                                        placeholder={isUploadingImage ? "Đang tải ảnh..." : "Nhập tin nhắn..."}
+                                        className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
+                                        autoComplete="off"
+                                        disabled={isUploadingImage}
+                                    />
+
+                                    <button type="submit" className="text-blue-500 hover:text-blue-700 disabled:opacity-60" disabled={isUploadingImage}>
                                         <Send className="h-5 w-5" />
                                     </button>
                                 </div>
