@@ -429,7 +429,6 @@ export default function ChatClient({
             reconnectionAttempts: 5,
             reconnectionDelay: 3000,
             withCredentials: true,
-            transports: ['websocket'],
         });
         socketRef.current = s;
 
