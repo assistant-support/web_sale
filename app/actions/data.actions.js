@@ -19,7 +19,9 @@ export async function createAreaAction(_previousState, formData) {
     const user = await checkAuthToken();
 
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin')) {
+    console.log(user.role);
+
+    if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
     const formInputValues = formData.getAll('formInput');
@@ -57,7 +59,7 @@ export async function updateAreaAction(_previousState, formData) {
     const formInput = formInputValues.map(Number);
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin')) {
+    if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
     if (!id || !name) {
@@ -104,7 +106,7 @@ export async function deleteAreaAction(_previousState, formData) {
     const id = formData.get('id');
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
+    if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
     try {
@@ -198,7 +200,6 @@ export async function addRegistrationToAction(_previousState, inputData) {
         }
 
         // TRƯỜNG HỢP 2: TẠO KHÁCH HÀNG MỚI
-        console.log('[Action] Tạo khách hàng mới.');
         const newCustomerData = {
             name: rawData.name,
             phone: normalizedPhone,

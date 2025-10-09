@@ -50,6 +50,18 @@ const nextConfig = {
                 port: '',
                 pathname: '/**',
             },
+            {
+                protocol: 'https',
+                hostname: 'scontent.fdad5-1.fna.fbcdn.ne',
+                port: '',
+                pathname: '/**',
+            },
+            {
+                protocol: 'https',
+                hostname: 'scontent.fdad5-1.fna.fbcdn.net',
+                port: '',
+                pathname: '/**',
+            },
         ],
     },
     output: 'standalone',

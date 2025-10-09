@@ -6,32 +6,29 @@ import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDow
 import { sendMessageAction, uploadImageToDriveAction, sendImageAction } from './actions';
 import { Toaster, toast } from 'sonner';
 
-
 import Image from 'next/image';
 import Link from 'next/link';
 import FallbackAvatar from '@/components/FallbackAvatar';
 
 // ======================= Cấu hình nhỏ =======================
-const VN_TZ = 'Asia/Ho_Chi_Minh';
-const PAGE_SIZE = 40; // mỗi lần load thêm 40
+const PAGE_SIZE = 40; // mỗi lần load thêm hội thoại
 const SOCKET_URL = process.env.NEXT_PUBLIC_REALTIME_URL || 'http://localhost:3001';
 
-// ======================= Helper =======================
-const isInbox = (convo) => convo?.type === 'INBOX';
-const getConvoPsid = (convo) => convo?.from_psid || null;
-const getConvoAvatarId = (convo) =>
-    convo?.from_psid || convo?.customers?.[0]?.fb_id || convo?.from?.id || null;
-const getConvoDisplayName = (convo) =>
-    convo?.customers?.[0]?.name || convo?.from?.name || 'Khách hàng ẩn';
-const avatarUrlFor = ({ idpage, iduser }) =>
-    iduser ? `https://pancake.vn/api/v1/pages/${idpage}/avatar/${iduser}` : undefined;
+// ====== THỜI GIAN: +7 tiếng trước khi format ======
+const addHours = (dateLike, h) => {
+    if (!dateLike) return null;
+    const d = new Date(dateLike);
+    d.setHours(d.getHours() + h);
+    return d;
+};
 
+// Ghi đè format: luôn +7h rồi convert Asia/Ho_Chi_Minh
 const fmtDateTimeVN = (dateLike) => {
     try {
         if (!dateLike) return 'Thời gian không xác định';
-        const d = new Date(dateLike);
+        const d = addHours(dateLike, 7); // +7h
         return d.toLocaleString('vi-VN', {
-            timeZone: VN_TZ,
+            timeZone: 'Asia/Ho_Chi_Minh',
             year: 'numeric',
             month: '2-digit',
             day: '2-digit',
@@ -43,18 +40,27 @@ const fmtDateTimeVN = (dateLike) => {
     }
 };
 
+// ======================= Helper =======================
+const isInbox = (convo) => convo?.type === 'INBOX';
+const getConvoPsid = (convo) => convo?.from_psid || null;
+const getConvoAvatarId = (convo) =>
+    convo?.from_psid || convo?.customers?.[0]?.fb_id || convo?.from?.id || null;
+const getConvoDisplayName = (convo) =>
+    convo?.customers?.[0]?.name || convo?.from?.name || 'Khách hàng ẩn';
+const avatarUrlFor = ({ idpage, iduser }) =>
+    iduser ? `https://pancake.vn/api/v1/pages/${idpage}/avatar/${iduser}` : undefined;
+
 // === Helpers cho messages ===
 const getSenderType = (msg, pageId) => {
-    // Ưu tiên trường bạn đã gán khi gửi lạc quan
-    if (msg?.senderType) return msg.senderType;
+    if (msg?.senderType) return msg.senderType; // optimistic
     const fromId = String(msg?.from?.id || '');
     return fromId === String(pageId) ? 'page' : 'customer';
 };
 
 const htmlToPlainText = (html) => {
     if (!html) return '';
-    // bóc nhanh <div>…</div> -> text; bạn có thể thay bằng DOMPurify nếu cần an toàn XSS
-    return html.replace(/<br\s*\/?>/gi, '\n')
+    return html
+        .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<\/div>\s*<div>/gi, '\n')
         .replace(/<\/?[^>]+(>|$)/g, '')
         .trim();
@@ -65,11 +71,9 @@ const normalizePancakeMessage = (raw, pageId) => {
     const senderType = getSenderType(raw, pageId);
     const ts = raw.inserted_at;
 
-    // 1) Nếu có attachments -> trả theo loại
     const atts = Array.isArray(raw.attachments) ? raw.attachments : [];
 
-    // gom ảnh
-    const imageAtts = atts.filter(a => a?.type === 'photo' && a?.url);
+    const imageAtts = atts.filter((a) => a?.type === 'photo' && a?.url);
     if (imageAtts.length > 0) {
         return {
             id: raw.id,
@@ -78,13 +82,16 @@ const normalizePancakeMessage = (raw, pageId) => {
             status: raw.status || 'sent',
             content: {
                 type: 'images',
-                images: imageAtts.map(a => ({ url: a.url, width: a?.image_data?.width, height: a?.image_data?.height }))
-            }
+                images: imageAtts.map((a) => ({
+                    url: a.url,
+                    width: a?.image_data?.width,
+                    height: a?.image_data?.height,
+                })),
+            },
         };
     }
 
-    // file / các loại khác
-    const fileAtts = atts.filter(a => a?.type && a?.type !== 'photo');
+    const fileAtts = atts.filter((a) => a?.type && a?.type !== 'photo');
     if (fileAtts.length > 0) {
         return {
             id: raw.id,
@@ -93,18 +100,16 @@ const normalizePancakeMessage = (raw, pageId) => {
             status: raw.status || 'sent',
             content: {
                 type: 'files',
-                files: fileAtts.map(a => ({
+                files: fileAtts.map((a) => ({
                     url: a.url,
                     kind: a.type,
-                    // nếu API có thêm filename/mime -> map thêm ở đây
-                }))
-            }
+                })),
+            },
         };
     }
 
-    // 2) Text: dùng original_message (thuần) – fallback từ html "message"
     const text =
-        (typeof raw.original_message === 'string' && raw.original_message.trim().length > 0)
+        typeof raw.original_message === 'string' && raw.original_message.trim().length > 0
             ? raw.original_message.trim()
             : htmlToPlainText(raw.message || '');
 
@@ -113,10 +118,9 @@ const normalizePancakeMessage = (raw, pageId) => {
         inserted_at: ts,
         senderType,
         status: raw.status || 'sent',
-        content: text ? { type: 'text', content: text } : { type: 'system', content: '' }
+        content: text ? { type: 'text', content: text } : { type: 'system', content: '' },
     };
 };
-
 
 // Hợp nhất danh sách hội thoại theo id, giữ item mới hơn (updated_at lớn hơn)
 const mergeConversations = (prevList, incoming) => {
@@ -126,12 +130,17 @@ const mergeConversations = (prevList, incoming) => {
         const old = map.get(c.id);
         if (!old) map.set(c.id, c);
         else {
-            const newer = new Date(c.updated_at).getTime() > new Date(old.updated_at).getTime();
+            const newer =
+                new Date(c.updated_at).getTime() > new Date(old.updated_at).getTime();
             map.set(c.id, newer ? c : old);
         }
     });
     return Array.from(map.values());
 };
+
+// Sắp xếp tin nhắn tăng dần theo thời gian
+const sortAscByTime = (arr) =>
+    [...arr].sort((a, b) => new Date(a.inserted_at) - new Date(b.inserted_at));
 
 // Lấy phần sau dấu "_" nếu có (theo API messages của Pancake)
 const extractConvoKey = (cid) => {
@@ -164,7 +173,10 @@ const LabelDropdown = ({
     }, []);
 
     const filteredLabels = useMemo(
-        () => labels.filter((label) => (label?.name || '').toLowerCase().includes(searchTerm.toLowerCase())),
+        () =>
+            labels.filter((label) =>
+                (label?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+            ),
         [labels, searchTerm]
     );
 
@@ -221,11 +233,12 @@ const LabelDropdown = ({
 };
 
 const MessageContent = ({ content }) => {
-    if (!content) return (
-        <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
-            Nội dung không hợp lệ
-        </h5>
-    );
+    if (!content)
+        return (
+            <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
+                Nội dung không hợp lệ
+            </h5>
+        );
 
     switch (content.type) {
         case 'text':
@@ -263,7 +276,6 @@ const MessageContent = ({ content }) => {
                             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
                             title={f.kind ? `Tệp ${f.kind}` : 'Tệp đính kèm'}
                         >
-                            {/* Bạn có thể thay icon theo f.kind */}
                             <svg width="16" height="16" viewBox="0 0 24 24" className="shrink-0">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" />
                                 <path d="M14 2v6h6" fill="none" stroke="currentColor" />
@@ -327,21 +339,27 @@ const MessageStatus = ({ status, error }) => {
 export default function ChatClient({
     pageConfig,
     label: initialLabels,
-    token
+    token,
 }) {
-    // 1) State hội thoại: KHỞI TẠO RỖNG
+    // 1) State hội thoại
     const [conversations, setConversations] = useState([]);
     const [loadedCount, setLoadedCount] = useState(0);
 
     const [allLabels, setAllLabels] = useState(initialLabels || []);
     const [selectedConvo, setSelectedConvo] = useState(null);
     const selectedConvoRef = useRef(null);
-    useEffect(() => { selectedConvoRef.current = selectedConvo }, [selectedConvo]);
+    useEffect(() => {
+        selectedConvoRef.current = selectedConvo;
+    }, [selectedConvo]);
 
     // 2) Messages detail cho hội thoại đang chọn
     const [messages, setMessages] = useState([]);
     const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-    console.log(messages);
+
+    // Load older messages (scroll top)
+    const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const messagesScrollRef = useRef(null);
 
     // 3) Search
     const [searchInput, setSearchInput] = useState('');
@@ -357,10 +375,10 @@ export default function ChatClient({
     const sidebarRef = useRef(null);
     const fileInputRef = useRef(null);
 
-    // Ảnh đang chọn (đã upload lên Drive) để gửi cùng tin nhắn
-    // Mỗi phần tử: { id, url, localId }
+    // Ảnh pending
     const [pendingImages, setPendingImages] = useState([]);
     const [isUploadingImage, setIsUploadingImage] = useState(false);
+
     // 6) Ước lượng “chưa rep” từ hội thoại
     const isLastFromPage = useCallback(
         (convo) => {
@@ -377,10 +395,6 @@ export default function ChatClient({
             );
         },
         [pageConfig?.id, pageConfig?.name]
-    );
-    const estimateUnrepliedCount = useCallback(
-        (convo) => (isLastFromPage(convo) ? 0 : 1),
-        [isLastFromPage]
     );
 
     // 7) Auto scroll cuối khi messages đổi
@@ -403,7 +417,7 @@ export default function ChatClient({
         }
         if (patch.type === 'remove' && Array.isArray(patch.ids)) {
             const set = new Set(patch.ids);
-            return prev.filter(c => !set.has(c.id));
+            return prev.filter((c) => !set.has(c.id));
         }
         return prev;
     }, []);
@@ -415,17 +429,17 @@ export default function ChatClient({
             reconnectionAttempts: 5,
             reconnectionDelay: 3000,
             withCredentials: true,
+            transports: ['websocket'],
         });
         socketRef.current = s;
 
-        s.on('connect', () => console.log('[socket] connected', s.id));
         s.on('disconnect', (r) => console.warn('[socket] disconnected:', r));
         s.on('connect_error', (e) => console.error('[socket] error:', e?.message || e));
 
         // Realtime: patch hội thoại
         s.on('conv:patch', (patch) => {
             if (patch?.pageId && String(patch.pageId) !== String(pageConfig.id)) return;
-            setConversations(prev => {
+            setConversations((prev) => {
                 const next = applyPatch(prev, patch);
                 return next.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
             });
@@ -435,12 +449,23 @@ export default function ChatClient({
         s.on('msg:new', (msg) => {
             const current = selectedConvoRef.current;
             const targetId = msg?.conversationId || msg?.conversation?.id;
-            if (current && (targetId === current.id || extractConvoKey(targetId) === extractConvoKey(current.id))) {
-                setMessages(prev => [...prev, normalizePancakeMessage(msg, pageConfig.id)]);
+            if (
+                current &&
+                (targetId === current.id ||
+                    extractConvoKey(targetId) === extractConvoKey(current.id))
+            ) {
+                setMessages((prev) =>
+                    sortAscByTime([...prev, normalizePancakeMessage(msg, pageConfig.id)])
+                );
             }
             if (targetId) {
-                setConversations(prev => {
-                    const conv = prev.find(c => c.id === targetId) || prev.find(c => extractConvoKey(c.id) === extractConvoKey(targetId)) || { id: targetId, type: 'INBOX' };
+                setConversations((prev) => {
+                    const conv =
+                        prev.find((c) => c.id === targetId) ||
+                        prev.find((c) => extractConvoKey(c.id) === extractConvoKey(targetId)) || {
+                            id: targetId,
+                            type: 'INBOX',
+                        };
                     const updated = {
                         ...conv,
                         snippet: (() => {
@@ -458,11 +483,11 @@ export default function ChatClient({
             }
         });
 
-        // Yêu cầu danh sách ban đầu + bật poll phía server (KHÔNG FETCH PANCAKE Ở CLIENT)
+        // Lấy danh sách ban đầu
         s.emit('conv:get', { pageId: pageConfig.id, token, current_count: 0 }, (res) => {
             if (res?.ok && Array.isArray(res.items)) {
                 const incoming = res.items.filter(isInbox);
-                setConversations(prev => {
+                setConversations((prev) => {
                     const merged = mergeConversations(prev, incoming);
                     return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
                 });
@@ -475,7 +500,10 @@ export default function ChatClient({
         return () => {
             if (selectedConvoRef.current?.id) {
                 try {
-                    s.emit('msg:watchStop', { pageId: pageConfig.id, conversationId: selectedConvoRef.current.id })
+                    s.emit('msg:watchStop', {
+                        pageId: pageConfig.id,
+                        conversationId: selectedConvoRef.current.id,
+                    });
                 } catch (_) { }
             }
             s.off('conv:patch');
@@ -486,7 +514,7 @@ export default function ChatClient({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pageConfig.id, token]);
 
-    // ===================== Load more (qua socket) =====================
+    // ===================== Load more conversations (sidebar) =====================
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
     const onSidebarScroll = useCallback(async () => {
@@ -501,18 +529,22 @@ export default function ChatClient({
             const nextCount = loadedCount + PAGE_SIZE;
             const s = socketRef.current;
             if (!s) return;
-            s.emit('conv:loadMore', { pageId: pageConfig.id, token, current_count: nextCount }, (ack) => {
-                if (ack?.ok && Array.isArray(ack.items)) {
-                    const incoming = ack.items.filter(isInbox);
-                    setConversations(prev => {
-                        const merged = mergeConversations(prev, incoming);
-                        return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-                    });
-                    setLoadedCount(nextCount);
-                } else if (ack?.error) {
-                    console.error('[conv:loadMore] error:', ack.error);
+            s.emit(
+                'conv:loadMore',
+                { pageId: pageConfig.id, token, current_count: nextCount },
+                (ack) => {
+                    if (ack?.ok && Array.isArray(ack.items)) {
+                        const incoming = ack.items.filter(isInbox);
+                        setConversations((prev) => {
+                            const merged = mergeConversations(prev, incoming);
+                            return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                        });
+                        setLoadedCount(nextCount);
+                    } else if (ack?.error) {
+                        console.error('[conv:loadMore] error:', ack.error);
+                    }
                 }
-            });
+            );
         } finally {
             setIsLoadingMore(false);
         }
@@ -525,6 +557,54 @@ export default function ChatClient({
         el.addEventListener('scroll', handler);
         return () => el.removeEventListener('scroll', handler);
     }, [onSidebarScroll]);
+
+    // ===================== Load older messages by scroll top =====================
+    const loadOlderMessages = useCallback(() => {
+        if (!selectedConvo || !socketRef.current || isLoadingOlder || !hasMore) return;
+
+        setIsLoadingOlder(true);
+
+        const nextCount = (messages?.length || 0) + 30; // mỗi lần +30
+        const scroller = messagesScrollRef.current;
+        const prevScrollHeight = scroller ? scroller.scrollHeight : 0;
+        const prevScrollTop = scroller ? scroller.scrollTop : 0;
+
+        const convoKey = extractConvoKey(selectedConvo.id);
+        const customerId = selectedConvo?.customers?.[0]?.id || '';
+
+        socketRef.current.emit(
+            'msg:get',
+            { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: nextCount },
+            (res) => {
+                if (res?.ok && Array.isArray(res.items)) {
+                    const normalized = sortAscByTime(
+                        res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
+                    );
+                    setMessages(normalized);
+                    setHasMore(res.items.length >= nextCount); // còn nữa nếu server trả đủ
+
+                    requestAnimationFrame(() => {
+                        if (!scroller) return;
+                        const newScrollHeight = scroller.scrollHeight;
+                        scroller.scrollTop = newScrollHeight - (prevScrollHeight - prevScrollTop);
+                    });
+                }
+                setIsLoadingOlder(false);
+            }
+        );
+    }, [selectedConvo, messages, token, pageConfig.id, isLoadingOlder, hasMore]);
+
+    useEffect(() => {
+        const el = messagesScrollRef.current;
+        if (!el) return;
+
+        const onScrollTop = () => {
+            if (el.scrollTop <= 80) loadOlderMessages();
+        };
+
+        el.addEventListener('scroll', onScrollTop);
+        return () => el.removeEventListener('scroll', onScrollTop);
+    }, [loadOlderMessages]);
 
     // ===================== Handlers =====================
     const handleSelectConvo = useCallback(
@@ -542,6 +622,7 @@ export default function ChatClient({
             // set UI & tải messages 1 lần
             setSelectedConvo(conversation);
             setMessages([]);
+            setHasMore(true); // reset state load-more
             setIsLoadingMessages(true);
 
             const convoKey = extractConvoKey(conversation.id);
@@ -551,7 +632,11 @@ export default function ChatClient({
                 { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0 },
                 (res) => {
                     if (res?.ok && Array.isArray(res.items)) {
-                        setMessages(res.items.map((m) => normalizePancakeMessage(m, pageConfig.id)));
+                        const normalized = sortAscByTime(
+                            res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
+                        );
+                        setMessages(normalized);
+                        setHasMore(res.items.length > 0);
                     } else if (res?.error) {
                         alert(`Error: ${res.error}`);
                     }
@@ -562,7 +647,6 @@ export default function ChatClient({
             // bật watcher realtime cho hội thoại này
             s.emit(
                 'msg:watchStart',
-                // count: 0 => server poll theo cursor từ đầu, sau đó tự nối tiếp
                 { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0, intervalMs: 2500 },
                 (ack) => {
                     if (!ack?.ok) console.error('[msg:watchStart] error:', ack?.error);
@@ -571,7 +655,7 @@ export default function ChatClient({
         },
         [pageConfig.id, token, selectedConvo?.id]
     );
-    // Click nút chọn ảnh
+
     const triggerPickImage = useCallback(() => {
         if (!selectedConvo) {
             toast.warning('Hãy chọn một hội thoại trước khi đính kèm ảnh.');
@@ -580,7 +664,6 @@ export default function ChatClient({
         fileInputRef.current?.click();
     }, [selectedConvo]);
 
-    // Upload ảnh lên Drive => thêm vào pendingImages để gửi
     const onPickImage = useCallback(async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
@@ -588,15 +671,13 @@ export default function ChatClient({
         try {
             for (const f of files) {
                 const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-                // Upload lên Drive (server action)
                 const res = await uploadImageToDriveAction(f);
                 if (!res?.success) {
                     toast.error(`Tải ảnh thất bại: ${res?.error || ''}`);
                     continue;
                 }
-                setPendingImages(prev => [...prev, { id: res.id, url: res.url, localId }]);
+                setPendingImages((prev) => [...prev, { id: res.id, url: res.url, localId }]);
             }
-            // reset input để có thể chọn lại cùng 1 file
             if (fileInputRef.current) fileInputRef.current.value = '';
         } finally {
             setIsUploadingImage(false);
@@ -604,7 +685,7 @@ export default function ChatClient({
     }, []);
 
     const removePendingImage = useCallback((localId) => {
-        setPendingImages(prev => prev.filter(x => x.localId !== localId));
+        setPendingImages((prev) => prev.filter((x) => x.localId !== localId));
     }, []);
 
     const handleSendMessage = async (formData) => {
@@ -613,11 +694,10 @@ export default function ChatClient({
         const hasImages = pendingImages.length > 0;
         if (!text && !hasImages) return;
 
-        // 1) Optimistic UI
+        // Optimistic UI
         const now = new Date().toISOString();
         const optimisticEntries = [];
         if (hasImages) {
-            // Gom tất cả ảnh thành 1 bubble ảnh (nhẹ giao diện hơn)
             const optimisticIdImages = `optimistic-img-${Date.now()}`;
             optimisticEntries.push({
                 id: optimisticIdImages,
@@ -626,8 +706,8 @@ export default function ChatClient({
                 status: 'sending',
                 content: {
                     type: 'images',
-                    images: pendingImages.map(p => ({ url: p.url }))
-                }
+                    images: pendingImages.map((p) => ({ url: p.url })),
+                },
             });
         }
         if (text) {
@@ -637,18 +717,17 @@ export default function ChatClient({
                 inserted_at: now,
                 senderType: 'page',
                 status: 'sending',
-                content: { type: 'text', content: text }
+                content: { type: 'text', content: text },
             });
         }
         if (optimisticEntries.length) {
-            setMessages(prev => [...prev, ...optimisticEntries]);
+            setMessages((prev) => sortAscByTime([...prev, ...optimisticEntries]));
         }
 
-        // 2) Gửi lên Pancake
+        // Gửi thật
         let overallOk = true;
         let lastError = null;
         try {
-            // Quy ước: nếu có >=1 ảnh, gửi ảnh đầu tiên kèm message (để “gửi chung hình và chữ”)
             if (hasImages) {
                 const first = pendingImages[0];
                 const res1 = await sendImageAction(
@@ -658,33 +737,45 @@ export default function ChatClient({
                     first.id,
                     text || ''
                 );
-                if (!res1?.success) { overallOk = false; lastError = res1?.error || 'SEND_IMAGE_FAILED'; }
-
-                // Các ảnh còn lại (nếu có) → gửi không kèm message
+                if (!res1?.success) {
+                    overallOk = false;
+                    lastError = res1?.error || 'SEND_IMAGE_FAILED';
+                }
                 for (let i = 1; i < pendingImages.length; i++) {
                     const it = pendingImages[i];
-                    const r = await sendImageAction(pageConfig.id, pageConfig.accessToken, selectedConvo.id, it.id, '');
-                    if (!r?.success) { overallOk = false; lastError = r?.error || 'SEND_IMAGE_FAILED'; }
+                    const r = await sendImageAction(
+                        pageConfig.id,
+                        pageConfig.accessToken,
+                        selectedConvo.id,
+                        it.id,
+                        ''
+                    );
+                    if (!r?.success) {
+                        overallOk = false;
+                        lastError = r?.error || 'SEND_IMAGE_FAILED';
+                    }
                 }
             } else if (text) {
-                // Chỉ có text
                 const r = await sendMessageAction(
                     pageConfig.id,
                     pageConfig.accessToken,
                     selectedConvo.id,
                     text
                 );
-                if (!r?.success) { overallOk = false; lastError = r?.error || 'SEND_TEXT_FAILED'; }
+                if (!r?.success) {
+                    overallOk = false;
+                    lastError = r?.error || 'SEND_TEXT_FAILED';
+                }
             }
         } catch (e) {
             overallOk = false;
             lastError = e?.message || 'SEND_FAILED';
         }
 
-        // 3) Cập nhật optimistic status + snippet sidebar
-        setMessages(prev =>
-            prev.map(m => {
-                if (optimisticEntries.find(o => o.id === m.id)) {
+        // cập nhật optimistic status + snippet
+        setMessages((prev) =>
+            prev.map((m) => {
+                if (optimisticEntries.find((o) => o.id === m.id)) {
                     return { ...m, status: overallOk ? 'sent' : 'failed', error: overallOk ? null : lastError };
                 }
                 return m;
@@ -692,17 +783,20 @@ export default function ChatClient({
         );
 
         if (overallOk) {
-            setConversations(prev => {
+            setConversations((prev) => {
                 const updated = {
                     ...selectedConvo,
                     snippet: text ? text : '[Ảnh]',
                     updated_at: new Date().toISOString(),
-                    last_sent_by: { id: pageConfig.id, name: pageConfig.name, email: `${pageConfig.id}@pancake` },
+                    last_sent_by: {
+                        id: pageConfig.id,
+                        name: pageConfig.name,
+                        email: `${pageConfig.id}@pancake`,
+                    },
                 };
                 const merged = mergeConversations(prev, [updated]);
                 return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
             });
-            // Reset khung soạn
             setPendingImages([]);
             formRef.current?.reset();
         } else {
@@ -756,7 +850,9 @@ export default function ChatClient({
         if (!selectedConvo) return [];
         const psid = getConvoPsid(selectedConvo);
         if (!psid) return [];
-        return allLabels.filter((label) => Array.isArray(label.customer) && label.customer.includes(psid));
+        return allLabels.filter(
+            (label) => Array.isArray(label.customer) && label.customer.includes(psid)
+        );
     }, [selectedConvo, allLabels]);
 
     // ===================== Render =====================
@@ -780,7 +876,9 @@ export default function ChatClient({
                             labels={allLabels}
                             selectedLabelIds={selectedFilterLabelIds}
                             onLabelChange={(labelId, checked) =>
-                                setSelectedFilterLabelIds(prev => checked ? [...prev, labelId] : prev.filter(id => id !== labelId))
+                                setSelectedFilterLabelIds((prev) =>
+                                    checked ? [...prev, labelId] : prev.filter((id) => id !== labelId)
+                                )
                             }
                             style="left"
                             trigger={
@@ -875,7 +973,7 @@ export default function ChatClient({
 
                             const lastFromPage = isLastFromPage(convo);
                             const snippetPrefix = lastFromPage ? 'Bạn: ' : `${customerName}: `;
-                            const unrepliedCount = (lastFromPage ? 0 : 1);
+                            const unrepliedCount = lastFromPage ? 0 : 1;
 
                             return (
                                 <li
@@ -898,7 +996,7 @@ export default function ChatClient({
                                                 className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center"
                                                 title="Tin nhắn chưa rep"
                                             >
-                                                {unrepliedCount == 1 ? '!' : null}
+                                                {unrepliedCount === 1 ? '!' : null}
                                             </span>
                                         )}
                                     </div>
@@ -967,10 +1065,14 @@ export default function ChatClient({
                                         <LabelDropdown
                                             labels={allLabels}
                                             selectedLabelIds={(allLabels || [])
-                                                .filter(l => Array.isArray(l.customer) && l.customer.includes(getConvoPsid(selectedConvo)))
-                                                .map(l => l._id)}
+                                                .filter(
+                                                    (l) =>
+                                                        Array.isArray(l.customer) &&
+                                                        l.customer.includes(getConvoPsid(selectedConvo))
+                                                )
+                                                .map((l) => l._id)}
                                             style="right"
-                                            onLabelChange={(labelId) => handleAssignLabelChange(labelId)}
+                                            onLabelChange={(labelId) => {/* hook gán nhãn nếu cần */ }}
                                             trigger={
                                                 <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
                                                     <Tag className="h-4 w-4 text-gray-500" />
@@ -991,7 +1093,13 @@ export default function ChatClient({
                                 </div>
                             </div>
 
-                            <div className="flex-1 p-6 space-y-1 overflow-y-auto">
+                            <div ref={messagesScrollRef} className="flex-1 p-6 space-y-1 overflow-y-auto">
+                                {isLoadingOlder && (
+                                    <div className="text-center text-xs text-gray-400 mb-2">
+                                        Đang tải tin nhắn cũ…
+                                    </div>
+                                )}
+
                                 {isLoadingMessages && (
                                     <div className="text-center text-gray-500">Đang tải tin nhắn...</div>
                                 )}
@@ -1009,15 +1117,15 @@ export default function ChatClient({
                                         >
                                             <div
                                                 className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page'
-                                                    ? 'bg-blue-500 text-white items-end'
-                                                    : 'bg-white text-gray-800'
+                                                        ? 'bg-blue-500 text-white items-end'
+                                                        : 'bg-white text-gray-800'
                                                     }`}
                                             >
                                                 <MessageContent content={msg.content} />
                                                 <div
                                                     className={`text-xs mt-1 ${msg.senderType === 'page'
-                                                        ? 'text-right text-blue-100/80'
-                                                        : 'text-left text-gray-500'
+                                                            ? 'text-right text-blue-100/80'
+                                                            : 'text-left text-gray-500'
                                                         }`}
                                                 >
                                                     {formattedTime}
@@ -1034,10 +1142,9 @@ export default function ChatClient({
                             </div>
 
                             <form ref={formRef} action={handleSendMessage} className="p-4 border-t border-gray-200 bg-white">
-                                {/* Preview ảnh đang chờ gửi */}
                                 {!!pendingImages.length && (
                                     <div className="mb-2 flex flex-wrap gap-2">
-                                        {pendingImages.map(img => (
+                                        {pendingImages.map((img) => (
                                             <div key={img.localId} className="relative">
                                                 <img
                                                     src={img.url}
@@ -1078,13 +1185,17 @@ export default function ChatClient({
 
                                     <input
                                         name="message"
-                                        placeholder={isUploadingImage ? "Đang tải ảnh..." : "Nhập tin nhắn..."}
+                                        placeholder={isUploadingImage ? 'Đang tải ảnh...' : 'Nhập tin nhắn...'}
                                         className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
                                         autoComplete="off"
                                         disabled={isUploadingImage}
                                     />
 
-                                    <button type="submit" className="text-blue-500 hover:text-blue-700 disabled:opacity-60" disabled={isUploadingImage}>
+                                    <button
+                                        type="submit"
+                                        className="text-blue-500 hover:text-blue-700 disabled:opacity-60"
+                                        disabled={isUploadingImage}
+                                    >
                                         <Send className="h-5 w-5" />
                                     </button>
                                 </div>
