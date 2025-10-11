@@ -396,12 +396,6 @@ export default function ChatClient({
         },
         [pageConfig?.id, pageConfig?.name]
     );
-
-    // 7) Auto scroll cuối khi messages đổi
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-
     // ============== SOCKET.IO: kết nối + handlers ==============
     const socketRef = useRef(null);
 
@@ -456,6 +450,7 @@ export default function ChatClient({
                 setMessages((prev) =>
                     sortAscByTime([...prev, normalizePancakeMessage(msg, pageConfig.id)])
                 );
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }
             if (targetId) {
                 setConversations((prev) => {
@@ -570,23 +565,51 @@ export default function ChatClient({
 
         const convoKey = extractConvoKey(selectedConvo.id);
         const customerId = selectedConvo?.customers?.[0]?.id || '';
-
         socketRef.current.emit(
             'msg:get',
             { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: nextCount },
             (res) => {
                 if (res?.ok && Array.isArray(res.items)) {
-                    const normalized = sortAscByTime(
-                        res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
-                    );
-                    setMessages(normalized);
-                    setHasMore(res.items.length >= nextCount); // còn nữa nếu server trả đủ
+                    const incomingMessages = res.items;
 
+                    // SỬA LỖI LOGIC 1: Điều kiện dừng tải chính xác
+                    // Nếu số lượng tin nhắn API trả về BẰNG với số lượng tin nhắn đã có trước đó,
+                    // có nghĩa là không có tin nhắn nào cũ hơn được tải về.
+                    // "messages" ở đây là state cũ trước khi update.
+                    if (incomingMessages.length === messages.length) {
+                        setHasMore(false);
+                    } else {
+                        setHasMore(true);
+                    }
+
+                    // Cập nhật state bằng cách cộng dồn tin nhắn
+                    setMessages(prevMessages => {
+                        const messageMap = new Map();
+                        // Thêm tin nhắn mới tải về (cũ hơn về mặt thời gian)
+                        incomingMessages.forEach(rawMsg => {
+                            const normalized = normalizePancakeMessage(rawMsg, pageConfig.id);
+                            messageMap.set(normalized.id, normalized);
+                        });
+                        // Thêm tin nhắn đã có
+                        prevMessages.forEach(msg => {
+                            if (!messageMap.has(msg.id)) {
+                                messageMap.set(msg.id, msg);
+                            }
+                        });
+                        return sortAscByTime(Array.from(messageMap.values()));
+                    });
+
+                    // SỬA LỖI UX 2: Giữ nguyên vị trí scroll sau khi tải
+                    // Logic này của bạn đã đúng, giờ nó sẽ hoạt động vì không còn bị useEffect ghi đè.
                     requestAnimationFrame(() => {
                         if (!scroller) return;
                         const newScrollHeight = scroller.scrollHeight;
                         scroller.scrollTop = newScrollHeight - (prevScrollHeight - prevScrollTop);
                     });
+
+                } else {
+                    // Nếu API lỗi hoặc không trả về mảng, dừng việc tải
+                    setHasMore(false);
                 }
                 setIsLoadingOlder(false);
             }
@@ -798,6 +821,7 @@ export default function ChatClient({
             });
             setPendingImages([]);
             formRef.current?.reset();
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         } else {
             toast.error(lastError || 'Gửi thất bại');
         }
@@ -1116,15 +1140,15 @@ export default function ChatClient({
                                         >
                                             <div
                                                 className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page'
-                                                        ? 'bg-blue-500 text-white items-end'
-                                                        : 'bg-white text-gray-800'
+                                                    ? 'bg-blue-500 text-white items-end'
+                                                    : 'bg-white text-gray-800'
                                                     }`}
                                             >
                                                 <MessageContent content={msg.content} />
                                                 <div
                                                     className={`text-xs mt-1 ${msg.senderType === 'page'
-                                                            ? 'text-right text-blue-100/80'
-                                                            : 'text-left text-gray-500'
+                                                        ? 'text-right text-blue-100/80'
+                                                        : 'text-left text-gray-500'
                                                         }`}
                                                 >
                                                     {formattedTime}
