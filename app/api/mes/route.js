@@ -1,4 +1,4 @@
-import { addRegistrationToAction } from '@/app/actions/data.actions';
+import Customer from '@/models/customer.model';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,21 +8,18 @@ export const dynamic = 'force-dynamic';
 // --- Pancake API ---
 // URL và Token để lấy dữ liệu hội thoại từ Pancake.vn
 const PANCAKE_API_URL = 'https://pancake.vn/api/v1/conversations';
-const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3Njc2ODY2NzksImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoibGtlMTltRTUwZWx2a3VKL0FsZ0s1TjhoM0FnMC9JMUZRK29FMkRSL3R4MCIsImlhdCI6MTc1OTkxMDY3OSwiZmJfaWQiOiIxMjIxNDc0MjEzMzI2OTA1NjEiLCJsb2dpbl9zZXNzaW9uIjpudWxsLCJmYl9uYW1lIjoiRGV2IFN1cHBvcnQifQ.2GybMzOImT5DLo2dktr3PJPTWPVpefiYo7mk6cq-P0M';
+const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV...'; // rút gọn trong ví dụ
 const PAGE_IDS = [
     'igo_17841465772365564', 'igo_17841459653240080', 'igo_17841432303738838',
     '140918602777989', '104088111408586', '111644183773352', '1992837824267906'
 ];
 
 // --- Registration Defaults ---
-// Thông tin mặc định khi tạo khách hàng mới từ inbox
 const DEFAULT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
 const DEFAULT_SOURCE_NAME = 'facebook_inbox';
 
-
 // ===== HELPER FUNCTIONS (Không thay đổi) =====
 
-// Chuẩn hóa số điện thoại Việt Nam
 function normalizeVNPhone(digits) {
     if (!digits) return null;
     let cleaned = digits.replace(/[^\d+]/g, '');
@@ -39,14 +36,12 @@ function normalizeVNPhone(digits) {
     if (/^0\d{10}$/.test(cleaned)) {
         return cleaned;
     }
-    return null; // Trả về null nếu không khớp định dạng chuẩn
+    return null;
 }
 
-// Trích xuất số điện thoại từ một đoạn văn bản
 function extractPhones(text) {
     if (typeof text !== 'string' || !text.trim()) return [];
     const out = new Set();
-    // Regex linh hoạt để bắt các SĐT có thể có dấu cách, chấm, gạch ngang
     const pattern = /(?:\+?84|0)[\s.\-_]*(?:\d[\s.\-_]*){8,10}\d/g;
     const matches = text.match(pattern) || [];
 
@@ -84,12 +79,11 @@ export async function GET() {
         const conversationData = await response.json();
         const conversations = Array.isArray(conversationData?.conversations) ? conversationData.conversations : [];
 
-        // 2. Xử lý tự động: quét SĐT và gọi Action
+        // 2. Xử lý tự động: quét SĐT và thao tác DB với Customer model
         const automationResults = [];
         const processedConversations = [];
 
         for (const conv of conversations) {
-            // Chỉ xử lý những hội thoại có tin nhắn chưa đọc
             if (!conv.unread_count || conv.unread_count === 0) {
                 continue;
             }
@@ -99,7 +93,7 @@ export async function GET() {
             const textToScan = conv.snippet || '';
             const detectedPhones = new Set();
 
-            // Ưu tiên 1: Lấy SĐT từ trường `recent_phone_numbers` (chính xác nhất)
+            // Ưu tiên 1: Lấy SĐT từ trường `recent_phone_numbers`
             if (Array.isArray(conv.recent_phone_numbers)) {
                 conv.recent_phone_numbers.forEach(p => {
                     if (p.phone_number) {
@@ -115,7 +109,6 @@ export async function GET() {
                 phonesFromSnippet.forEach(phone => detectedPhones.add(phone));
             }
 
-            // Nếu không tìm thấy SĐT trong cả hai nguồn, bỏ qua
             if (detectedPhones.size === 0) {
                 automationResults.push({
                     conversation_id: conv.id,
@@ -126,31 +119,74 @@ export async function GET() {
                 continue;
             }
 
-            // Lấy SĐT đầu tiên tìm được để đăng ký
+            // Lấy SĐT đầu tiên (đã là dạng 0xxxx... nếu normalize thành công)
             const phoneToRegister = [...detectedPhones][0];
 
-            // Tạo FormData để gọi Server Action
-            const formData = new FormData();
-            formData.set('name', customerName);
-            formData.set('phone', phoneToRegister);
-            formData.set('source', DEFAULT_SOURCE_ID);
-            formData.set('sourceName', DEFAULT_SOURCE_NAME);
-
-            let actionResult;
-            try {
-                // Gọi Server Action để thêm khách hàng
-                actionResult = await addRegistrationToAction({}, formData);
-            } catch (e) {
-                actionResult = { ok: false, message: e?.message || 'Lỗi không xác định khi gọi Server Action.' };
+            if (!phoneToRegister) {
+                automationResults.push({
+                    conversation_id: conv.id,
+                    decision: 'phone_normalization_failed',
+                    customer_name: customerName,
+                    raw_snippet: textToScan,
+                });
+                continue;
             }
 
-            automationResults.push({
-                conversation_id: conv.id,
-                decision: 'register_attempted',
-                customer_name: customerName,
-                phone_used: phoneToRegister,
-                action_result: actionResult,
-            });
+            // --- Kiểm tra DB (Customer model) ---
+            try {
+                // Tìm xem đã có phone này chưa (so sánh chính xác trên trường phone)
+                const existing = await Customer.findOne({ phone: phoneToRegister }).lean?.() ?? await Customer.findOne({ phone: phoneToRegister });
+
+                if (existing) {
+                    automationResults.push({
+                        conversation_id: conv.id,
+                        decision: 'already_exists',
+                        customer_name: customerName,
+                        phone_used: phoneToRegister,
+                        existing_customer_id: existing._id ?? existing.id ?? null,
+                    });
+                    continue; // bỏ qua tạo mới
+                }
+
+                // Nếu chưa tồn tại -> tạo mới
+                const newCustomerData = {
+                    name: customerName,
+                    phone: phoneToRegister,
+                    source: DEFAULT_SOURCE_ID,
+                    sourceName: DEFAULT_SOURCE_NAME,
+                    // bạn có thể thêm các trường mặc định khác ở đây nếu model yêu cầu
+                };
+
+                // Sử dụng create hoặc new + save tùy model
+                let created;
+                if (typeof Customer.create === 'function') {
+                    created = await Customer.create(newCustomerData);
+                } else {
+                    // fallback nếu model là class với constructor
+                    created = new Customer(newCustomerData);
+                    if (typeof created.save === 'function') {
+                        created = await created.save();
+                    }
+                }
+
+                automationResults.push({
+                    conversation_id: conv.id,
+                    decision: 'created',
+                    customer_name: customerName,
+                    phone_used: phoneToRegister,
+                    created_customer_id: created._id ?? created.id ?? null,
+                });
+
+            } catch (dbErr) {
+                // Lỗi khi truy vấn/ghi DB
+                automationResults.push({
+                    conversation_id: conv.id,
+                    decision: 'db_error',
+                    customer_name: customerName,
+                    phone_used: phoneToRegister,
+                    error: dbErr?.message || String(dbErr),
+                });
+            }
         }
 
         // 3. Trả về kết quả
