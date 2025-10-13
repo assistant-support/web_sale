@@ -8,40 +8,48 @@ export const dynamic = 'force-dynamic';
 // --- Pancake API ---
 // URL và Token để lấy dữ liệu hội thoại từ Pancake.vn
 const PANCAKE_API_URL = 'https://pancake.vn/api/v1/conversations';
-const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV...'; // rút gọn trong ví dụ
+const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3Njc2ODY2NzksImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoibGtlMTltRTUwZWx2a3VKL0FsZ0s1TjhoM0FnMC9JMUZRK29FMkRSL3R4MCIsImlhdCI6MTc1OTkxMDY3OSwiZmJfaWQiOiIxMjIxNDc0MjEzMzI2OTA1NjEiLCJsb2dpbl9zZXNzaW9uIjpudWxsLCJmYl9uYW1lIjoiRGV2IFN1cHBvcnQifQ.2GybMzOImT5DLo2dktr3PJPTWPVpefiYo7mk6cq-P0M';
 const PAGE_IDS = [
     'igo_17841465772365564', 'igo_17841459653240080', 'igo_17841432303738838',
     '140918602777989', '104088111408586', '111644183773352', '1992837824267906'
 ];
 
 // --- Registration Defaults ---
+// Thông tin mặc định khi tạo khách hàng mới từ inbox
 const DEFAULT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
 const DEFAULT_SOURCE_NAME = 'facebook_inbox';
 
+
 // ===== HELPER FUNCTIONS (Không thay đổi) =====
 
+// Chuẩn hóa số điện thoại Việt Nam
 function normalizeVNPhone(digits) {
     if (!digits) return null;
-    let cleaned = digits.replace(/[^\d+]/g, '');
+    let cleaned = String(digits).replace(/[^\d+]/g, '');
 
+    // Nếu có +84 hoặc 84 ở đầu -> chuyển thành 0
     if (/^\+?84\d{9,10}$/.test(cleaned)) {
         cleaned = cleaned.replace(/^\+?84/, '0');
     }
+    // Nếu chỉ có 9 chữ số và không bắt đầu bằng 0 -> thêm 0
     if (/^\d{9}$/.test(cleaned) && !cleaned.startsWith('0')) {
         cleaned = '0' + cleaned;
     }
+    // Kiểm tra định dạng 10 hoặc 11 chữ số bắt đầu bằng 0
     if (/^0\d{9}$/.test(cleaned)) {
         return cleaned;
     }
     if (/^0\d{10}$/.test(cleaned)) {
         return cleaned;
     }
-    return null;
+    return null; // Trả về null nếu không khớp định dạng chuẩn
 }
 
+// Trích xuất số điện thoại từ một đoạn văn bản
 function extractPhones(text) {
     if (typeof text !== 'string' || !text.trim()) return [];
     const out = new Set();
+    // Regex linh hoạt để bắt các SĐT có thể có dấu cách, chấm, gạch ngang
     const pattern = /(?:\+?84|0)[\s.\-_]*(?:\d[\s.\-_]*){8,10}\d/g;
     const matches = text.match(pattern) || [];
 
@@ -52,6 +60,7 @@ function extractPhones(text) {
     }
     return [...out];
 }
+
 
 // ===== API ROUTE HANDLER =====
 
@@ -84,6 +93,7 @@ export async function GET() {
         const processedConversations = [];
 
         for (const conv of conversations) {
+            // Chỉ xử lý những hội thoại có tin nhắn chưa đọc
             if (!conv.unread_count || conv.unread_count === 0) {
                 continue;
             }
@@ -93,10 +103,10 @@ export async function GET() {
             const textToScan = conv.snippet || '';
             const detectedPhones = new Set();
 
-            // Ưu tiên 1: Lấy SĐT từ trường `recent_phone_numbers`
+            // Ưu tiên 1: Lấy SĐT từ trường `recent_phone_numbers` (chính xác nhất)
             if (Array.isArray(conv.recent_phone_numbers)) {
                 conv.recent_phone_numbers.forEach(p => {
-                    if (p.phone_number) {
+                    if (p && p.phone_number) {
                         const normalized = normalizeVNPhone(p.phone_number);
                         if (normalized) detectedPhones.add(normalized);
                     }
@@ -109,6 +119,7 @@ export async function GET() {
                 phonesFromSnippet.forEach(phone => detectedPhones.add(phone));
             }
 
+            // Nếu không tìm thấy SĐT trong cả hai nguồn, bỏ qua
             if (detectedPhones.size === 0) {
                 automationResults.push({
                     conversation_id: conv.id,
@@ -119,9 +130,10 @@ export async function GET() {
                 continue;
             }
 
-            // Lấy SĐT đầu tiên (đã là dạng 0xxxx... nếu normalize thành công)
+            // Lấy SĐT đầu tiên tìm được để đăng ký (đã ở dạng chuẩn 0xxxx...)
             const phoneToRegister = [...detectedPhones][0];
 
+            // Nếu normalize không trả về giá trị hợp lệ (điều kiện phòng vệ)
             if (!phoneToRegister) {
                 automationResults.push({
                     conversation_id: conv.id,
@@ -135,7 +147,8 @@ export async function GET() {
             // --- Kiểm tra DB (Customer model) ---
             try {
                 // Tìm xem đã có phone này chưa (so sánh chính xác trên trường phone)
-                const existing = await Customer.findOne({ phone: phoneToRegister }).lean?.() ?? await Customer.findOne({ phone: phoneToRegister });
+                // Sử dụng exec() để có Promise thực thi
+                const existing = await Customer.findOne({ phone: phoneToRegister }).exec();
 
                 if (existing) {
                     automationResults.push({
@@ -154,28 +167,60 @@ export async function GET() {
                     phone: phoneToRegister,
                     source: DEFAULT_SOURCE_ID,
                     sourceName: DEFAULT_SOURCE_NAME,
-                    // bạn có thể thêm các trường mặc định khác ở đây nếu model yêu cầu
+                    // Bạn có thể thêm các trường mặc định khác ở đây nếu model yêu cầu
                 };
 
-                // Sử dụng create hoặc new + save tùy model
-                let created;
-                if (typeof Customer.create === 'function') {
-                    created = await Customer.create(newCustomerData);
-                } else {
-                    // fallback nếu model là class với constructor
-                    created = new Customer(newCustomerData);
-                    if (typeof created.save === 'function') {
-                        created = await created.save();
+                let createdCustomer = null;
+                try {
+                    // Thử tạo bản ghi mới
+                    if (typeof Customer.create === 'function') {
+                        createdCustomer = await Customer.create(newCustomerData);
+                    } else {
+                        // fallback nếu model là class với constructor
+                        createdCustomer = new Customer(newCustomerData);
+                        if (typeof createdCustomer.save === 'function') {
+                            createdCustomer = await createdCustomer.save();
+                        }
+                    }
+
+                    automationResults.push({
+                        conversation_id: conv.id,
+                        decision: 'created',
+                        customer_name: customerName,
+                        phone_used: phoneToRegister,
+                        created_customer_id: createdCustomer._id ?? createdCustomer.id ?? null,
+                    });
+                } catch (createErr) {
+                    // Xử lý trường hợp race-condition / duplicate key (ví dụ index unique trên phone)
+                    // Mongo duplicate key error thường có code 11000
+                    if (createErr && (createErr.code === 11000 || (createErr.name === 'MongoError' && createErr.code === 11000))) {
+                        // Trong trường hợp bị duplicate khi tạo, coi là đã tồn tại
+                        // Lấy lại bản ghi hiện có để lấy id
+                        let dupExisting = null;
+                        try {
+                            dupExisting = await Customer.findOne({ phone: phoneToRegister }).exec();
+                        } catch (e) {
+                            // ignore
+                        }
+                        automationResults.push({
+                            conversation_id: conv.id,
+                            decision: 'already_exists_after_create_attempt',
+                            customer_name: customerName,
+                            phone_used: phoneToRegister,
+                            existing_customer_id: dupExisting?._id ?? dupExisting?.id ?? null,
+                            note: 'Duplicate key detected when creating, treated as already exists.',
+                        });
+                    } else {
+                        // Lỗi khác khi tạo
+                        automationResults.push({
+                            conversation_id: conv.id,
+                            decision: 'db_create_error',
+                            customer_name: customerName,
+                            phone_used: phoneToRegister,
+                            error: createErr?.message || String(createErr),
+                        });
                     }
                 }
-
-                automationResults.push({
-                    conversation_id: conv.id,
-                    decision: 'created',
-                    customer_name: customerName,
-                    phone_used: phoneToRegister,
-                    created_customer_id: created._id ?? created.id ?? null,
-                });
 
             } catch (dbErr) {
                 // Lỗi khi truy vấn/ghi DB
