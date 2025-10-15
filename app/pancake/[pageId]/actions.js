@@ -24,7 +24,7 @@ export async function uploadImageToDriveAction(file) {
         const id = info?.id;
         if (!id) return { success: false, error: 'UPLOAD_OK_BUT_NO_ID' };
         console.log(info);
-        
+
         return { success: true, id, url: viewUrlFromId(id) };
     } catch (e) {
         console.error('[uploadImageToDriveAction] error:', e?.message || e);
@@ -45,15 +45,16 @@ export async function sendImageAction(pageId, accessToken, conversationId, image
         fd.append('send_by_platform', 'web');
         fd.append('message', message || '')
         const url =
-            `${PANCAKE_API_BASE_URL}/public_api/v1/pages/${pageId}` +
-            `/conversations/${conversationId}/messages?page_access_token=${accessToken}`;
+            `https://pancake.vn/api/v1/pages/${pageId}` +
+            `/conversations/${conversationId}/messages?access_token=${accessToken}`;
 
-        const res = await fetch(url, { method: 'POST', body: fd });
-        if (!res.ok) {
-            const text = await res.text().catch(() => '');
-            throw new Error(text || `HTTP ${res.status}`);
-        }
-        return { success: true };
+        let res = await fetch(url, { method: 'POST', body: fd });
+        console.log(res);
+        
+        res = await res.json();
+        console.log(res);
+        if (res.success) return { success: true };
+        return { success: false, error: 'Pancake API reported failure' };
     } catch (e) {
         console.error('[sendImageAction] error:', e?.message || e);
         return { success: false, error: e?.message || 'SEND_IMAGE_FAILED' };
@@ -69,24 +70,27 @@ export async function sendMessageAction(pageId, accessToken, conversationId, mes
         }
 
         const url =
-            `${PANCAKE_API_BASE_URL}/public_api/v1/pages/${pageId}` +
-            `/conversations/${conversationId}/messages`;
+            `https://pancake.vn/api/v1/pages/${pageId}` +
+            `/conversations/${conversationId}/messages?access_token=${accessToken}`;
 
         const payload = {
             action: 'reply_inbox',
             message: text,
             messaging_type: 'MESSAGE_TAG',
             tag: 'POST_PURCHASE_UPDATE',
+            send_by_platform: "web"
         };
-
-        const res = await axios.post(url, payload, {
-            params: { page_access_token: accessToken },
+        let res = await fetch(url, {
+            method: 'POST', body: JSON.stringify(payload), headers: {
+                'Content-Type': 'application/json'     // cần có header này khi gửi JSON
+            },
         });
-
-        if (res.data?.success) return { success: true };
+        res = await res.json();
+        console.log(res);
+        if (res.success) return { success: true };
         return { success: false, error: 'Pancake API reported failure' };
     } catch (e) {
-        console.error('[sendMessageAction] error:', e?.response?.data || e?.message || e);
+        console.log('[sendMessageAction] error:', e?.response?.data || e?.message || e);
         return { success: false, error: e?.response?.data?.message || 'Failed to send message' };
     }
 }

@@ -711,6 +711,7 @@ export default function ChatClient({
     }, []);
 
     const handleSendMessage = async (formData) => {
+        console.log('Sending message:', formData, selectedConvo);
         if (!selectedConvo) return;
         const text = (formData.get('message') || '').trim();
         const hasImages = pendingImages.length > 0;
@@ -782,7 +783,7 @@ export default function ChatClient({
                     pageConfig.id,
                     pageConfig.accessToken,
                     selectedConvo.id,
-                    text
+                    text,
                 );
                 if (!r?.success) {
                     overallOk = false;
