@@ -52,7 +52,7 @@ const nextConfig = {
             },
             {
                 protocol: 'https',
-                hostname: 'scontent.fdad5-1.fna.fbcdn.ne',
+                hostname: 'scontent.fdad5-1.fna.fbcdn.net',
                 port: '',
                 pathname: '/**',
             },
