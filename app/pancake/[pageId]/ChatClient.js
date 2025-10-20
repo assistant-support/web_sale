@@ -13,21 +13,14 @@ import FallbackAvatar from '@/components/FallbackAvatar';
 // ======================= Cấu hình nhỏ =======================
 const PAGE_SIZE = 40; // mỗi lần load thêm hội thoại
 const SOCKET_URL = process.env.NEXT_PUBLIC_REALTIME_URL || 'http://localhost:3001';
+const FORCE_WS = (process.env.NEXT_PUBLIC_SOCKET_WS_ONLY || 'false') === 'true';
 
-// ====== THỜI GIAN: +7 tiếng trước khi format ======
-const addHours = (dateLike, h) => {
-    if (!dateLike) return null;
-    const d = new Date(dateLike);
-    d.setHours(d.getHours() + h);
-    return d;
-};
-
-// Ghi đè format: luôn +7h rồi convert Asia/Ho_Chi_Minh
+// ====== THỜI GIAN: format theo Asia/Ho_Chi_Minh (KHÔNG cộng tay) ======
+/** Định dạng thời gian theo múi giờ VN, fallback chuỗi mặc định nếu lỗi */
 const fmtDateTimeVN = (dateLike) => {
     try {
         if (!dateLike) return 'Thời gian không xác định';
-        const d = addHours(dateLike, 7); // +7h
-        return d.toLocaleString('vi-VN', {
+        return new Date(dateLike).toLocaleString('vi-VN', {
             timeZone: 'Asia/Ho_Chi_Minh',
             year: 'numeric',
             month: '2-digit',
@@ -40,23 +33,30 @@ const fmtDateTimeVN = (dateLike) => {
     }
 };
 
-// ======================= Helper =======================
+// ======================= Helpers hội thoại =======================
+/** Chỉ lấy hội thoại INBOX */
 const isInbox = (convo) => convo?.type === 'INBOX';
+/** Lấy PSID (nếu có) dùng cho gán nhãn */
 const getConvoPsid = (convo) => convo?.from_psid || null;
+/** Lấy id avatar người dùng */
 const getConvoAvatarId = (convo) =>
     convo?.from_psid || convo?.customers?.[0]?.fb_id || convo?.from?.id || null;
+/** Lấy tên hiển thị */
 const getConvoDisplayName = (convo) =>
     convo?.customers?.[0]?.name || convo?.from?.name || 'Khách hàng ẩn';
+/** Tạo URL avatar Pancake */
 const avatarUrlFor = ({ idpage, iduser }) =>
     iduser ? `https://pancake.vn/api/v1/pages/${idpage}/avatar/${iduser}` : undefined;
 
-// === Helpers cho messages ===
+// ======================= Helpers tin nhắn =======================
+/** Xác định phía gửi (page|customer) dựa trên from.id và pageId */
 const getSenderType = (msg, pageId) => {
-    if (msg?.senderType) return msg.senderType; // optimistic
+    if (msg?.senderType) return msg.senderType; // cho optimistic
     const fromId = String(msg?.from?.id || '');
     return fromId === String(pageId) ? 'page' : 'customer';
 };
 
+/** Convert HTML <div>, <br>... sang plain text để hiển thị an toàn */
 const htmlToPlainText = (html) => {
     if (!html) return '';
     return html
@@ -66,13 +66,18 @@ const htmlToPlainText = (html) => {
         .trim();
 };
 
-// Chuẩn hoá 1 message của Pancake thành cấu trúc UI bạn dùng
+/** 
+ * Chuẩn hoá 1 message Pancake thành cấu trúc UI:
+ * - Ưu tiên attachments: 'photo' => images, loại khác => files (click download)
+ * - Text: dùng original_message nếu có; fallback parse plain text từ message (HTML)
+ */
 const normalizePancakeMessage = (raw, pageId) => {
     const senderType = getSenderType(raw, pageId);
     const ts = raw.inserted_at;
 
     const atts = Array.isArray(raw.attachments) ? raw.attachments : [];
 
+    // Tách ảnh
     const imageAtts = atts.filter((a) => a?.type === 'photo' && a?.url);
     if (imageAtts.length > 0) {
         return {
@@ -91,6 +96,7 @@ const normalizePancakeMessage = (raw, pageId) => {
         };
     }
 
+    // Tách file (mọi loại khác 'photo' xem như file)
     const fileAtts = atts.filter((a) => a?.type && a?.type !== 'photo');
     if (fileAtts.length > 0) {
         return {
@@ -103,11 +109,13 @@ const normalizePancakeMessage = (raw, pageId) => {
                 files: fileAtts.map((a) => ({
                     url: a.url,
                     kind: a.type,
+                    name: a?.name || a?.filename || undefined,
                 })),
             },
         };
     }
 
+    // Text: KHÔNG cố “parse JSON”, KHÔNG render HTML thô
     const text =
         typeof raw.original_message === 'string' && raw.original_message.trim().length > 0
             ? raw.original_message.trim()
@@ -122,27 +130,26 @@ const normalizePancakeMessage = (raw, pageId) => {
     };
 };
 
-// Hợp nhất danh sách hội thoại theo id, giữ item mới hơn (updated_at lớn hơn)
+/** Merge danh sách hội thoại theo id, giữ field cũ & ghi đè field mới nếu newer */
 const mergeConversations = (prevList, incoming) => {
-    const map = new Map();
-    prevList.forEach((c) => map.set(c.id, c));
+    const map = new Map(prevList.map((c) => [c.id, c]));
     (incoming || []).forEach((c) => {
         const old = map.get(c.id);
-        if (!old) map.set(c.id, c);
-        else {
-            const newer =
-                new Date(c.updated_at).getTime() > new Date(old.updated_at).getTime();
-            map.set(c.id, newer ? c : old);
+        if (!old) {
+            map.set(c.id, c);
+        } else {
+            const newer = new Date(c.updated_at).getTime() > new Date(old.updated_at).getTime();
+            map.set(c.id, newer ? { ...old, ...c } : old); // merge shallow để không mất field
         }
     });
     return Array.from(map.values());
 };
 
-// Sắp xếp tin nhắn tăng dần theo thời gian
+/** Sắp xếp tin nhắn tăng dần theo thời gian */
 const sortAscByTime = (arr) =>
-    [...arr].sort((a, b) => new Date(a.inserted_at) - new Date(b.inserted_at));
+    [...arr].sort((a, b) => new Date(a.inserted_at).getTime() - new Date(b.inserted_at).getTime());
 
-// Lấy phần sau dấu "_" nếu có (theo API messages của Pancake)
+/** Lấy phần sau dấu "_" nếu có (theo API messages của Pancake) */
 const extractConvoKey = (cid) => {
     if (!cid) return cid;
     const idx = String(cid).indexOf('_');
@@ -150,6 +157,7 @@ const extractConvoKey = (cid) => {
 };
 
 // ======================= Subcomponents =======================
+/** Dropdown chọn/lọc nhãn khách hàng */
 const LabelDropdown = ({
     labels = [],
     selectedLabelIds = [],
@@ -232,6 +240,7 @@ const LabelDropdown = ({
     );
 };
 
+/** Render nội dung tin nhắn (text/images/files/system) */
 const MessageContent = ({ content }) => {
     if (!content)
         return (
@@ -274,14 +283,15 @@ const MessageContent = ({ content }) => {
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
-                            title={f.kind ? `Tệp ${f.kind}` : 'Tệp đính kèm'}
+                            title={f.name || (f.kind ? `Tệp ${f.kind}` : 'Tệp đính kèm')}
+                            download
                         >
                             <svg width="16" height="16" viewBox="0 0 24 24" className="shrink-0">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" />
                                 <path d="M14 2v6h6" fill="none" stroke="currentColor" />
                             </svg>
                             <span className="truncate max-w-[280px]">
-                                {f.kind ? `${f.kind.toUpperCase()} file` : 'Tệp đính kèm'}
+                                {f.name || (f.kind ? `${String(f.kind).toUpperCase()} file` : 'Tệp đính kèm')}
                             </span>
                         </a>
                     ))}
@@ -302,6 +312,7 @@ const MessageContent = ({ content }) => {
     }
 };
 
+/** Hiển thị trạng thái gửi của tin nhắn optimistic (gần nhất) */
 const MessageStatus = ({ status, error }) => {
     switch (status) {
         case 'sending':
@@ -345,7 +356,7 @@ export default function ChatClient({
     const [conversations, setConversations] = useState([]);
     const [loadedCount, setLoadedCount] = useState(0);
 
-    const [allLabels, setAllLabels] = useState(initialLabels || []);
+    const [allLabels] = useState(initialLabels || []);
     const [selectedConvo, setSelectedConvo] = useState(null);
     const selectedConvoRef = useRef(null);
     useEffect(() => {
@@ -380,6 +391,7 @@ export default function ChatClient({
     const [isUploadingImage, setIsUploadingImage] = useState(false);
 
     // 6) Ước lượng “chưa rep” từ hội thoại
+    /** Kiểm tra tin cuối có phải do page gửi không (để ước lượng badge chưa rep) */
     const isLastFromPage = useCallback(
         (convo) => {
             const last = convo?.last_sent_by;
@@ -396,10 +408,26 @@ export default function ChatClient({
         },
         [pageConfig?.id, pageConfig?.name]
     );
+
     // ============== SOCKET.IO: kết nối + handlers ==============
     const socketRef = useRef(null);
 
-    // applyPatch cho conv:patch
+    // Tránh trùng tin nhắn
+    const seenMsgIdsRef = useRef(new Set());
+
+    // Nhớ số lượng tin từ server (không tính optimistic) để load-more chính xác
+    const fetchedCountRef = useRef(0);
+
+    // Nhớ số hội thoại đã load để phục hồi sau reconnect
+    const loadedCountRef = useRef(0);
+    useEffect(() => {
+        loadedCountRef.current = loadedCount;
+    }, [loadedCount]);
+
+    // Nhớ hội thoại đang watch để bật lại khi reconnect
+    const watchingConvoRef = useRef(null);
+
+    /** Áp patch conv:patch -> trả danh sách mới đã sort */
     const applyPatch = useCallback((prev, patch) => {
         if (!patch || !patch.type) return prev;
         if (patch.type === 'replace' && Array.isArray(patch.items)) {
@@ -416,78 +444,131 @@ export default function ChatClient({
         return prev;
     }, []);
 
+    /** Thiết lập socket, nhận conv:patch và msg:new (realtime), + phục hồi watcher khi reconnect */
     useEffect(() => {
         const s = io(SOCKET_URL, {
             path: '/socket.io',
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 3000,
+            reconnectionDelayMax: 10000,
+            randomizationFactor: 0.5,
             withCredentials: true,
+            ...(FORCE_WS ? { transports: ['websocket'] } : {}),
         });
         socketRef.current = s;
 
-        s.on('disconnect', (r) => console.warn('[socket] disconnected:', r));
-        s.on('connect_error', (e) => console.error('[socket] error:', e?.message || e));
+        // Khi connect: lấy danh sách và bật lại watcher nếu có
+        s.on('connect', () => {
+            s.emit('conv:get', { pageId: pageConfig.id, token, current_count: loadedCountRef.current }, (res) => {
+                if (res?.ok && Array.isArray(res.items)) {
+                    const incoming = res.items.filter(isInbox);
+                    setConversations((prev) => {
+                        const merged = mergeConversations(prev, incoming);
+                        return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                    });
+                    setLoadedCount(incoming.length);
+                }
+            });
 
-        // Realtime: patch hội thoại
+            const curId = watchingConvoRef.current || selectedConvoRef.current?.id;
+            if (curId) {
+                const convoKey = extractConvoKey(curId);
+                const customerId = selectedConvoRef.current?.customers?.[0]?.id || '';
+                s.emit(
+                    'msg:watchStart',
+                    { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0, intervalMs: 2500 },
+                    () => { /* no-op */ }
+                );
+            }
+        });
+
+        // Patch hội thoại realtime
         s.on('conv:patch', (patch) => {
             if (patch?.pageId && String(patch.pageId) !== String(pageConfig.id)) return;
             setConversations((prev) => {
                 const next = applyPatch(prev, patch);
-                return next.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                return next.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
             });
         });
 
-        // Realtime: tin nhắn mới
-        s.on('msg:new', (msg) => {
+        // Tin nhắn mới realtime (de-dup + upsert)
+        s.on('msg:new', (incomingMsg) => {
+            console.log(incomingMsg);
+            
+            // chống trùng theo id
+            if (incomingMsg?.id) {
+                if (seenMsgIdsRef.current.has(incomingMsg.id)) return;
+                seenMsgIdsRef.current.add(incomingMsg.id);
+                if (seenMsgIdsRef.current.size > 5000) {
+                    // tránh phình bộ nhớ: giữ lại 2500 id gần nhất
+                    seenMsgIdsRef.current = new Set(Array.from(seenMsgIdsRef.current).slice(-2500));
+                }
+            }
+
+            // xác định hội thoại đích
+            let targetId = incomingMsg?.conversationId || incomingMsg?.conversation?.id;
+            if (!targetId && selectedConvoRef.current) {
+                targetId = selectedConvoRef.current.id;
+                incomingMsg = { ...incomingMsg, conversationId: targetId };
+            }
+
             const current = selectedConvoRef.current;
-            const targetId = msg?.conversationId || msg?.conversation?.id;
             if (
                 current &&
                 (targetId === current.id ||
-                    extractConvoKey(targetId) === extractConvoKey(current.id))
+                    extractConvoKey(String(targetId)) === extractConvoKey(String(current.id)))
             ) {
-                setMessages((prev) =>
-                    sortAscByTime([...prev, normalizePancakeMessage(msg, pageConfig.id)])
-                );
+                const n = normalizePancakeMessage(incomingMsg, pageConfig.id);
+                setMessages((prev) => {
+                    const i = prev.findIndex((m) => m.id === n.id);
+                    if (i >= 0) {
+                        const next = [...prev];
+                        next[i] = n;
+                        return sortAscByTime(next);
+                    }
+                    return sortAscByTime([...prev, n]);
+                });
                 messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }
+
+            // Cập nhật snippet sidebar
             if (targetId) {
                 setConversations((prev) => {
                     const conv =
                         prev.find((c) => c.id === targetId) ||
-                        prev.find((c) => extractConvoKey(c.id) === extractConvoKey(targetId)) || {
+                        prev.find((c) => extractConvoKey(String(c.id)) === extractConvoKey(String(targetId))) || {
                             id: targetId,
                             type: 'INBOX',
                         };
+                    const n = normalizePancakeMessage(incomingMsg, pageConfig.id);
                     const updated = {
                         ...conv,
-                        snippet: (() => {
-                            const n = normalizePancakeMessage(msg, pageConfig.id);
-                            if (n?.content?.type === 'text') return n.content.content;
-                            if (n?.content?.type === 'images') return '[Ảnh]';
-                            if (n?.content?.type === 'files') return '[Tệp]';
-                            return conv.snippet;
-                        })(),
-                        updated_at: msg?.inserted_at || new Date().toISOString(),
+                        snippet:
+                            n?.content?.type === 'text'
+                                ? n.content.content
+                                : n?.content?.type === 'images'
+                                    ? '[Ảnh]'
+                                    : n?.content?.type === 'files'
+                                        ? '[Tệp]'
+                                        : conv.snippet,
+                        updated_at: incomingMsg?.inserted_at || new Date().toISOString(),
                     };
                     const merged = mergeConversations(prev, [updated]);
-                    return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                    return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
                 });
             }
         });
 
-        // Lấy danh sách ban đầu
+        // Lấy danh sách ban đầu khi mount
         s.emit('conv:get', { pageId: pageConfig.id, token, current_count: 0 }, (res) => {
             if (res?.ok && Array.isArray(res.items)) {
                 const incoming = res.items.filter(isInbox);
                 setConversations((prev) => {
                     const merged = mergeConversations(prev, incoming);
-                    return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                    return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
                 });
                 setLoadedCount(incoming.length);
-            } else if (res?.error) {
-                console.error('[conv:get] error:', res.error);
             }
         });
 
@@ -498,19 +579,23 @@ export default function ChatClient({
                         pageId: pageConfig.id,
                         conversationId: selectedConvoRef.current.id,
                     });
-                } catch (_) { }
+                } catch { }
             }
             s.off('conv:patch');
             s.off('msg:new');
+            s.off('connect');
+            s.off('connect_error');
+            s.off('disconnect');
             s.disconnect();
             socketRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pageConfig.id, token]);
+    }, [pageConfig.id, token, applyPatch]);
 
     // ===================== Load more conversations (sidebar) =====================
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+    /** Khi scroll gần cuối sidebar -> gọi conv:loadMore */
     const onSidebarScroll = useCallback(async () => {
         if (isSearching) return;
         const el = sidebarRef.current;
@@ -531,11 +616,9 @@ export default function ChatClient({
                         const incoming = ack.items.filter(isInbox);
                         setConversations((prev) => {
                             const merged = mergeConversations(prev, incoming);
-                            return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                            return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
                         });
                         setLoadedCount(nextCount);
-                    } else if (ack?.error) {
-                        console.error('[conv:loadMore] error:', ack.error);
                     }
                 }
             );
@@ -553,12 +636,13 @@ export default function ChatClient({
     }, [onSidebarScroll]);
 
     // ===================== Load older messages by scroll top =====================
+    /** Khi kéo lên trên cùng khung chat -> tăng count để lấy thêm message cũ */
     const loadOlderMessages = useCallback(() => {
         if (!selectedConvo || !socketRef.current || isLoadingOlder || !hasMore) return;
 
         setIsLoadingOlder(true);
 
-        const nextCount = (messages?.length || 0) + 30; // mỗi lần +30
+        const nextCount = fetchedCountRef.current + 30; // mỗi lần +30
         const scroller = messagesScrollRef.current;
         const prevScrollHeight = scroller ? scroller.scrollHeight : 0;
         const prevScrollTop = scroller ? scroller.scrollTop : 0;
@@ -572,49 +656,40 @@ export default function ChatClient({
                 if (res?.ok && Array.isArray(res.items)) {
                     const incomingMessages = res.items;
 
-                    // SỬA LỖI LOGIC 1: Điều kiện dừng tải chính xác
-                    // Nếu số lượng tin nhắn API trả về BẰNG với số lượng tin nhắn đã có trước đó,
-                    // có nghĩa là không có tin nhắn nào cũ hơn được tải về.
-                    // "messages" ở đây là state cũ trước khi update.
-                    if (incomingMessages.length === messages.length) {
+                    // Nếu tổng không tăng -> hết dữ liệu
+                    if (incomingMessages.length === fetchedCountRef.current) {
                         setHasMore(false);
                     } else {
                         setHasMore(true);
+                        fetchedCountRef.current = incomingMessages.length; // cập nhật mốc
                     }
 
-                    // Cập nhật state bằng cách cộng dồn tin nhắn
-                    setMessages(prevMessages => {
-                        const messageMap = new Map();
-                        // Thêm tin nhắn mới tải về (cũ hơn về mặt thời gian)
-                        incomingMessages.forEach(rawMsg => {
-                            const normalized = normalizePancakeMessage(rawMsg, pageConfig.id);
-                            messageMap.set(normalized.id, normalized);
+                    // Cộng dồn unique theo id
+                    setMessages((prevMessages) => {
+                        const map = new Map();
+                        incomingMessages.forEach((raw) => {
+                            const n = normalizePancakeMessage(raw, pageConfig.id);
+                            map.set(n.id, n);
                         });
-                        // Thêm tin nhắn đã có
-                        prevMessages.forEach(msg => {
-                            if (!messageMap.has(msg.id)) {
-                                messageMap.set(msg.id, msg);
-                            }
+                        prevMessages.forEach((m) => {
+                            if (!map.has(m.id)) map.set(m.id, m);
                         });
-                        return sortAscByTime(Array.from(messageMap.values()));
+                        return sortAscByTime(Array.from(map.values()));
                     });
 
-                    // SỬA LỖI UX 2: Giữ nguyên vị trí scroll sau khi tải
-                    // Logic này của bạn đã đúng, giờ nó sẽ hoạt động vì không còn bị useEffect ghi đè.
+                    // Giữ nguyên vị trí scroll sau khi tải
                     requestAnimationFrame(() => {
                         if (!scroller) return;
                         const newScrollHeight = scroller.scrollHeight;
                         scroller.scrollTop = newScrollHeight - (prevScrollHeight - prevScrollTop);
                     });
-
                 } else {
-                    // Nếu API lỗi hoặc không trả về mảng, dừng việc tải
                     setHasMore(false);
                 }
                 setIsLoadingOlder(false);
             }
         );
-    }, [selectedConvo, messages, token, pageConfig.id, isLoadingOlder, hasMore]);
+    }, [selectedConvo, token, pageConfig.id, isLoadingOlder, hasMore]);
 
     useEffect(() => {
         const el = messagesScrollRef.current;
@@ -629,6 +704,7 @@ export default function ChatClient({
     }, [loadOlderMessages]);
 
     // ===================== Handlers =====================
+    /** Chọn 1 hội thoại -> dừng watcher cũ, load lịch sử, seed de-dup, bật watcher mới */
     const handleSelectConvo = useCallback(
         async (conversation) => {
             if (selectedConvo?.id === conversation.id) return;
@@ -646,6 +722,7 @@ export default function ChatClient({
             setMessages([]);
             setHasMore(true); // reset state load-more
             setIsLoadingMessages(true);
+            seenMsgIdsRef.current = new Set(); // reset chống trùng khi đổi hội thoại
 
             const convoKey = extractConvoKey(conversation.id);
             const customerId = conversation?.customers?.[0]?.id || '';
@@ -654,13 +731,19 @@ export default function ChatClient({
                 { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0 },
                 (res) => {
                     if (res?.ok && Array.isArray(res.items)) {
+                        fetchedCountRef.current = res.items.length; // mốc server
+
                         const normalized = sortAscByTime(
                             res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
                         );
+
+                        // seed chống trùng ngay tại đây để watcher không bắn lại các tin vừa load
+                        seenMsgIdsRef.current = new Set(normalized.map((m) => m.id).filter(Boolean));
+
                         setMessages(normalized);
                         setHasMore(res.items.length > 0);
                     } else if (res?.error) {
-                        alert(`Error: ${res.error}`);
+                        toast.error(res.error);
                     }
                     setIsLoadingMessages(false);
                 }
@@ -671,13 +754,14 @@ export default function ChatClient({
                 'msg:watchStart',
                 { pageId: pageConfig.id, token, conversationId: convoKey, customerId, count: 0, intervalMs: 2500 },
                 (ack) => {
-                    if (!ack?.ok) console.error('[msg:watchStart] error:', ack?.error);
+                    if (ack?.ok) watchingConvoRef.current = conversation?.id || null;
                 }
             );
         },
         [pageConfig.id, token, selectedConvo?.id]
     );
 
+    /** Mở file picker ảnh */
     const triggerPickImage = useCallback(() => {
         if (!selectedConvo) {
             toast.warning('Hãy chọn một hội thoại trước khi đính kèm ảnh.');
@@ -686,6 +770,7 @@ export default function ChatClient({
         fileInputRef.current?.click();
     }, [selectedConvo]);
 
+    /** Sau khi chọn ảnh -> upload lên Drive (hoặc nơi của bạn) và đưa vào pending */
     const onPickImage = useCallback(async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
@@ -706,12 +791,13 @@ export default function ChatClient({
         }
     }, []);
 
+    /** Xoá ảnh pending trước khi gửi */
     const removePendingImage = useCallback((localId) => {
         setPendingImages((prev) => prev.filter((x) => x.localId !== localId));
     }, []);
 
+    /** Gửi tin nhắn (text + ảnh pending) với optimistic UI */
     const handleSendMessage = async (formData) => {
-        console.log('Sending message:', formData, selectedConvo);
         if (!selectedConvo) return;
         const text = (formData.get('message') || '').trim();
         const hasImages = pendingImages.length > 0;
@@ -818,7 +904,7 @@ export default function ChatClient({
                     },
                 };
                 const merged = mergeConversations(prev, [updated]);
-                return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
             });
             setPendingImages([]);
             formRef.current?.reset();
@@ -829,6 +915,7 @@ export default function ChatClient({
     };
 
     // ===================== Search (qua socket) =====================
+    /** Gọi conv:search theo tên/SĐT */
     const runSearch = useCallback(() => {
         const q = (searchInput || '').trim();
         if (!q) return;
@@ -840,11 +927,11 @@ export default function ChatClient({
                 setSearchResults(ack.items.filter(isInbox));
             } else if (ack?.error) {
                 toast.error('Tìm kiếm thất bại');
-                console.error('[conv:search] error:', ack.error);
             }
         });
     }, [searchInput, pageConfig.id, token]);
 
+    /** Xoá trạng thái tìm kiếm */
     const clearSearch = useCallback(() => {
         setIsSearching(false);
         setSearchInput('');
@@ -854,12 +941,13 @@ export default function ChatClient({
     // ===================== Dữ liệu hiển thị =====================
     const listForSidebar = isSearching ? searchResults : conversations;
 
+    /** Lọc theo nhãn + sort by updated_at */
     const filteredSortedConversations = useMemo(() => {
         const list = (listForSidebar || []).filter((convo) => {
             if (selectedFilterLabelIds.length > 0) {
                 const psid = getConvoPsid(convo);
                 if (!psid) return false;
-                const customerLabelIds = allLabels
+                const customerLabelIds = (allLabels || [])
                     .filter((label) => Array.isArray(label.customer) && label.customer.includes(psid))
                     .map((label) => label._id);
                 const hasAll = selectedFilterLabelIds.every((id) => customerLabelIds.includes(id));
@@ -869,15 +957,6 @@ export default function ChatClient({
         });
         return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     }, [listForSidebar, selectedFilterLabelIds, allLabels]);
-
-    const assignedLabelsForSelectedConvo = useMemo(() => {
-        if (!selectedConvo) return [];
-        const psid = getConvoPsid(selectedConvo);
-        if (!psid) return [];
-        return allLabels.filter(
-            (label) => Array.isArray(label.customer) && label.customer.includes(psid)
-        );
-    }, [selectedConvo, allLabels]);
 
     // ===================== Render =====================
     return (
@@ -990,7 +1069,7 @@ export default function ChatClient({
 
                             const psid = getConvoPsid(convo);
                             const assignedLabels = psid
-                                ? allLabels.filter(
+                                ? (allLabels || []).filter(
                                     (label) => Array.isArray(label.customer) && label.customer.includes(psid)
                                 )
                                 : [];
@@ -1096,7 +1175,9 @@ export default function ChatClient({
                                                 )
                                                 .map((l) => l._id)}
                                             style="right"
-                                            onLabelChange={(labelId) => {/* hook gán nhãn nếu cần */ }}
+                                            onLabelChange={() => {
+                                                /* hook gán nhãn nếu cần */
+                                            }}
                                             trigger={
                                                 <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
                                                     <Tag className="h-4 w-4 text-gray-500" />
@@ -1132,24 +1213,24 @@ export default function ChatClient({
                                     if (!msg) return null;
                                     const formattedTime = fmtDateTimeVN(msg.inserted_at);
                                     return msg.content?.type === 'system' ? (
-                                        <MessageContent key={msg.id || `msg-${index}`} content={msg.content} />
+                                        <MessageContent key={msg.id ?? `sys-${index}`} content={msg.content} />
                                     ) : (
                                         <div
-                                            key={msg.id || `msg-${index}`}
+                                            key={msg.id ?? `m-${msg.inserted_at}-${index}`}
                                             className={`flex flex-col my-1 ${msg.senderType === 'page' ? 'items-end' : 'items-start'
                                                 }`}
                                         >
                                             <div
                                                 className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page'
-                                                    ? 'bg-blue-500 text-white items-end'
-                                                    : 'bg-white text-gray-800'
+                                                        ? 'bg-blue-500 text-white items-end'
+                                                        : 'bg-white text-gray-800'
                                                     }`}
                                             >
                                                 <MessageContent content={msg.content} />
                                                 <div
                                                     className={`text-xs mt-1 ${msg.senderType === 'page'
-                                                        ? 'text-right text-blue-100/80'
-                                                        : 'text-left text-gray-500'
+                                                            ? 'text-right text-blue-100/80'
+                                                            : 'text-left text-gray-500'
                                                         }`}
                                                 >
                                                     {formattedTime}

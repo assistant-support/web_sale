@@ -11,7 +11,6 @@ export default async function ChatPage({ params }) {
     if (!pageConfig) notFound();
 
     const label = await getLabelData();
-
     return (
         <ChatClient
             pageConfig={pageConfig}

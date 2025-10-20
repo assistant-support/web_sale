@@ -4,8 +4,7 @@ import { getPagesFromAPI } from '@/lib/pancake-api';
 
 export default async function HomePage() {
     let pages = await getPagesFromAPI();
-    let dataSource = 'Dữ liệu từ API';
-
+    
     return (
         <div className="w-full h-full bg-gray-100 flex">
             <div className="w-full bg-white rounded-md border border-gray-200 flex-1 p-6">
