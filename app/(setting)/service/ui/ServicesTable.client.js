@@ -18,6 +18,7 @@ import {
     CheckCircle2,
     Package,
     DollarSign,
+    Settings,
 } from 'lucide-react';
 import Popup from '@/components/ui/popup';
 import ServiceEditorForm from './ServiceEditorForm.client';
@@ -37,7 +38,7 @@ const TYPE_FILTER_ITEMS = [
 ];
 
 export default function ServicesTable({ initialData, actions }) {
-    const { createService, updateService, setServiceActive, reloadServices } = actions;
+    const { createService, updateService, setServiceActive, reloadServices, fixServiceCoverPermissions } = actions;
 
     const [q, setQ] = useState('');
     const [typeFilter, setTypeFilter] = useState('all');
@@ -76,6 +77,14 @@ export default function ServicesTable({ initialData, actions }) {
         });
     };
 
+    const fixPermissions = async () => {
+        const result = await act.run(fixServiceCoverPermissions, [], {
+            successMessage: 'Đã sửa quyền hình ảnh.',
+            errorMessage: 'Có lỗi khi sửa quyền hình ảnh.',
+        });
+        console.log('Fix permissions result:', result);
+    };
+
     const TypePill = ({ type }) => (
         <span
             className="inline-flex items-center gap-1 rounded-[999px] border px-2.5 py-1 text-xs"
@@ -87,9 +96,20 @@ export default function ServicesTable({ initialData, actions }) {
     );
 
     const coverUrlOf = (cover) => {
-        if (!cover) return null;
-        if (typeof cover === 'string' && (cover.startsWith('http') || cover.startsWith('data:'))) return cover;
-        return `https://lh3.googleusercontent.com/d/${cover}`;
+        console.log('🔍 coverUrlOf called with:', cover, 'type:', typeof cover);
+        if (!cover) {
+            console.log('❌ No cover provided');
+            return null;
+        }
+        if (typeof cover === 'string' && (cover.startsWith('http') || cover.startsWith('data:'))) {
+            console.log('✅ Using direct URL:', cover);
+            return cover;
+        }
+        // Sử dụng format Google Drive uc?export=view cho image embedding
+        const imageUrl = `https://drive.google.com/uc?export=view&id=${cover}`;
+        
+        console.log('✅ Generated image URL:', imageUrl);
+        return imageUrl;
     };
 
     return (
@@ -117,6 +137,16 @@ export default function ServicesTable({ initialData, actions }) {
                 <CustomSelect value={typeFilter} onChange={setTypeFilter} items={TYPE_FILTER_ITEMS} />
 
                 <button
+                    onClick={fixPermissions}
+                    className="inline-flex items-center gap-2 cursor-pointer rounded-[6px] px-3 py-2 text-sm font-medium hover:brightness-110"
+                    style={{ background: 'var(--border)', color: 'var(--text)' }}
+                    title="Sửa quyền hình ảnh cho tất cả dịch vụ"
+                >
+                    <Settings className="w-4 h-4" />
+                    <h5>Sửa quyền ảnh</h5>
+                </button>
+
+                <button
                     onClick={() => setOpenCreate(true)}
                     className="inline-flex items-center gap-2 cursor-pointer rounded-[6px] px-3 py-2 text-sm font-medium hover:brightness-110"
                     style={{ background: 'var(--main_d)', color: 'white' }}
@@ -129,6 +159,7 @@ export default function ServicesTable({ initialData, actions }) {
             {/* “Bảng” dạng card */}
             <div className="mt-2 space-y-4 flex-1 scroll p-1">
                 {data.map((svc) => {
+                    console.log('🔍 Service data:', svc.name, 'cover:', svc.cover);
                     const interest = svc.stats?.interest ?? 0;
                     const completed = svc.stats?.completed ?? 0;
                     const reviews = svc.stats?.reviews ?? 0;
@@ -257,6 +288,18 @@ export default function ServicesTable({ initialData, actions }) {
                                                 alt={svc.name}
                                                 className="h-full w-full object-cover"
                                                 loading="lazy"
+                                                onError={(e) => {
+                                                    console.log('❌ Image load error for:', coverUrl);
+                                                    console.log('🔄 Trying thumbnail URL format...');
+                                                    // Thử thumbnail format cho Google Drive
+                                                    if (svc.cover) {
+                                                        const thumbUrl = `https://drive.google.com/thumbnail?id=${svc.cover}&sz=w1000`;
+                                                        e.target.src = thumbUrl;
+                                                    }
+                                                }}
+                                                onLoad={() => {
+                                                    console.log('✅ Image loaded successfully:', coverUrl);
+                                                }}
                                             />
                                         ) : (
                                             <div className="h-full w-full flex items-center justify-center">

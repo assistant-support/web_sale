@@ -13,7 +13,7 @@ export async function createLabelAction(_previousState, formData) {
 
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
+    if (!user.role.includes('Admin') && !user.role.includes('Sale')&& !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
 
@@ -54,7 +54,7 @@ export async function updateLabelAction(_previousState, formData) {
 
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
+    if (!user.role.includes('Admin') && !user.role.includes('Sale') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
 
@@ -92,7 +92,7 @@ export async function deleteLabelAction(_previousState, formData) {
     const id = formData.get('id');
     const user = await checkAuthToken();
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    if (!user.role.includes('Admin') && !user.role.includes('Sale')) {
+    if (!user.role.includes('Admin') && !user.role.includes('Sale') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
     }
 

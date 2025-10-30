@@ -66,6 +66,7 @@ export function formatDelay(ms) {
 
 // Chuyển status code thành text
 const statusMap = {
+    // ... (nội dung giống hệt ở trên) ...
     'new_unconfirmed_1': 'Data mới',
     'missing_info_1': 'Thiếu thông tin',
     'not_valid_1': 'Không hợp lệ',

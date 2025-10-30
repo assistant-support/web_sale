@@ -21,6 +21,10 @@ export default function FilterControls({
     const { replace } = useRouter();
     const searchTimeout = useRef(null);
 
+    // Local state cho bộ lọc ngày; chỉ áp dụng khi người dùng nhấn Enter
+    const [startDateLocal, setStartDateLocal] = useState(searchParams.get('startDate') || '');
+    const [endDateLocal, setEndDateLocal] = useState(searchParams.get('endDate') || new Date().toISOString().split('T')[0]);
+
     const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
     const [isPipelineStatusMenuOpen, setIsPipelineStatusMenuOpen] = useState(false);
     const [isTagsMenuOpen, setIsTagsMenuOpen] = useState(false);
@@ -209,16 +213,18 @@ export default function FilterControls({
                     <input
                         type="date"
                         className="input"
-                        defaultValue={searchParams.get('startDate') || ''}
-                        onChange={(e) => createURL({ startDate: e.target.value, endDate: searchParams.get('endDate') })}
+                        value={startDateLocal}
+                        onChange={(e) => setStartDateLocal(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') createURL({ startDate: startDateLocal, endDate: endDateLocal }); }}
                         style={{ flex: 1 }}
                     />
                     <h5>đến</h5>
                     <input
                         type="date"
                         className="input"
-                        defaultValue={searchParams.get('endDate') || new Date().toISOString().split('T')[0]}
-                        onChange={(e) => createURL({ startDate: searchParams.get('startDate'), endDate: e.target.value })}
+                        value={endDateLocal}
+                        onChange={(e) => setEndDateLocal(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') createURL({ startDate: startDateLocal, endDate: endDateLocal }); }}
                         style={{ flex: 1 }}
                     />
                 </div>

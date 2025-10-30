@@ -38,7 +38,9 @@ async function dataCallsAll() {
 async function dataCallsByCustomer(customerId) {
     try {
         await connectDB();
-
+        
+        console.log('🔍 [dataCallsByCustomer] Searching for customer ID:', customerId);
+        
         const calls = await Call.find({ customer: customerId })
             .populate({
                 path: 'customer',
@@ -50,6 +52,16 @@ async function dataCallsByCustomer(customerId) {
             })
             .sort({ createdAt: -1 })
             .lean();
+
+        console.log('🔍 [dataCallsByCustomer] Found calls:', calls.length);
+        console.log('🔍 [dataCallsByCustomer] Calls data:', calls.map(call => ({
+            _id: call._id,
+            customer: call.customer,
+            user: call.user?.name,
+            status: call.status,
+            duration: call.duration,
+            createdAt: call.createdAt
+        })));
 
         return JSON.parse(JSON.stringify(calls));
     } catch (error) {

@@ -4,7 +4,8 @@ import { getPagesFromAPI } from '@/lib/pancake-api';
 
 export default async function HomePage() {
     let pages = await getPagesFromAPI();
-    
+    let dataSource = 'Dữ liệu từ API';
+
     return (
         <div className="w-full h-full bg-gray-100 flex">
             <div className="w-full bg-white rounded-md border border-gray-200 flex-1 p-6">
@@ -17,7 +18,7 @@ export default async function HomePage() {
                             <Link href={`/pancake/${page.id}`} key={page.id} className="block h-full">
                                 <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center space-x-4 cursor-pointer hover:border-blue-500 hover:shadow-md transition-all duration-200 h-full">
                                     <Image
-                                        src={page.avatar}
+                                        src={page.avatar}            // URL avatar của page (Instagram/Facebook)
                                         alt={page.name}
                                         width={48}
                                         height={48}

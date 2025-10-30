@@ -3,11 +3,35 @@
 
 import { useMemo, useState } from 'react';
 import { Headset, Upload, Plus, Trash2, Package, MessageSquare, Send } from 'lucide-react';
-import { viewUrlFromId } from '@/function/client';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+// Helper function để tạo URL hiển thị ảnh từ nhiều định dạng input:
+// - Nếu là URL trực tiếp (http, https) hoặc data URL -> dùng trực tiếp
+// - Nếu là Google Drive fileId -> chuyển sang định dạng uc?export=view
+const viewUrlFromId = (cover) => {
+    if (!cover) return null;
+    if (typeof cover === 'string' && (cover.startsWith('http') || cover.startsWith('data:'))) {
+        return cover;
+    }
+    return `https://drive.google.com/uc?export=view&id=${cover}`;
+};
+
+// Cùng logic với bảng dịch vụ để đảm bảo đồng nhất cách build URL cover
+const coverUrlOf = (cover) => {
+    if (!cover) return null;
+    if (typeof cover === 'string' && (cover.startsWith('http') || cover.startsWith('data:'))) {
+        return cover;
+    }
+    return `https://drive.google.com/uc?export=view&id=${cover}`;
+};
 
 const TYPES = [
     { value: 'noi_khoa', label: 'Nội khoa' },
     { value: 'ngoai_khoa', label: 'Ngoại khoa' },
+];
+
+const SALE_GROUPS = [
+    { value: 'noi_khoa', label: 'Nhóm Nội khoa' },
+    { value: 'ngoai_khoa', label: 'Nhóm Ngoại khoa' },
 ];
 
 const newEmptyCourse = () => ({
@@ -25,8 +49,11 @@ const newEmptyPostMessage = () => ({
 export default function ServiceEditorForm({ mode = 'create', initial, onSubmit }) {
     const [name, setName] = useState(initial?.name || '');
     const [type, setType] = useState(initial?.type || 'noi_khoa');
+    const [saleGroup, setSaleGroup] = useState(initial?.saleGroup || '');
+    const [defaultSale, setDefaultSale] = useState(initial?.defaultSale || '');
     const [description, setDescription] = useState(initial?.description || '');
-    const [coverPreview, setCoverPreview] = useState(viewUrlFromId(initial?.cover) || '');
+    const [coverPreview, setCoverPreview] = useState(coverUrlOf(initial?.cover) || '');
+    const [originalCover, setOriginalCover] = useState(initial?.cover || '');
     const [coverDataUrl, setCoverDataUrl] = useState('');
     const [uploading, setUploading] = useState(false);
     const [courses, setCourses] = useState(initial?.treatmentCourses || []);
@@ -42,6 +69,7 @@ export default function ServiceEditorForm({ mode = 'create', initial, onSubmit }
         reader.onloadend = () => {
             const dataUrl = reader.result?.toString() || '';
             setCoverPreview(dataUrl);
+            setOriginalCover(dataUrl);
             setCoverDataUrl(dataUrl);
             setUploading(false);
         };
@@ -55,6 +83,8 @@ export default function ServiceEditorForm({ mode = 'create', initial, onSubmit }
         const payload = {
             name,
             type,
+            saleGroup: saleGroup || null,
+            defaultSale: defaultSale || null,
             description,
             cover: coverDataUrl || initial?.cover || '',
             treatmentCourses: courses,
@@ -79,7 +109,26 @@ export default function ServiceEditorForm({ mode = 'create', initial, onSubmit }
                                 >
                                     <div className="aspect-[16/9]">
                                         {coverPreview ? (
-                                            <img src={coverPreview} alt="cover" className="h-full w-full object-cover" />
+                                            <img
+                                                src={coverPreview}
+                                                alt="cover"
+                                                className="h-full w-full object-cover"
+                                                onError={(e) => {
+                                                    // Thử URL format khác cho Google Drive nếu đang dùng fileId hoặc uc?export=view
+                                                    if (typeof originalCover === 'string' && !originalCover.startsWith('data:')) {
+                                                        const isId = !(originalCover.startsWith('http'));
+                                                        const id = isId
+                                                            ? originalCover
+                                                            : (originalCover.match(/\/d\/([^/]+)/)?.[1] || originalCover.match(/id=([^&]+)/)?.[1]);
+                                                        if (id) {
+                                                            const altUrl = `https://lh3.googleusercontent.com/d/${id}`;
+                                                            if (e.currentTarget.src !== altUrl) {
+                                                                setCoverPreview(altUrl);
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                            />
                                         ) : (
                                             <div className="h-full w-full flex items-center justify-center">
                                                 <div
@@ -136,6 +185,28 @@ export default function ServiceEditorForm({ mode = 'create', initial, onSubmit }
                                     </option>
                                 ))}
                             </select>
+                        </FormRow>
+                        <FormRow label="Nhóm Sale phụ trách">
+                            <Select value={saleGroup || 'none'} onValueChange={(v) => setSaleGroup(v === 'none' ? '' : v)}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Chọn nhóm sale" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Không chọn</SelectItem>
+                                    {SALE_GROUPS.map((group) => (
+                                        <SelectItem key={group.value} value={group.value}>
+                                            {group.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </FormRow>
+                        <FormRow label="Sale phụ trách mặc định">
+                            <Input
+                                value={defaultSale}
+                                onChange={(e) => setDefaultSale(e.target.value)}
+                                placeholder="ID người phụ trách (để trống nếu dùng round-robin)"
+                            />
                         </FormRow>
                     </div>
 

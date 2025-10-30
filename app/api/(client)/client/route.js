@@ -9,6 +9,7 @@ import Logs from "@/models/log.model";
 import { actionZalo, sendGP } from "@/function/drive/appscript";
 import { formatMessage } from "@/app/api/(zalo)/action/route";
 import { revalidateData } from "@/app/actions/customer.actions";
+import autoAssignForCustomer from "@/utils/autoAssign";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,7 @@ async function findNextAvailableZaloAccount() {
 
 export async function POST(req) {
   try {
+    // console.log('🚩Đi qua API POST /api/(client)/client (tạo khách hàng)');
     await connectDB();
     const selectedZalo = await findNextAvailableZaloAccount();
     if (!selectedZalo) {
@@ -94,6 +96,13 @@ export async function POST(req) {
       name: data?.name, bd: data?.bd, email: data?.email, phone, nameparent: data?.nameparent, area: data?.area, source: data?.source, roles: selectedZalo.roles || [],
     });
     console.log(`[Create Customer] Đã tạo khách hàng mới: ${String(doc._id)} với SĐT: ${phone}`);
+    // Gán tự động theo dịch vụ (nếu có)
+    try {
+      // console.log('🚩Gọi autoAssignForCustomer từ API client/create');
+      await autoAssignForCustomer(doc._id, { serviceId: data?.service });
+    } catch (e) {
+      console.error('[API client/create] Auto-assign tĩnh lỗi:', e?.message || e);
+    }
     revalidateData();
     const response = NextResponse.json({
       status: true, message: "created_and_processing_in_background", data: { id: doc._id, phone },

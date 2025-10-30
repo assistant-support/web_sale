@@ -215,7 +215,8 @@ export async function saveCallResultAction(prevState, formData) {
     try {
         await connectDB();
 
-        // SỬ DỤNG HÀM MỚI: Tải file ghi âm lên
+        // SỬ DỤNG HÀM MỚI: Tải file ghi âm lên 
+        // ?? id folder này là id của folder ảnh?
         const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm'; // Cần thêm biến này
         const uploadedFile = await uploadFileToDrive(recordingFile, folderId);
 

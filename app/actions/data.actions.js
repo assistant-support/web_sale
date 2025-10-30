@@ -12,6 +12,7 @@ import { revalidateData } from '@/app/actions/customer.actions';
 import { sendGP } from "@/function/drive/appscript";
 import { service_data } from '@/data/services/wraperdata.db'
 import { se } from "date-fns/locale";
+import autoAssignForCustomer from '@/utils/autoAssign';
 
 export async function createAreaAction(_previousState, formData) {
     await dbConnect();
@@ -130,7 +131,12 @@ export async function deleteAreaAction(_previousState, formData) {
  * - Tương thích hoàn toàn với hook useActionUI.
  */
 export async function addRegistrationToAction(_previousState, inputData) {
-    console.log('[Action] Bắt đầu xử lý đăng ký/thêm mới khách hàng.');
+    // console.log('🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩');
+    // console.log('🚩ĐI QUA HÀM addRegistrationToAction');
+    // console.log('🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩🚩');
+    // console.log('[Action] Bắt đầu xử lý đăng ký/thêm mới khách hàng.');
+    // console.log('🚩[DEBUG] InputData type:', typeof inputData);
+    // console.log('🚩[DEBUG] InputData is FormData:', inputData instanceof FormData);
 
     try {
         const isFormData = inputData instanceof FormData;
@@ -147,6 +153,17 @@ export async function addRegistrationToAction(_previousState, inputData) {
             source: isFormData ? inputData.get('source')?.trim() : '68b5ebb3658a1123798c0ce4', // Source mặc định
             sourceName: isFormData ? inputData.get('sourceName')?.trim() : 'Trực tiếp', // SourceName mặc định
         };
+
+        // LOG: dữ liệu nhận từ form/manual
+        try {
+            const debugEntries = isFormData ? Array.from(inputData.entries()) : null;
+            console.log('[Action] Incoming registration payload:', {
+                isFormData,
+                isManualEntry,
+                rawData,
+                debugEntries,
+            });
+        } catch (_) {}
 
         let user = null;
         if (isManualEntry) {
@@ -177,6 +194,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
         // --- BƯỚC 2: XỬ LÝ LOGIC CHÍNH ---
         await dbConnect();
         const existingCustomer = await Customer.findOne({ phone: normalizedPhone });
+        console.log('[Action] Lookup by phone result:', { normalizedPhone, exists: !!existingCustomer });
 
         // TRƯỜNG HỢP 1: KHÁCH HÀNG ĐÃ TỒN TẠI -> CẬP NHẬT
         if (existingCustomer) {
@@ -185,7 +203,9 @@ export async function addRegistrationToAction(_previousState, inputData) {
             if (rawData.email && existingCustomer.email !== rawData.email) existingCustomer.email = rawData.email;
             if (birthDate && (!existingCustomer.bd || existingCustomer.bd.getTime() !== birthDate.getTime())) existingCustomer.bd = birthDate;
 
+            const beforeTags = [...(existingCustomer.tags || [])];
             existingCustomer.tags = [...new Set([...existingCustomer.tags, rawData.service].filter(Boolean))];
+            console.log('[Action] Duplicate merge - tags update:', { beforeTags, rawService: rawData.service, afterTags: existingCustomer.tags });
             existingCustomer.care.push({
                 content: `Data trùng từ ${isManualEntry ? 'nhập liệu thủ công' : `form "${rawData.sourceName}"`}. Gộp và cập nhật hồ sơ.`,
                 createBy: user?.id || '68b0af5cf58b8340827174e0',
@@ -194,6 +214,33 @@ export async function addRegistrationToAction(_previousState, inputData) {
             existingCustomer.pipelineStatus[0] = 'duplicate_merged_1';
             existingCustomer.pipelineStatus[1] = 'duplicate_merged_1';
             await existingCustomer.save();
+            // Thử gán Sale nếu hồ sơ chưa có assignee
+            // console.log('🚩[DEBUG] Kiểm tra assignees cho customer đã tồn tại:', {
+            //     hasAssignees: Array.isArray(existingCustomer.assignees) && existingCustomer.assignees.length > 0,
+            //     assigneesCount: existingCustomer.assignees?.length || 0
+            // });
+            
+            try {
+                if (!Array.isArray(existingCustomer.assignees) || existingCustomer.assignees.length === 0) {
+                    const svcId = rawData.service || (existingCustomer.tags?.[0] || null);
+                    // console.log('🚩[DEBUG] Merge case - svcId =', svcId);
+                    // console.log('🚩Gọi autoAssignForCustomer từ addRegistrationToAction (merge case)');
+                    let assignResult = await autoAssignForCustomer(existingCustomer._id, { serviceId: svcId });
+                    // console.log('🚩[DEBUG] Merge case - autoAssign result (lần 1):', assignResult);
+                    
+                    if (!assignResult?.ok) {
+                        // console.log('🚩Gọi autoAssignForCustomer(forceStaticAssign) từ addRegistrationToAction (merge case)');
+                        assignResult = await autoAssignForCustomer(existingCustomer._id, { forceStaticAssign: true });
+                        // console.log('🚩[DEBUG] Merge case - autoAssign result (lần 2 - forceStatic):', assignResult);
+                    }
+                    // console.log('[Action] Duplicate merge - auto-assign result:', assignResult);
+                } else {
+                    console.log('🚩[SKIP] Customer đã có assignees, không gọi autoAssignForCustomer');
+                }
+            } catch (e) {
+                console.error('🚩[ERROR] Duplicate merge - auto-assign error:', e?.message || e);
+                console.error('🚩[ERROR] Stack trace:', e?.stack);
+            }
             revalidateData();
             sendUpdateNotification(existingCustomer, rawData, 'updated', isManualEntry).catch(err => console.error('[Action] Lỗi ngầm khi gửi thông báo cập nhật:', err));
             return { ok: true, message: 'Số điện thoại đã tồn tại. Hồ sơ đã được cập nhật với thông tin mới.', type: 'merged' };
@@ -215,7 +262,25 @@ export async function addRegistrationToAction(_previousState, inputData) {
         };
 
         const newCustomer = new Customer(newCustomerData);
+        console.log('[Action] Creating new customer with data:', newCustomerData);
         await newCustomer.save();
+        console.log('[Action] Created new customer:', { id: newCustomer._id, name: newCustomer.name, phone: newCustomer.phone, tags: newCustomer.tags });
+        
+        // Gán tự động theo dịch vụ được chọn - LUÔN GỌI KỂ CẢ KHÔNG CÓ SERVICE
+        // console.log('🚩BẮT ĐẦU GỌI autoAssignForCustomer từ addRegistrationToAction (create case)');
+        // console.log('🚩[DEBUG] rawData.service =', rawData.service);
+        // console.log('🚩[DEBUG] newCustomer._id =', newCustomer._id);
+        // console.log('🚩[DEBUG] newCustomer.tags =', newCustomer.tags);
+        
+        try {
+            // console.log('🚩Gọi autoAssignForCustomer từ addRegistrationToAction (create case)');
+            const assignResult = await autoAssignForCustomer(newCustomer._id, { serviceId: rawData.service || null });
+            // console.log('🚩[DEBUG] Kết quả autoAssignForCustomer:', assignResult);
+        } catch (e) {
+            console.error('🚩[ERROR] Auto-assign theo dịch vụ lỗi:', e?.message || e);
+            console.error('🚩[ERROR] Stack trace:', e?.stack);
+            // Nếu lỗi, vẫn tiếp tục và không throw để không làm gián đoạn flow
+        }
         revalidateData();
         console.log(`[Action] Đã lưu khách hàng mới với trạng thái: new_unconfirmed_1. Bắt đầu các tác vụ nền.`);
 

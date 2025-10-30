@@ -1,3 +1,3 @@
 export function viewUrlFromId(id) {
-    return id ? `https://lh3.googleusercontent.com/d/${id}` : null;
+    return id ? `https://drive.google.com/uc?export=view&id=${id}` : null;
 }

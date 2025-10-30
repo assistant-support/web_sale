@@ -9,6 +9,7 @@ import '@/models/zalo.model' // Giữ lại nếu Zalo Account vẫn liên quan 
 import ScheduledJob from "@/models/schedule";
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
 import Service from '@/models/services.model';
+import autoAssignForCustomer from '@/utils/autoAssign';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
@@ -296,6 +297,7 @@ export async function updateCustomerInfo(previousState, formData) {
     if (!id) return { success: false, error: 'Thiếu ID khách hàng.' };
 
     try {
+        // console.log('🚩Đi qua hàm updateCustomerInfo');
         await connectDB();
 
         // Lấy các trường cơ bản từ form
@@ -318,6 +320,19 @@ export async function updateCustomerInfo(previousState, formData) {
         });
 
         await Customer.findByIdAndUpdate(id, payload);
+
+        // Nếu vừa chọn dịch vụ (tags) và chưa có người phụ trách thì auto-assign ngay
+        try {
+            if (Array.isArray(payload.tags) && payload.tags.length > 0) {
+                const fresh = await Customer.findById(id).select('assignees tags').lean();
+                if (!fresh?.assignees || fresh.assignees.length === 0) {
+                    // console.log('🚩Gọi autoAssignForCustomer từ updateCustomerInfo');
+                    await autoAssignForCustomer(id, { serviceId: payload.tags[0] });
+                }
+            }
+        } catch (e) {
+            console.error('[updateCustomerInfo] Auto-assign after tag update error:', e?.message || e);
+        }
 
         revalidateData();
         return { success: true, message: 'Cập nhật thông tin thành công!' };
@@ -407,6 +422,7 @@ export async function updateCustomerStatusAction(previousState, formData) {
  * Đồng thời cập nhật trạng thái pipeline và ghi log chăm sóc (care).
  */
 export async function assignRoleToCustomersAction(prevState, formData) {
+    // console.log('🚩Đi qua hàm assignRoleToCustomersAction');
     // 1. Xác thực và phân quyền người dùng
     const user = await checkAuthToken();
     // 2. Lấy và kiểm tra dữ liệu đầu vào

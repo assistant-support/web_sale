@@ -5,7 +5,7 @@ import connectMongo from '@/config/connectDB';
 import Service from '@/models/services.model';
 import { getServiceAll, getServiceOne } from '@/data/services/handledata.db';
 import checkAuthToken from '@/utils/checktoken';
-import { uploadBufferToDrive } from '@/lib/drive';
+import { uploadBufferToDrive, setPublicPermission } from '@/lib/drive';
 import { Readable } from 'node:stream';
 
 // ====== LOG HELPERS ======
@@ -52,11 +52,14 @@ async function ensureDriveIdFromCover(cover, nameHint, reqId) {
     return null;
   }
   try {
-    const stream = Readable.from(parts.buffer);
+    // Sử dụng folder ID từ Shared Drive (không tạo folder mới)
+    const folderId = '1vNTcGy_oYM9phqutlvt-Fc5td8bFTkSm';
+    
     const info = await uploadBufferToDrive({
       name: fileNameFor(nameHint),
       mime: parts.mime,
-      buffer: stream,
+      buffer: parts.buffer,
+      folderId: folderId
     });
     return info?.id || null;
   } catch (err) {
@@ -154,6 +157,8 @@ export async function createService(formData) {
     const {
       name,
       type,
+      saleGroup,
+      defaultSale,
       description = '',
       cover,
       treatmentCourses,
@@ -164,6 +169,8 @@ export async function createService(formData) {
     const payload = {
       name: String(name || '').trim(),
       type,
+      saleGroup: saleGroup || null,
+      defaultSale: defaultSale || null,
       description: String(description || '').trim(),
       // Xử lý các trường mảng bằng helper
       treatmentCourses: parseTreatmentCourses(treatmentCourses),
@@ -208,6 +215,8 @@ export async function updateService(id, formData) {
     const {
       name,
       type,
+      saleGroup,
+      defaultSale,
       description,
       cover,
       isActive,
@@ -224,6 +233,8 @@ export async function updateService(id, formData) {
     // Cập nhật các trường cơ bản nếu có
     if (name != null) svc.name = String(name).trim();
     if (type != null) svc.type = type;
+    if (saleGroup != null) svc.saleGroup = saleGroup;
+    if (defaultSale != null) svc.defaultSale = defaultSale;
     if (description != null) svc.description = String(description).trim();
     if (typeof isActive === 'boolean') svc.isActive = isActive;
 
@@ -279,5 +290,40 @@ export async function setServiceActive(id, active) {
   } catch (err) {
     console.error(modTag, now(), reqId, 'setServiceActive: error', err?.message, err?.response?.data || err);
     return { success: false, error: 'Không thể đổi trạng thái dịch vụ.' };
+  }
+}
+
+/* -----------------------
+   FIX COVER IMAGE PERMISSIONS
+----------------------- */
+export async function fixServiceCoverPermissions() {
+  const reqId = rid();
+  try {
+    const me = await checkAuthToken();
+    if (!me || !me.id) {
+      return { success: false, error: 'Không xác thực được người dùng.' };
+    }
+    await connectMongo();
+    
+    const services = await Service.find({ cover: { $exists: true, $ne: '' } });
+    console.log(modTag, now(), reqId, `Found ${services.length} services with covers`);
+    
+    const results = [];
+    for (const svc of services) {
+      if (svc.cover && !svc.cover.startsWith('http') && !svc.cover.startsWith('data:')) {
+        const permResult = await setPublicPermission(svc.cover);
+        results.push({
+          serviceId: svc._id,
+          serviceName: svc.name,
+          coverId: svc.cover,
+          permissionFixed: permResult.success,
+        });
+      }
+    }
+    
+    return { success: true, data: { results } };
+  } catch (err) {
+    console.error(modTag, now(), reqId, 'fixServiceCoverPermissions: error', err?.message);
+    return { success: false, error: 'Không thể sửa quyền hình ảnh.' };
   }
 }

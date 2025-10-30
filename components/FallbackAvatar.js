@@ -60,6 +60,7 @@ export default function FallbackAvatar({ src, alt, name, width, height, classNam
             height={height}
             className={className}
             onError={() => setImgError(true)} // Quan trọng: Bắt sự kiện lỗi
+            unoptimized={true} // Tắt image optimization để tránh lỗi với external URLs
         />
     );
 }

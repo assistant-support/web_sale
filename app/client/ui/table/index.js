@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, SlidersHorizontal } from 'lucide-react';
 import CustomerRow from './row';
-import { getStatusInVietnamese } from '@/function/index'
+import { getStatusInVietnamese, getCurrentStageFromPipeline } from '@/function/index'
 // =============================================================
 // == 1. ĐỊNH NGHĨA CỘT DỮ LIỆU VÀ CÁC HẰNG SỐ
 // =============================================================
@@ -124,8 +124,9 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
             }
             case 'assignees': return <h6>{Array.isArray(value) && value.length > 0 ? value.map(a => a.user?.name).join(', ') : '-'}</h6>;
             case 'currentStep': {
-                const status = customer.pipelineStatus.length - 1;
-                return <h6>Bước {status}</h6>;
+                // Hiển thị tối thiểu là Bước 1 nếu khách hàng chưa có bước trước đó
+                const { currentStageId } = getCurrentStageFromPipeline(customer);
+                return <h6>Bước {currentStageId}</h6>;
             }
             case 'phonex': {
                 console.log(customer.phone, value == undefined);

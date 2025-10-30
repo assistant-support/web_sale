@@ -1,6 +1,8 @@
 // app/pancake/[pageId]/actions.js
 'use server';
 
+import axios from 'axios';
+import { PANCAKE_API_BASE_URL } from '@/config/pages';
 import { uploadBufferToDrive, viewUrlFromId } from '@/lib/drive';
 
 // 1) Upload ảnh lên Drive và trả về { id, url }
@@ -48,7 +50,7 @@ export async function sendImageAction(pageId, accessToken, conversationId, image
 
         let res = await fetch(url, { method: 'POST', body: fd });
         console.log(res);
-
+        
         res = await res.json();
         console.log(res);
         if (res.success) return { success: true };
@@ -61,7 +63,6 @@ export async function sendImageAction(pageId, accessToken, conversationId, image
 
 // 3) Gửi tin nhắn text
 export async function sendMessageAction(pageId, accessToken, conversationId, message) {
-
     try {
         const text = (message || '').trim();
         if (!pageId || !accessToken || !conversationId || !text) {
@@ -79,14 +80,13 @@ export async function sendMessageAction(pageId, accessToken, conversationId, mes
             tag: 'POST_PURCHASE_UPDATE',
             send_by_platform: "web"
         };
-
         let res = await fetch(url, {
             method: 'POST', body: JSON.stringify(payload), headers: {
                 'Content-Type': 'application/json'     // cần có header này khi gửi JSON
             },
         });
         res = await res.json();
-        console.log(res, accessToken);
+        console.log(res);
         if (res.success) return { success: true };
         return { success: false, error: 'Pancake API reported failure' };
     } catch (e) {

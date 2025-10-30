@@ -1,4 +1,5 @@
 import Customer from '@/models/customer.model';
+import autoAssignForCustomer from '@/utils/autoAssign';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 // --- Pancake API ---
 // URL và Token để lấy dữ liệu hội thoại từ Pancake.vn
 const PANCAKE_API_URL = 'https://pancake.vn/api/v1/conversations';
-const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3Njc2ODY2NzksImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoibGtlMTltRTUwZWx2a3VKL0FsZ0s1TjhoM0FnMC9JMUZRK29FMkRSL3R4MCIsImlhdCI6MTc1OTkxMDY3OSwiZmJfaWQiOiIxMjIxNDc0MjEzMzI2OTA1NjEiLCJsb2dpbl9zZXNzaW9uIjpudWxsLCJmYl9uYW1lIjoiRGV2IFN1cHBvcnQifQ.2GybMzOImT5DLo2dktr3PJPTWPVpefiYo7mk6cq-P0M';
+const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3NjcwNzc2NzUsImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoiNlRPRTdIcjhhQ0FLdjQzRm9rN2dDelJJRWRTQU1VM1ZmRmxKakxYcUFTZyIsImlhdCI6MTc1OTMwMTY3NSwiZmJfaWQiOiIxMjIxNDc0MjEzMzI2OTA1NjEiLCJsb2dpbl9zZXNzaW9uIjpudWxsLCJmYl9uYW1lIjoiRGV2IFN1cHBvcnQifQ.8SQAtPVKMw40uzbRceqC7-9GC121ajrzR0pKI1XDxcM';
 const PAGE_IDS = [
     'igo_17841465772365564', 'igo_17841459653240080', 'igo_17841432303738838',
     '140918602777989', '104088111408586', '111644183773352', '1992837824267906'
@@ -181,6 +182,13 @@ export async function GET() {
                         if (typeof createdCustomer.save === 'function') {
                             createdCustomer = await createdCustomer.save();
                         }
+                    }
+
+                    // Gán tĩnh người phụ trách
+                    try {
+                        await autoAssignForCustomer(createdCustomer._id, { forceStaticAssign: true });
+                    } catch (e) {
+                        // ignore
                     }
 
                     automationResults.push({

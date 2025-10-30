@@ -9,7 +9,7 @@ import air from '@/app/layout.module.css'
 import SettingsPage from "../components/nav";
 
 export const metadata = {
-    title: "Dịch vụ",
+    title: "CRM Sale",
     description: "Quản lý dịch vụ"
 };
 
