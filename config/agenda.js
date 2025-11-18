@@ -12,6 +12,7 @@ import Variant from '@/models/variant.model';
 import Service from '@/models/services.model';
 import User from '@/models/users';
 import { actionZalo, sendGP } from '@/function/drive/appscript';
+import { sendPreSurgeryMessageIfNeeded } from '@/data/customers/wraperdata.db';
 import Appointment from '@/models/appointment.model';
 import { processMessageConversation } from '@/utils/autoMessageCustomer';
 import { getPagesFromAPI } from '@/lib/pancake-api';
@@ -95,7 +96,7 @@ async function processMessage(rawMessage, customer) {
  * Gửi yêu cầu revalidate cache tới Next.js API để cập nhật giao diện người dùng.
  */
 function triggerRevalidation() {
-    console.log('[Agenda] Triggering revalidation via API for tag: customers');
+   
     try {
         const host = process.env.URL || 'http://localhost:3000';
         const secret = process.env.REVALIDATE_SECRET_TOKEN;
@@ -224,7 +225,7 @@ async function genericJobProcessor(job) {
 async function allocationJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'allocation';
-    console.log(`[Job ${jobName}] Bắt đầu xử lý cho KH: ${customerId}`);
+   
     let newStatus = 'undetermined_3'
     try {
         const customer = await Customer.findById(customerId);
@@ -244,15 +245,13 @@ async function allocationJobProcessor(job) {
         for (const group of requiredGroups) {
             const isAlreadyAssigned = customer.assignees.some(a => a.group === group);
             if (isAlreadyAssigned) {
-                console.log(`[Job ${jobName}] KH đã được gán cho nhóm ${group}. Bỏ qua.`);
                 continue;
             }
             const nextSale = await findNextSaleForGroup(group, zaloAccountId);
             if (nextSale) {
                 customer.assignees.push({ user: nextSale._id, group: group, assignedAt: new Date() });
                 assignmentsMade++;
-                console.log(`[Job ${jobName}] Đã gán KH ${customerId} cho Sale ${nextSale._id} nhóm ${group}.`);
-
+               
                 // ==========================================================
                 // == THÊM LOGIC CẬP NHẬT newStatus TẠI ĐÂY ==
                 if (group === 'noi_khoa') {
@@ -287,7 +286,7 @@ async function allocationJobProcessor(job) {
 async function bellJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'bell';
-    console.log(`[Job ${jobName}] Bắt đầu gửi thông báo cho KH: ${customerId}`);
+   
     try {
         const customer = await Customer.findById(customerId).populate('care.createBy', 'name').lean();
         if (!customer) throw new Error(`Không tìm thấy KH ID: ${customerId}`);
@@ -322,7 +321,7 @@ async function bellJobProcessor(job) {
 
         if (!success) throw new Error('Gửi thông báo qua Google Apps Script thất bại');
 
-        console.log(`[Job ${jobName}] Đã gửi thông báo thành công cho KH ${customerId}.`);
+        
         await logCareHistory(customerId, jobName, 'success');
         await updateStepStatus(cwId, jobName, 'completed', customerId);
     } catch (error) {
@@ -345,12 +344,12 @@ async function bellJobProcessor(job) {
 async function attachWorkflow(customerId, templateId) {
     const existingAssignment = await CustomerWorkflow.findOne({ customerId, templateId });
     if (existingAssignment) {
-        console.log(`[attachWorkflow] Bỏ qua vì KH ${customerId} đã có WF ${templateId}.`);
+        
         return;
     }
     const template = await WorkflowTemplate.findById(templateId);
     if (!template) {
-        console.error(`[attachWorkflow] Không tìm thấy template ID: ${templateId}`);
+       
         return;
     }
     const customerWorkflow = new CustomerWorkflow({
@@ -806,6 +805,69 @@ async function postSurgeryMessageProcessor(job) {
 }
 
 // =============================================================
+// == Processor mới: servicePreSurgeryMessage
+// =============================================================
+async function servicePreSurgeryMessageProcessor(job) {
+    const { customerId, serviceDetailId, triggeredBy } = job.attrs.data || {};
+    const jobName = 'servicePreSurgeryMessage';
+
+    if (!customerId || !serviceDetailId) {
+        console.error(`[Job ${jobName}] Thiếu customerId hoặc serviceDetailId.`);
+        return;
+    }
+
+    try {
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            await logCareHistory(customerId, jobName, 'failed', `Không tìm thấy khách hàng ${customerId}.`);
+            return;
+        }
+
+        let detail = null;
+        if (customer.serviceDetails?.id) {
+            detail = customer.serviceDetails.id(serviceDetailId);
+        }
+        if (!detail && Array.isArray(customer.serviceDetails)) {
+            detail = customer.serviceDetails.find((d) => String(d?._id) === String(serviceDetailId));
+        }
+
+        if (!detail) {
+            await logCareHistory(customerId, jobName, 'failed', `Không tìm thấy đơn chốt ${serviceDetailId}.`);
+            return;
+        }
+
+        if (detail.approvalStatus !== 'approved') {
+            await logCareHistory(customerId, jobName, 'success', `Đơn ${serviceDetailId} không còn ở trạng thái approved. Bỏ qua gửi tin nhắn.`);
+            return;
+        }
+
+        const detailSnapshot = detail.toObject ? detail.toObject() : JSON.parse(JSON.stringify(detail));
+        const sessionStub = triggeredBy ? { id: triggeredBy } : { id: SYSTEM_USER_ID };
+
+        const result = await sendPreSurgeryMessageIfNeeded({
+            customer,
+            detail: detailSnapshot,
+            session: sessionStub,
+        }).catch((error) => ({ error: error?.message || 'Unhandled error trong servicePreSurgeryMessageProcessor.' }));
+
+        if (result?.success) {
+            await logCareHistory(customerId, jobName, 'success', 'Đã gửi tin nhắn trước phẫu thuật sau duyệt đơn.');
+            return;
+        }
+
+        if (result?.skipped) {
+            await logCareHistory(customerId, jobName, 'success', result.skipped);
+            return;
+        }
+
+        await logCareHistory(customerId, jobName, 'failed', result?.error || 'Không thể gửi tin nhắn trước phẫu thuật.');
+    } catch (error) {
+        console.error(`[Job ${jobName}] Xảy ra lỗi: "${error.message}"`);
+        await logCareHistory(customerId, jobName, 'failed', error.message);
+    }
+}
+
+// =============================================================
 // == 4.5. PROCESSOR CHO AUTO MESSAGE CUSTOMER
 // =============================================================
 /**
@@ -938,6 +1000,7 @@ const initAgenda = async () => {
     agendaInstance.define('appointmentReminder', { priority: 'high', concurrency: 10 }, appointmentReminderProcessor);
     agendaInstance.define('preSurgeryReminder', { priority: 'normal', concurrency: 10 }, preSurgeryReminderProcessor);
     agendaInstance.define('postSurgeryMessage', { priority: 'high', concurrency: 10 }, postSurgeryMessageProcessor);
+    agendaInstance.define('servicePreSurgeryMessage', { priority: 'high', concurrency: 10 }, servicePreSurgeryMessageProcessor);
     agendaInstance.define('autoMessageCustomer', { priority: 'normal', concurrency: 1 }, autoMessageCustomerProcessor);
     
     agendaInstance.on('fail', (err, job) => {

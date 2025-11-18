@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Send, Loader2, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon } from 'lucide-react';
-import { sendMessageAction, uploadImageToDriveAction, sendImageAction } from './actions';
+import { sendMessageAction, uploadImageToPancakeAction, sendImageAction } from './actions';
 import { Toaster, toast } from 'sonner';
 
 import Image from 'next/image';
@@ -187,14 +187,29 @@ export default function EnhancedChatClient({
         
         try {
             for (const file of files) {
-                const uploadResult = await uploadImageToDriveAction(file);
-                if (uploadResult.success) {
-                    const sendResult = await sendImageAction({
-                        pageId: pageConfig.id,
+                const uploadResult = await uploadImageToPancakeAction(file, {
+                    pageId: pageConfig.id,
+                    accessToken: token,
+                });
+                if (uploadResult.success && uploadResult.contentId && uploadResult.attachmentId) {
+                    const sendResult = await sendImageAction(
+                        pageConfig.id,
                         token,
-                        conversationId: selectedConvo.id,
-                        imageUrl: uploadResult.url
-                    });
+                        selectedConvo.id,
+                        {
+                            contentId: uploadResult.contentId,
+                            attachmentId: uploadResult.attachmentId,
+                            url: uploadResult.url,
+                            previewUrl: uploadResult.previewUrl,
+                            thumbnailUrl: uploadResult.thumbnailUrl || null,
+                            mimeType: uploadResult.mimeType || file.type,
+                            name: uploadResult.name || file.name,
+                            size: uploadResult.size ?? file.size,
+                            width: uploadResult.width ?? null,
+                            height: uploadResult.height ?? null,
+                        },
+                        ''
+                    );
                     
                     if (!sendResult.success) {
                         toast.error('Gửi ảnh thất bại: ' + sendResult.error);

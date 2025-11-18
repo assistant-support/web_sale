@@ -4,7 +4,7 @@ import { history_data } from '@/data/actions/get';
 export default async function AdminPage() {
     const historyResult = await history_data();
     const historyData = processHistoryData(historyResult.success ? historyResult : { data: [] });
-    console.log(historyData);
+    
 
     return (
         <>

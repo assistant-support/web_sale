@@ -178,6 +178,7 @@ const FormSchema = new Schema(
 
         zaloavt: String,
         zaloname: String,
+        cover_customer: { type: String, trim: true, default: null }, // ID ảnh trên Google Drive
 
         assignees: {
             type: [{
@@ -211,7 +212,14 @@ const FormSchema = new Schema(
 
         serviceDetails: { type: [ServiceDetailSchema], default: [] },
         
+        // Lịch sử sử dụng dịch vụ được build từ serviceDetails
+        // Format: { "Tên dịch vụ": ["Liệu trình 1", "Liệu trình 2", ...] }
+        history_service: { type: Schema.Types.Mixed, default: {} },
+        
         id_phone_mes: { type: String, default: null }, // ID conversation từ Pancake
+        Id_area_customer: { type: String, trim: true, default: null }, // Tên khu vực khách hàng từ bảng area_customer
+        service_start_date: { type: Date, default: null }, // Ngày bắt đầu sử dụng dịch vụ
+        service_last_date: { type: Date, default: null }, // Ngày sử dụng dịch vụ lần cuối
     },
     { timestamps: false, versionKey: false }
 );
@@ -226,6 +234,17 @@ FormSchema.pre('save', function (next) {
             .split(' ')
             .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
             .join(' ');
+    
+    // Đảm bảo history_service luôn là Object (không phải undefined)
+    if (this.history_service === undefined || this.history_service === null) {
+        this.history_service = {};
+    }
+    
+    // Đánh dấu history_service đã được modified nếu có thay đổi
+    if (this.isModified('history_service')) {
+        this.markModified('history_service');
+    }
+    
     next();
 });
 

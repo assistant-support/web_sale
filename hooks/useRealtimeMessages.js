@@ -50,8 +50,108 @@ const normalizePancakeMessage = (raw, pageId) => {
         };
     }
 
+    // Handle video attachments
+    const videoAtts = atts
+        .map((a) => {
+            const url =
+                a?.video_data?.url ||
+                a?.url ||
+                a?.origin_url ||
+                a?.payload?.url ||
+                a?.payload?.src;
+            return url
+                ? {
+                      ...a,
+                      url,
+                      width: a?.video_data?.width,
+                      height: a?.video_data?.height,
+                      name: a?.name || a?.file_name,
+                      length: a?.video_data?.length,
+                      mime: a?.mime || a?.content_type,
+                  }
+                : null;
+        })
+        .filter((a) => a && (a.type === 'video' || a.mime?.startsWith?.('video/')));
+
+    if (videoAtts.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'videos',
+                videos: videoAtts.map((a) => ({
+                    url: a.url,
+                    width: a.width,
+                    height: a.height,
+                    name: a.name,
+                    length: a.length,
+                    mime: a.mime,
+                    thumbnail: a?.thumbnail_url || a?.preview_url,
+                })),
+            },
+        };
+    }
+
+    // Fallback: message only contains .mp4 link without attachments
+    const extractVideoUrls = () => {
+        const urls = new Set();
+
+        const collect = (value) => {
+            if (typeof value !== 'string') return;
+            const matches = value.match(/https?:\/\/\S+/gi);
+            if (!matches) return;
+            matches.forEach((candidate) => {
+                const clean = candidate.replace(/[>"')]+$/g, '');
+                if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(clean)) {
+                    urls.add(clean);
+                }
+            });
+        };
+
+        collect(raw.original_message);
+        collect(htmlToPlainText(raw.message || ''));
+
+        if (Array.isArray(raw.message_tags)) {
+            raw.message_tags.forEach((tag) => collect(tag?.link || tag?.url));
+        }
+
+        return Array.from(urls);
+    };
+
+    const fallbackVideos = extractVideoUrls();
+    if (fallbackVideos.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'videos',
+                videos: fallbackVideos.map((url) => ({
+                    url,
+                    width: null,
+                    height: null,
+                    name: raw.original_message && !raw.original_message.startsWith('http')
+                        ? raw.original_message
+                        : url.split('/').pop()?.split('?')[0],
+                    length: null,
+                    mime: undefined,
+                    thumbnail: null,
+                })),
+            },
+        };
+    }
+
     // Handle file attachments
-    const fileAtts = atts.filter((a) => a?.type && a?.type !== 'photo');
+    const fileAtts = atts.filter(
+        (a) =>
+            a?.type &&
+            a?.type !== 'photo' &&
+            a?.type !== 'video' &&
+            !a?.mime?.startsWith?.('video/')
+    );
     if (fileAtts.length > 0) {
         return {
             id: raw.id,
@@ -176,6 +276,7 @@ export const useRealtimeMessages = (pageConfig, token, selectedConversationId) =
                             }
                             if (normalizedMessage?.content?.type === 'images') return '[Ảnh]';
                             if (normalizedMessage?.content?.type === 'files') return '[Tệp]';
+                            if (normalizedMessage?.content?.type === 'videos') return '[Video]';
                             return conv.snippet;
                         })(),
                         updated_at: rawMessage?.inserted_at || new Date().toISOString(),

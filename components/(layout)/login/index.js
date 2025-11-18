@@ -99,7 +99,7 @@ const LoginPage = () => {
         body: JSON.stringify(data),
       });
       const result = await response.json();
-      
+      console.log(result);
       window.location.reload()
     } catch (err) {
       console.error('Lỗi:', err);

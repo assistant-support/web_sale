@@ -17,6 +17,7 @@ export default function SpecificCallDebugger() {
     const testAudioAPI = async () => {
         setLoading(true);
         try {
+            console.log('🔍 Testing audio API for call:', PROBLEMATIC_CALL_ID);
             
             const response = await fetch(`/api/calls/${PROBLEMATIC_CALL_ID}/audio`);
             const result = {
@@ -27,11 +28,11 @@ export default function SpecificCallDebugger() {
                 timestamp: new Date().toLocaleString('vi-VN')
             };
             
-            
+            console.log('🔍 API Response:', result);
             setTestResults(result);
             
         } catch (error) {
-           
+            console.error('❌ API Test Error:', error);
             setTestResults({
                 error: error.message,
                 timestamp: new Date().toLocaleString('vi-VN')
@@ -44,10 +45,10 @@ export default function SpecificCallDebugger() {
     const testDirectDriveAccess = async () => {
         setLoading(true);
         try {
-           
+            console.log('🔍 Testing direct Drive access...');
             
             const result = await debugSpecificCall(PROBLEMATIC_CALL_ID);
-            
+            console.log('🔍 Debug result:', result);
             
             setTestResults(prev => ({
                 ...prev,
@@ -55,7 +56,7 @@ export default function SpecificCallDebugger() {
             }));
             
         } catch (error) {
-            
+            console.error('❌ Direct Drive Test Error:', error);
             setTestResults(prev => ({
                 ...prev,
                 directDriveTest: { error: error.message }

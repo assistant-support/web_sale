@@ -24,7 +24,7 @@ export async function createAreaAction(_previousState, formData) {
     const user = await checkAuthToken();
 
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    console.log(user.role);
+    
 
     if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
@@ -270,7 +270,6 @@ async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
         // Kiểm tra xem đã gửi thông báo cho customer này trong 30s gần đây chưa
         const lastSentTime = notificationSentMap.get(customerId);
         if (lastSentTime && (now - lastSentTime) < DEBOUNCE_TIME) {
-            
             return;
         }
         
@@ -307,7 +306,7 @@ Thời gian: ${formattedCreateAt}`;
 
         // 5. Gửi qua Google Apps Script
         await sendGP(message);
-        console.log(`[sendUpdateNotification] ✅ Đã gửi thông báo Apps Script cho KH ${customerId} (Loại: ${type})`);
+        
     } catch (err) {
         const customerId = customer._id?.toString() || 'unknown';
         console.error(`[sendUpdateNotification] ❌ Lỗi gửi Apps Script cho KH ${customerId}:`, err);
@@ -388,10 +387,6 @@ async function findNextAvailableZaloAccount() {
  * Hàm xử lý nền: Tìm UID Zalo và gửi tin nhắn xác nhận.
  */
 async function processFindUidAndSendMessage(newCustomer) {
-    console.log('[processFindUidAndSendMessage] ====================================');
-    console.log('[processFindUidAndSendMessage] Bắt đầu xử lý tìm UID và gửi tin nhắn cho KH:', newCustomer._id);
-    console.log('[processFindUidAndSendMessage] Customer name:', newCustomer.name);
-    console.log('[processFindUidAndSendMessage] Customer phone:', newCustomer.phone);
     
     const customerId = newCustomer._id;
     const phone = newCustomer.phone;
@@ -409,8 +404,7 @@ async function processFindUidAndSendMessage(newCustomer) {
             return;
         }
         
-        console.log('[processFindUidAndSendMessage] ✅ Đã chọn tài khoản Zalo:', selectedZalo.name, 'UID:', selectedZalo.uid);
-        
+       
         // 2. Format phone number (đảm bảo có +84)
         let formattedPhone = phone.toString().trim();
         if (formattedPhone.startsWith('+84')) {
@@ -451,12 +445,12 @@ async function processFindUidAndSendMessage(newCustomer) {
         
         // Xử lý retry nếu tài khoản Zalo ngừng hoạt động
         if (!findUidResponse.status && findUidResponse.message?.includes('ngừng hoạt động')) {
-            console.log('[processFindUidAndSendMessage] ⚠️ Tài khoản Zalo đã ngừng hoạt động. Đang thử với tài khoản khác...');
+            
             const allAccounts = await ZaloAccount.find({ _id: { $ne: selectedZalo._id } }).sort({ _id: -1 }).lean();
             
             for (const retryZalo of allAccounts) {
                 if (retryZalo.rateLimitPerHour > 0 && retryZalo.rateLimitPerDay > 0) {
-                    console.log('[processFindUidAndSendMessage] Đang retry với tài khoản:', retryZalo.name);
+                   
                     selectedZalo = retryZalo;
                     
                     findUidResponse = await actionZalo({
@@ -469,7 +463,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                         // Retry thành công - XÓA LOG ĐẦU TIÊN (thất bại) và chỉ giữ log thành công
                         if (firstLogId) {
                             await Logs.deleteOne({ _id: firstLogId });
-                            
+                           
                         }
                         
                         // Log retry thành công
@@ -489,7 +483,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                         });
                         
                         findUidStatus = "thành công (retry)";
-                        console.log('[processFindUidAndSendMessage] ✅ Retry thành công với tài khoản:', retryZalo.name);
+                       
                         break;
                     } else {
                         // Retry thất bại - log lại nhưng không xóa log đầu tiên
@@ -551,7 +545,6 @@ async function processFindUidAndSendMessage(newCustomer) {
                 }
             );
             
-            console.log('[processFindUidAndSendMessage] ✅ Đã cập nhật UID (' + normalizedUid + ') và thêm care log cho KH:', customerId);
             
             // Revalidate để cập nhật UI ngay lập tức
             revalidateData();
@@ -614,7 +607,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                     const finalMessageToSend = await formatMessage(template, doc, selectedZalo);
                     
                     if (finalMessageToSend) {
-                        console.log('[processFindUidAndSendMessage] Đang gửi tin nhắn xác nhận...');
+                       
                         const sendMessageResponse = await actionZalo({
                             uid: selectedZalo.uid,
                             uidPerson: normalizedUid,
@@ -644,12 +637,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                         
                         if (isSuccess) {
                             messageStatus = "thành công";
-                            console.log('[processFindUidAndSendMessage] ✅ Đã gửi tin nhắn xác nhận thành công');
-                            console.log('[processFindUidAndSendMessage] Response details:', {
-                                status: sendMessageResponse.status,
-                                error_code: sendMessageResponse.content?.error_code,
-                                error_message: sendMessageResponse.content?.error_message
-                            });
+                           
                             
                             // Cập nhật care log và pipelineStatus khi thành công
                             await Customer.findByIdAndUpdate(customerId, {
@@ -668,7 +656,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                             });
                         } else {
                             messageStatus = "thất bại";
-                            const errorMsg = sendMessageResponse.content?.error_message || sendMessageResponse.message || 'Không xác định';
+                            const errorMsg = sendMessageResponse.content?.error_message || sendMessageResponse.message || 'Không xác định data.actions.js';
                             console.error('[processFindUidAndSendMessage] ❌ Gửi tin nhắn thất bại:', {
                                 status: sendMessageResponse.status,
                                 error_code: sendMessageResponse.content?.error_code,
@@ -696,10 +684,10 @@ async function processFindUidAndSendMessage(newCustomer) {
                     }
                 } else {
                     messageStatus = "bỏ qua (không có template)";
-                    console.log('[processFindUidAndSendMessage] ⚠️ Không tìm thấy template tin nhắn xác nhận');
+                    
                 }
             } catch (messageError) {
-                console.error('[processFindUidAndSendMessage] Lỗi trong lúc gửi tin nhắn:', messageError.message);
+                
                 messageStatus = "thất bại";
             }
             
@@ -740,11 +728,11 @@ Hành động xác nhận khách hàng mới: ${phone}
         
         try {
             await sendGP(finalMessage);
-            console.log('[processFindUidAndSendMessage] ✅ Gửi thông báo thành công');
+            
         } catch (gpError) {
             console.error('[processFindUidAndSendMessage] ❌ Gửi thông báo thất bại:', gpError.message);
         }
         
-        console.log('[processFindUidAndSendMessage] ====================================');
+      
     }
 }

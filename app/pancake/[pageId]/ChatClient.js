@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { io } from 'socket.io-client';
-import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon } from 'lucide-react';
-import { sendMessageAction, uploadImageToDriveAction, sendImageAction } from './actions';
-import { toggleLabelForCustomer } from '@/app/(setting)/label/actions';
+import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon, Video as VideoIcon, Play } from 'lucide-react';
+import { sendMessageAction, uploadImageToPancakeAction, sendImageAction, uploadVideoToPancakeAction, sendVideoAction } from './actions';
+import { toggleLabelForCustomer, getConversationIdsByLabelsAndPage } from '@/app/(setting)/label/actions';
+import { getConversationsFromIds } from '@/lib/pancake-api';
 import { Toaster, toast } from 'sonner';
 
 import Image from 'next/image';
@@ -126,14 +127,14 @@ const createAutoCustomer = async (customerName, messageContent, conversationId, 
         const result = await response.json();
         
         if (result.success) {
-            // Tạo khách hàng thành công:'
+           
             return result;
         } else {
-            //Không thể tạo khách hàng:'
+           
             return null;
         }
     } catch (error) {
-        //Lỗi khi gọi API
+        console.error('❌ [Auto Customer] Lỗi khi gọi API:', error);
         return null;
     }
 };
@@ -153,27 +154,61 @@ const normalizePancakeMessage = (raw, pageId) => {
         ...(raw.attachment ? [raw.attachment] : []),
     ];
 
+    const deriveType = (a) => {
+        const type =
+            a?.type ||
+            a?.attachment_type ||
+            a?.attachmentType ||
+            a?.payload?.type ||
+            '';
+        return typeof type === 'string' ? type.toLowerCase() : '';
+    };
+
+    const deriveMime = (a) => {
+        const mime =
+            a?.mime ||
+            a?.mime_type ||
+            a?.content_type ||
+            a?.payload?.mime ||
+            a?.payload?.mime_type ||
+            '';
+        return typeof mime === 'string' ? mime.toLowerCase() : '';
+    };
+
+    const resolveUrl = (a) => {
+        const candidates = [
+            a?.url,
+            a?.content_url,
+            a?.attachment_url,
+            a?.preview_url,
+            a?.thumbnail_url,
+            a?.image_data?.url,
+            a?.payload?.url,
+            a?.payload?.src,
+            a?.media?.image?.src,
+            a?.media?.image?.url,
+            a?.src,
+            a?.source,
+            a?.file_url,
+            a?.origin_url,
+        ];
+        return candidates.find((u) => typeof u === 'string' && u);
+    };
+
     // ✅ Phát hiện sticker - sticker có type="sticker" hoặc trong payload
     const stickerAtts = atts
-        .filter((a) => a && (
-            a.type === 'sticker' || 
-            a.type?.toLowerCase() === 'sticker' ||
-            a.payload?.type === 'sticker' ||
-            (a.payload && a.payload.sticker_id) ||
-            (a.payload && a.payload.url && a.type !== 'photo' && a.type !== 'image')
-        ))
+        .filter((a) => {
+            const type = deriveType(a);
+            return (
+                a &&
+                (type === 'sticker' ||
+                    a?.payload?.type === 'sticker' ||
+                    a?.payload?.sticker_id ||
+                    (a?.payload?.url && type !== 'photo' && type !== 'image'))
+            );
+        })
         .map((a) => {
-            const url = a?.url
-                || a?.preview_url
-                || a?.image_data?.url
-                || a?.src
-                || a?.source
-                || a?.payload?.url
-                || a?.payload?.src
-                || a?.payload?.image_url
-                || a?.media?.image?.src
-                || a?.media?.image?.url
-                || a?.file_url;
+            const url = resolveUrl(a) || a?.payload?.image_url;
             return url ? { ...a, url, stickerId: a?.payload?.sticker_id || a?.sticker_id } : null;
         })
         .filter((a) => a && a.url);
@@ -198,23 +233,28 @@ const normalizePancakeMessage = (raw, pageId) => {
     }
 
     const imageAtts = atts
-        .filter((a) => a && (
-            (a.type === 'photo' || a.type === 'image' || a.mime?.startsWith?.('image/')) &&
-            a.type !== 'sticker' && 
-            a.type?.toLowerCase() !== 'sticker'
-        ))
+        .filter((a) => {
+            if (!a) return false;
+            const type = deriveType(a);
+            if (type === 'sticker') return false;
+            const mime = deriveMime(a);
+            return (
+                type === 'photo' ||
+                type === 'image' ||
+                (type === 'file' && mime.startsWith('image/')) ||
+                mime.startsWith('image/')
+            );
+        })
         .map((a) => {
-            const url = a?.url
-                || a?.preview_url
-                || a?.image_data?.url
-                || a?.src
-                || a?.source
-                || a?.payload?.url
-                || a?.payload?.src
-                || a?.media?.image?.src
-                || a?.media?.image?.url
-                || a?.file_url;
-            return url ? { ...a, url } : a;
+            const url = resolveUrl(a);
+            return url
+                ? {
+                      ...a,
+                      url,
+                      width: a?.image_data?.width || a?.width,
+                      height: a?.image_data?.height || a?.height,
+                  }
+                : a;
         })
         .filter((a) => a?.url);
     if (imageAtts.length > 0) {
@@ -234,17 +274,117 @@ const normalizePancakeMessage = (raw, pageId) => {
         };
     }
 
+    const videoAtts = atts
+        .map((a) => {
+            const url =
+                a?.video_data?.url ||
+                resolveUrl(a);
+            return url
+                ? {
+                      ...a,
+                      url,
+                      width: a?.video_data?.width || a?.width,
+                      height: a?.video_data?.height || a?.height,
+                      thumbnail:
+                          a?.thumbnail_url ||
+                          a?.preview_url ||
+                          a?.video_data?.thumbnail_url,
+                  }
+                : null;
+        })
+        .filter((a) => {
+            if (!a) return false;
+            const type = deriveType(a);
+            const mime = deriveMime(a);
+            return type === 'video' || mime.startsWith('video/');
+        });
+
+    if (videoAtts.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'videos',
+                videos: videoAtts.map((a) => ({
+                    url: a.url,
+                    width: a.width,
+                    height: a.height,
+                    name: a?.name || a?.file_name || raw?.original_message,
+                    length: a?.video_data?.length,
+                    thumbnail: a?.thumbnail,
+                    mime: a?.mime,
+                })),
+            },
+        };
+    }
+
+    // 🔁 Một số tin nhắn (đặc biệt từ Zalo) chỉ gửi link .mp4 mà không có attachments
+    const extractVideoUrlsFromMessage = () => {
+        const urls = new Set();
+
+        const collectFromText = (value) => {
+            if (typeof value !== 'string') return;
+            const matches = value.match(/https?:\/\/\S+/gi);
+            if (!matches) return;
+            matches.forEach((candidate) => {
+                const clean = candidate.replace(/[>"')]+$/g, '');
+                if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(clean)) {
+                    urls.add(clean);
+                }
+            });
+        };
+
+        collectFromText(raw.original_message);
+        collectFromText(htmlToPlainText(raw.message || ''));
+
+        if (Array.isArray(raw.message_tags)) {
+            raw.message_tags.forEach((tag) => {
+                collectFromText(tag?.link || tag?.url);
+            });
+        }
+
+        return Array.from(urls);
+    };
+
+    const fallbackVideoUrls = extractVideoUrlsFromMessage();
+    if (fallbackVideoUrls.length > 0) {
+        return {
+            id: raw.id,
+            inserted_at: ts,
+            senderType,
+            status: raw.status || 'sent',
+            content: {
+                type: 'videos',
+                videos: fallbackVideoUrls.map((url) => ({
+                    url,
+                    width: null,
+                    height: null,
+                    name: raw.original_message && !raw.original_message.startsWith('http')
+                        ? raw.original_message
+                        : url.split('/').pop()?.split('?')[0],
+                    length: null,
+                    thumbnail: null,
+                    mime: undefined,
+                })),
+            },
+        };
+    }
+
     // ✅ QUAN TRỌNG: Lọc bỏ attachment type="REACTION" và "sticker" vì đã xử lý riêng
     // Nếu có text message, ưu tiên hiển thị text với reaction thay vì file
-    const fileAtts = atts.filter((a) => 
-        a?.type && 
-        a?.type !== 'photo' && 
-        a?.type !== 'image' && 
-        a?.type !== 'sticker' &&
-        a?.type?.toLowerCase() !== 'sticker' &&
-        a?.type !== 'REACTION' && // Bỏ qua REACTION attachment
-        a?.type?.toLowerCase() !== 'reaction' // Bỏ qua cả lowercase
-    );
+    const fileAtts = atts.filter((a) => {
+        if (!a?.type) return false;
+        const type = typeof a.type === 'string' ? a.type.toLowerCase() : '';
+        const mime = typeof a.mime === 'string' ? a.mime.toLowerCase() : '';
+        if (type === 'photo' || type === 'image' || type === 'video' || type === 'sticker' || type === 'reaction') {
+            return false;
+        }
+        if (mime.startsWith('video/')) return false;
+        if (a?.type === 'REACTION') return false;
+        return true;
+    });
     
     // Parse text message - có thể chứa reaction format: "[❤️ ] text"
     let text =
@@ -281,13 +421,8 @@ const normalizePancakeMessage = (raw, pageId) => {
     if (text && typeof text === 'string') {
         // Debug log để kiểm tra dữ liệu
         if (text.includes('[') || text.includes('❤️') || text.includes(']')) {
-            
-            console.log('🔍 [Reaction Parse] Raw message:', {
-                id: raw.id,
-                original_message: raw.original_message,
-                message: raw.message,
-                attachments: raw.attachments
-            });
+            console.log('🔍 [Reaction Parse] Original text:', text);
+         
         }
         
         // Tìm tất cả các reaction ở đầu message trong format [emoji] hoặc [emoji ]
@@ -318,13 +453,7 @@ const normalizePancakeMessage = (raw, pageId) => {
                 // Loại bỏ phần reaction ở đầu khỏi text
                 cleanText = text.replace(reactionRegex, '').trim();
                 
-                console.log('✅ [Reaction Parse] Parsed:', {
-                    reactions,
-                    cleanText,
-                    originalText: text,
-                    reactionPart,
-                    reactionMatches: reactionMatches.map(m => m[1])
-                });
+               
             }
         } else {
             // Nếu không match với regex, thử cách khác: tìm pattern [xxx] ở đầu
@@ -335,11 +464,7 @@ const normalizePancakeMessage = (raw, pageId) => {
                 cleanText = simpleMatch[2].trim();
                 if (reactionText && reactionText !== 'REACTION' && reactionText !== 'reaction') {
                     reactions = [reactionText];
-                    console.log('✅ [Reaction Parse] Simple match:', {
-                        reactions,
-                        cleanText,
-                        originalText: text
-                    });
+                    
                 }
             }
         }
@@ -357,7 +482,15 @@ const normalizePancakeMessage = (raw, pageId) => {
         ...(reactions.length > 0 && { reactions }) // Thêm reactions nếu có
     } : { type: 'system', content: '' };
     
-   
+    // Debug log để kiểm tra kết quả cuối cùng
+    // if (reactions.length > 0) {
+    //     console.log('📤 [Reaction Parse] Final normalized message:', {
+    //         id: raw.id,
+    //         content: normalizedContent,
+    //         hasReactions: !!normalizedContent.reactions,
+    //         reactionsCount: reactions.length
+    //     });
+    // }
     
     return {
         id: raw.id,
@@ -526,7 +659,7 @@ const LabelDropdown = ({
     );
 };
 
-const MessageContent = ({ content }) => {
+const MessageContent = ({ content, onVideoClick }) => {
     if (!content)
         return (
             <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
@@ -576,6 +709,51 @@ const MessageContent = ({ content }) => {
                                 loading="lazy"
                             />
                         </div>
+                    ))}
+                </div>
+            );
+
+        case 'videos':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {content.videos.map((video, i) => (
+                        <button
+                            key={i}
+                            type="button"
+                            className="group relative overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            onClick={() => onVideoClick?.(video)}
+                        >
+                            <div className="relative w-[260px] max-w-full rounded-lg overflow-hidden border border-gray-200 bg-black">
+                                {video.thumbnail ? (
+                                    <img
+                                        src={video.thumbnail}
+                                        alt={video.name || `Video ${i + 1}`}
+                                        className="w-full aspect-video object-cover opacity-80 group-hover:opacity-60 transition"
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    <video
+                                        src={video.url}
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        className="w-full aspect-video object-cover opacity-80 group-hover:opacity-60 transition"
+                                    />
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white shadow-lg">
+                                        <Play className="h-6 w-6" />
+                                    </div>
+                                </div>
+                            </div>
+                            {video.name && (
+                                <div className="mt-1 flex justify-center">
+                                    <span className="max-w-[240px] truncate text-sm text-blue-600 group-hover:underline">
+                                        {video.name}
+                                    </span>
+                                </div>
+                            )}
+                        </button>
                     ))}
                 </div>
             );
@@ -681,6 +859,8 @@ export default function ChatClient({
     const [isNearBottom, setIsNearBottom] = useState(true);
     const isNearBottomRef = useRef(true);
     const lastScrollTopRef = useRef(0);
+    const isInitialLoadRef = useRef(true);
+    const shouldScrollToBottomRef = useRef(false);
 
     // 3) Search
     const [searchInput, setSearchInput] = useState('');
@@ -689,30 +869,130 @@ export default function ChatClient({
 
     // 4) Lọc theo nhãn
     const [selectedFilterLabelIds, setSelectedFilterLabelIds] = useState([]);
+    const [labelFilterConversations, setLabelFilterConversations] = useState([]);
+    const [isLoadingLabelFilter, setIsLoadingLabelFilter] = useState(false);
 
     // 5) Refs UI
     const formRef = useRef(null);
     const messagesEndRef = useRef(null);
     const sidebarRef = useRef(null);
     const fileInputRef = useRef(null);
+    const videoInputRef = useRef(null);
 
     // Ảnh pending
     const [pendingImages, setPendingImages] = useState([]);
+    const [pendingVideos, setPendingVideos] = useState([]);
+    const pendingVideosRef = useRef(pendingVideos);
     const [isUploadingImage, setIsUploadingImage] = useState(false);
-    const hasPendingUploads = useMemo(() => pendingImages.some((p) => !p?.id), [pendingImages]);
+    const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+    const hasPendingUploads = useMemo(
+        () =>
+            pendingImages.some((p) => !p?.contentId) ||
+            pendingVideos.some((v) => !v?.contentId),
+        [pendingImages, pendingVideos]
+    );
+    const [videoPreview, setVideoPreview] = useState(null);
+
+    useEffect(() => {
+        pendingVideosRef.current = pendingVideos;
+    }, [pendingVideos]);
+
+    useEffect(() => {
+        return () => {
+            pendingVideosRef.current.forEach((v) => {
+                if (v?.url && v.url.startsWith('blob:')) {
+                    URL.revokeObjectURL(v.url);
+                }
+            });
+        };
+    }, []);
+
+    useEffect(() => {
+        setVideoPreview(null);
+    }, [selectedConvo?.id]);
 
     // Gán/Bỏ gán nhãn cho hội thoại đang chọn
     const handleToggleLabel = useCallback(
         async (labelId, checked) => {
             try {
-                const psid = getConvoPsid(selectedConvoRef.current);
-                if (!psid) {
-                    toast.error('Không thể gán nhãn: thiếu PSID.');
+                const selectedConvo = selectedConvoRef.current;
+                if (!selectedConvo || !selectedConvo.id) {
+                    toast.error('Không thể gán nhãn: thiếu thông tin hội thoại.');
                     return;
                 }
-                const res = await toggleLabelForCustomer({ labelId, psid });
+
+                // Lấy conversation_id từ hội thoại đang chọn
+                const conversationId = selectedConvo.id;
+                const pageId = pageConfig.id;
+                
+                // Gọi API messages để lấy conversation_id và customer_id từ response
+                let conversationIdFromAPI = conversationId;
+                let customerIdFromAPI = '';
+                
+                try {
+                    // Thử lấy customerId từ selectedConvo để gọi API
+                    let customerIdForRequest = selectedConvo.customers?.[0]?.id 
+                        || selectedConvo.customers?.[0]?.fb_id 
+                        || selectedConvo.from?.id 
+                        || null;
+                    
+                    // Gọi API messages để lấy conversation_id và customer_id từ response
+                    let messagesUrl = `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?customer_id=${customerIdForRequest || ''}&access_token=${token}&user_view=true&is_new_api=true&separate_pos=true`;
+                    let messagesResponse = await fetch(messagesUrl);
+                    
+                    // Nếu lỗi 400 (thiếu customer_id), thử gọi lại không có customer_id
+                    if (!messagesResponse.ok && messagesResponse.status === 400) {
+                        messagesUrl = `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?access_token=${token}&user_view=true&is_new_api=true&separate_pos=true`;
+                        messagesResponse = await fetch(messagesUrl);
+                    }
+                    
+                    if (messagesResponse.ok) {
+                        const messagesData = await messagesResponse.json();
+                        
+                        // Lấy conversation_id từ messages[0].conversation_id
+                        if (messagesData?.messages && Array.isArray(messagesData.messages) && messagesData.messages.length > 0) {
+                            const firstMessage = messagesData.messages[0];
+                            if (firstMessage?.conversation_id) {
+                                conversationIdFromAPI = firstMessage.conversation_id;
+                            } else if (firstMessage?.conversation?.id) {
+                                conversationIdFromAPI = firstMessage.conversation.id;
+                            }
+                        } else if (messagesData?.conversation_id) {
+                            conversationIdFromAPI = messagesData.conversation_id;
+                        }
+                        
+                        // Lấy customer_id từ customers[0].id (ưu tiên id, sau đó mới đến fb_id)
+                        if (messagesData?.customers && Array.isArray(messagesData.customers) && messagesData.customers.length > 0) {
+                            const firstCustomer = messagesData.customers[0];
+                            // Ưu tiên lấy id (UUID), sau đó mới đến fb_id
+                            customerIdFromAPI = firstCustomer.id || firstCustomer.fb_id || '';
+                          
+                        } else {
+                            console.warn('⚠️ [handleToggleLabel] Không tìm thấy customers array trong response');
+                        }
+                    } else {
+                        console.warn('⚠️ [handleToggleLabel] API response không OK:', messagesResponse.status, messagesResponse.statusText);
+                    }
+                } catch (apiError) {
+                    console.warn('[handleToggleLabel] Không thể lấy dữ liệu từ API, sử dụng dữ liệu từ hội thoại:', apiError);
+                    // Vẫn tiếp tục với dữ liệu từ selectedConvo
+                    customerIdFromAPI = selectedConvo.customers?.[0]?.id || selectedConvo.customers?.[0]?.fb_id || '';
+                }
+
+              
+
+                // Gọi hàm toggleLabelForCustomer với pageId, conversationId và customerId
+                const res = await toggleLabelForCustomer({ 
+                    labelId, 
+                    pageId,
+                    conversationId: conversationIdFromAPI,
+                    customerId: customerIdFromAPI
+                });
+                
+               
                 if (!res?.success) {
                     toast.error(res?.error || 'Không thể cập nhật nhãn');
+                    console.error('❌ [handleToggleLabel] Error:', res?.error);
                     return;
                 }
 
@@ -720,19 +1000,38 @@ export default function ChatClient({
                 setAllLabels((prev) =>
                     prev.map((l) => {
                         if (l._id !== labelId) return l;
-                        const set = new Set(Array.isArray(l.customer) ? l.customer : []);
-                        if (checked) set.add(psid); else set.delete(psid);
-                        return { ...l, customer: Array.from(set) };
+                        
+                        // Cập nhật theo cấu trúc mới
+                        const customerData = l.customer || {};
+                        const pageData = customerData[pageId] || { IDconversation: [], IDcustomer: [] };
+                        
+                        if (checked) {
+                            // Thêm vào
+                            if (!pageData.IDconversation.includes(conversationIdFromAPI)) {
+                                pageData.IDconversation.push(conversationIdFromAPI);
+                                pageData.IDcustomer.push(customerIdFromAPI);
+                            }
+                        } else {
+                            // Xóa khỏi
+                            const index = pageData.IDconversation.indexOf(conversationIdFromAPI);
+                            if (index !== -1) {
+                                pageData.IDconversation.splice(index, 1);
+                                pageData.IDcustomer.splice(index, 1);
+                            }
+                        }
+                        
+                        customerData[pageId] = pageData;
+                        return { ...l, customer: customerData };
                     })
                 );
 
                 toast.success(res?.message || (checked ? 'Đã gán nhãn' : 'Đã bỏ nhãn'));
             } catch (e) {
                 toast.error('Lỗi khi cập nhật nhãn');
-               
+                console.error('[handleToggleLabel] error:', e);
             }
         },
-        []
+        [pageConfig.id, token]
     );
 
     // 6) Ước lượng “chưa rep” từ hội thoại
@@ -899,7 +1198,7 @@ export default function ChatClient({
                     const platform = pageConfig?.platform || 'facebook';
                     const pageName = pageConfig?.name || 'Page Facebook';
                     
-                    
+                  
                     
                     // Gọi API tạo khách hàng tự động (không await để không block UI)
                     createAutoCustomer(customerName, messageText, conversationId, platform, pageName)
@@ -916,36 +1215,53 @@ export default function ChatClient({
             
             // Nếu conversationId là undefined, vẫn refresh nếu có conversation đang chọn
             if (current && (!targetId || currentKey === targetKey)) {
-                const s = socketRef.current;
-                if (s) {
-                    // ✅ QUAN TRỌNG: Với Zalo (pzl_*), phải giữ nguyên conversation.id GỐC
-                    const isZalo = pageConfig?.platform === 'personal_zalo';
-                    const conversationIdForRequest = isZalo 
-                        ? current.id  // ✅ Zalo: giữ nguyên "pzl_12345_67890"
-                        : extractConvoKey(current.id);  // Facebook/Instagram: extract
+                // ✅ SỬA LỖI: Không gọi lại API msg:get mỗi khi có msg:new
+                // Thay vào đó, chỉ thêm tin nhắn mới vào danh sách nếu chưa có
+                // Điều này tránh việc thay thế toàn bộ messages và làm mất tin nhắn cũ đã load
+                
+                const normalizedNewMsg = normalizePancakeMessage(msg, pageConfig.id);
+                
+                setMessages(prevMessages => {
+                    // Kiểm tra xem tin nhắn đã tồn tại chưa
+                    const exists = prevMessages.some(m => m.id === normalizedNewMsg.id);
+                    if (exists) {
+                        // Tin nhắn đã có, không cần thêm lại
+                        return prevMessages;
+                    }
                     
-                    // Đối với Zalo, customerId có thể là null
-                    const customerId = current?.customers?.[0]?.id
-                        || current?.from?.id
-                        || current?.from_psid
-                        || null;
+                    // Thêm tin nhắn mới vào cuối danh sách
+                    const updated = [...prevMessages, normalizedNewMsg];
+                    // Sắp xếp lại theo thời gian để đảm bảo đúng thứ tự
+                    const sorted = sortAscByTime(updated);
                     
-                    s.emit(
-                        'msg:get',
-                        { pageId: pageConfig.id, token, conversationId: conversationIdForRequest, customerId: customerId || null, count: 0 },
-                        (res) => {
-                            if (res?.ok && Array.isArray(res.items)) {
-                                const normalized = sortAscByTime(
-                                    res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
-                                );
-                                setMessages(normalized);
-                                if (isNearBottomRef.current) {
-                                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-                                }
-                            }
+                    // Chỉ scroll xuống nếu user đang ở gần cuối (trong vòng 100px)
+                    // Kiểm tra lại trạng thái scroll hiện tại
+                    const container = messagesScrollRef.current;
+                    if (container) {
+                        const scrollTop = container.scrollTop;
+                        const scrollHeight = container.scrollHeight;
+                        const clientHeight = container.clientHeight;
+                        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                        const isNearBottom = distanceFromBottom < 100;
+                        
+                        if (isNearBottom) {
+                            // User đang ở gần cuối, đánh dấu cần scroll
+                            shouldScrollToBottomRef.current = true;
+                            isNearBottomRef.current = true;
+                        } else {
+                            // User đang xem tin nhắn cũ, không scroll
+                            shouldScrollToBottomRef.current = false;
+                            isNearBottomRef.current = false;
                         }
-                    );
-                }
+                    } else {
+                        // Nếu chưa có container, giả định user ở cuối
+                        if (isNearBottomRef.current) {
+                            shouldScrollToBottomRef.current = true;
+                        }
+                    }
+                    
+                    return sorted;
+                });
             }
             if (targetId) {
                 setConversations((prev) => {
@@ -965,6 +1281,7 @@ export default function ChatClient({
                             const n = normalizePancakeMessage(msg, pageConfig.id);
                             const snippet = n?.content?.type === 'text' ? n.content.content : 
                                           n?.content?.type === 'images' ? '[Ảnh]' :
+                                          n?.content?.type === 'videos' ? '[Video]' :
                                           n?.content?.type === 'files' ? '[Tệp]' : conv.snippet;
                             
                             
@@ -1059,7 +1376,7 @@ export default function ChatClient({
 
         setIsLoadingOlder(true);
 
-        const nextCount = (messages?.length || 0) + 30; // mỗi lần +30
+        const currentCount = messages?.length || 0;
         const scroller = messagesScrollRef.current;
         const prevScrollHeight = scroller ? scroller.scrollHeight : 0;
         const prevScrollTop = scroller ? scroller.scrollTop : 0;
@@ -1079,19 +1396,23 @@ export default function ChatClient({
         
         socketRef.current.emit(
             'msg:get',
-            { pageId: pageConfig.id, token, conversationId: conversationIdForRequest, customerId: customerId || null, count: nextCount },
+            { pageId: pageConfig.id, token, conversationId: conversationIdForRequest, customerId: customerId || null, count: currentCount },
             (res) => {
                 if (res?.ok && Array.isArray(res.items)) {
                     const incomingMessages = res.items;
 
-                    // SỬA LỖI LOGIC 1: Điều kiện dừng tải chính xác
-                    // Nếu số lượng tin nhắn API trả về BẰNG với số lượng tin nhắn đã có trước đó,
-                    // có nghĩa là không có tin nhắn nào cũ hơn được tải về.
-                    // "messages" ở đây là state cũ trước khi update.
-                    if (incomingMessages.length === messages.length) {
+                    // Kiểm tra xem có tin nhắn mới không
+                    const prevMessageIds = new Set(messages.map(m => m.id));
+                    const newMessages = incomingMessages.filter(rawMsg => {
+                        const normalized = normalizePancakeMessage(rawMsg, pageConfig.id);
+                        return !prevMessageIds.has(normalized.id);
+                    });
+
+                    // Nếu không có tin nhắn mới, đánh dấu hết tin nhắn
+                    if (newMessages.length === 0) {
                         setHasMore(false);
-                    } else {
-                        setHasMore(true);
+                        setIsLoadingOlder(false);
+                        return;
                     }
 
                     // Cập nhật state bằng cách cộng dồn tin nhắn
@@ -1111,13 +1432,13 @@ export default function ChatClient({
                         return sortAscByTime(Array.from(messageMap.values()));
                     });
 
-                    // SỬA LỖI UX 2: Giữ nguyên vị trí scroll sau khi tải
-                    // Logic này của bạn đã đúng, giờ nó sẽ hoạt động vì không còn bị useEffect ghi đè.
-                    requestAnimationFrame(() => {
+                    // Giữ nguyên vị trí scroll sau khi tải (giống testpancake)
+                    setTimeout(() => {
                         if (!scroller) return;
                         const newScrollHeight = scroller.scrollHeight;
-                        scroller.scrollTop = newScrollHeight - (prevScrollHeight - prevScrollTop);
-                    });
+                        const heightDiff = newScrollHeight - prevScrollHeight;
+                        scroller.scrollTop = prevScrollTop + heightDiff;
+                    }, 50);
 
                 } else {
                     // Nếu API lỗi hoặc không trả về mảng, dừng việc tải
@@ -1128,6 +1449,51 @@ export default function ChatClient({
         );
     }, [selectedConvo, messages, token, pageConfig.id, isLoadingOlder, hasMore]);
 
+    // Scroll to bottom when messages change (only on initial load or new messages from socket)
+    useEffect(() => {
+        // Chỉ scroll khi:
+        // 1. Initial load (khi chọn conversation mới)
+        // 2. Có tin nhắn mới từ socket (real-time)
+        // KHÔNG scroll khi load more (giữ nguyên vị trí)
+        
+        if (isInitialLoadRef.current && messages.length > 0) {
+            // Initial load - scroll to bottom sau khi messages được render
+            setTimeout(() => {
+                const container = messagesScrollRef.current;
+                if (container) {
+                    // Scroll xuống dưới cùng
+                    container.scrollTop = container.scrollHeight;
+                }
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                isInitialLoadRef.current = false;
+            }, 150);
+        } else if (shouldScrollToBottomRef.current && messages.length > 0) {
+            // New message from socket - scroll to bottom
+            // Chỉ scroll nếu user đang ở gần cuối (đã được kiểm tra khi thêm tin nhắn)
+            setTimeout(() => {
+                const container = messagesScrollRef.current;
+                if (container) {
+                    // Kiểm tra lại một lần nữa để chắc chắn
+                    const scrollTop = container.scrollTop;
+                    const scrollHeight = container.scrollHeight;
+                    const clientHeight = container.clientHeight;
+                    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                    const isNearBottom = distanceFromBottom < 100;
+                    
+                    if (isNearBottom && isNearBottomRef.current) {
+                        // User đang ở gần cuối, scroll xuống
+                        container.scrollTop = container.scrollHeight;
+                        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                    }
+                } else {
+                    // Fallback nếu không có container
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }
+                shouldScrollToBottomRef.current = false;
+            }, 100);
+        }
+    }, [messages.length]);
+
     useEffect(() => {
         const el = messagesScrollRef.current;
         if (!el) return;
@@ -1135,24 +1501,36 @@ export default function ChatClient({
         const handleScroll = () => {
             const currentTop = el.scrollTop;
             const previousTop = lastScrollTopRef.current;
+            const scrollHeight = el.scrollHeight;
+            const clientHeight = el.clientHeight;
+            const distanceFromBottom = scrollHeight - currentTop - clientHeight;
 
-            if (currentTop < previousTop && isNearBottomRef.current) {
-                isNearBottomRef.current = false;
-                setIsNearBottom(false);
+            // Cập nhật trạng thái nearBottom chính xác hơn (threshold 100px)
+            const nearBottom = distanceFromBottom < 100;
+
+            // Nếu user scroll lên (currentTop < previousTop), đánh dấu không ở cuối
+            if (currentTop < previousTop) {
+                if (isNearBottomRef.current) {
+                    isNearBottomRef.current = false;
+                    setIsNearBottom(false);
+                    // Khi user scroll lên, không nên scroll xuống nữa
+                    shouldScrollToBottomRef.current = false;
+                }
             }
 
             lastScrollTopRef.current = currentTop;
 
-            if (currentTop <= 80) {
+            // Load more when scrolled to top (within 50px threshold) - giống testpancake
+            if (currentTop < 50 && hasMore && !isLoadingOlder) {
                 loadOlderMessages();
             }
 
-            const distanceFromBottom = el.scrollHeight - currentTop - el.clientHeight;
-            const nearBottom = distanceFromBottom < 40;
-
+            // Cập nhật trạng thái nearBottom
             if (isNearBottomRef.current !== nearBottom) {
                 isNearBottomRef.current = nearBottom;
                 setIsNearBottom(nearBottom);
+                // Nếu user scroll xuống gần cuối, có thể cho phép scroll khi có tin nhắn mới
+                // Nhưng không tự động scroll ngay
             }
         };
 
@@ -1161,7 +1539,7 @@ export default function ChatClient({
 
         el.addEventListener('scroll', handleScroll, { passive: true });
         return () => el.removeEventListener('scroll', handleScroll);
-    }, [loadOlderMessages]);
+    }, [loadOlderMessages, hasMore, isLoadingOlder]);
 
     // ===================== Handlers =====================
     const handleSelectConvo = useCallback(
@@ -1187,15 +1565,18 @@ export default function ChatClient({
                 }
                 return prev;
             });
-            // Sửa lỗi: Chỉ reset messages nếu chuyển sang hội thoại khác
-            if (selectedConvo?.id !== conversation.id) {
-                setMessages([]);
-            }
-            setHasMore(true); // reset state load-more
+            // Reset tất cả state khi chuyển conversation (giống testpancake)
+            setMessages([]); // Clear messages trước
+            setHasMore(true); // Reset state load-more
+            setIsLoadingOlder(false); // Reset loading older state
             setIsLoadingMessages(true);
+            
+            // Reset scroll flags và refs
+            isInitialLoadRef.current = true; // Reset initial load flag - sẽ scroll xuống sau khi load
             isNearBottomRef.current = true;
             setIsNearBottom(true);
             lastScrollTopRef.current = 0;
+            shouldScrollToBottomRef.current = false; // Reset scroll flag - sẽ được set sau khi load xong
 
             // ✅ QUAN TRỌNG: Với Zalo (pzl_*), phải giữ nguyên conversation.id GỐC
             // Không được extract vì server sẽ build URL sai
@@ -1206,12 +1587,32 @@ export default function ChatClient({
             
             // Với Zalo cá nhân và một số nguồn, không có customers[0].id -> dùng from.id hoặc from_psid
             // Đối với Zalo, có thể không cần customerId để tải tin nhắn
-            const customerId = conversation?.customers?.[0]?.id
+            let customerId = conversation?.customers?.[0]?.id
+                || conversation?.customers?.[0]?.fb_id
                 || conversation?.from?.id
                 || conversation?.from_psid
                 || null;
             
+            // Fallback: Nếu không có customerId, thử extract từ conversation_id
+            if (!customerId && conversation?.id) {
+                const convId = String(conversation.id);
+                // Với TikTok: ttm_-000P2GGgk_nsouQeH7KP4Qa9bTrwp6f0URw_dTVOZ3FjdW9CUXRwT2Voa0dreGI5eHhLckE9PQ==
+                if (convId.startsWith('ttm_')) {
+                    const parts = convId.split('_');
+                    if (parts.length >= 3) {
+                        // Lấy phần sau dấu _ thứ 2 làm customer_id
+                        customerId = parts.slice(2).join('_');
+                    }
+                } else if (convId.includes('_') && !convId.startsWith('pzl_') && !convId.startsWith('igo_')) {
+                    // Với Facebook: pageId_customerId
+                    const parts = convId.split('_');
+                    if (parts.length >= 2) {
+                        customerId = parts[parts.length - 1];
+                    }
+                }
+            }
             
+          
             
             // Tải tin nhắn - với Zalo, customerId có thể là null
             s.emit(
@@ -1224,20 +1625,29 @@ export default function ChatClient({
                     count: 0 
                 },
                 (res) => {
-                    
+                    console.log('📥 [ChatClient] Messages response:', {
+                        ok: res?.ok,
+                        itemsCount: res?.items?.length || 0,
+                        error: res?.error
+                    });
                     
                     if (res?.ok && Array.isArray(res.items)) {
                         const normalized = sortAscByTime(
                             res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
                         );
-                        
+                       
                         setMessages(normalized);
+                        // Set hasMore dựa trên số lượng tin nhắn (nếu có tin nhắn thì có thể còn tin nhắn cũ hơn)
                         setHasMore(res.items.length > 0);
-                        if (isNearBottomRef.current) {
-                            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        
+                        // Đánh dấu cần scroll xuống khi load lần đầu (initial load)
+                        // useEffect sẽ xử lý scroll sau khi messages được set
+                        if (isInitialLoadRef.current) {
+                            shouldScrollToBottomRef.current = true;
                         }
                     } else if (res?.error) {
-                        
+                        console.error('❌ [ChatClient] msg:get error:', res.error);
+                        console.warn('⚠️ [ChatClient] Không thể tải tin nhắn:', res.error);
                         // Hiển thị thông báo lỗi cho user
                         toast.error(`Không thể tải tin nhắn: ${res.error}`);
                     } else {
@@ -1279,11 +1689,7 @@ export default function ChatClient({
         const trySelect = (convo, context = {}) => {
             if (!convo) return false;
             const convoName = convo?.customers?.[0]?.name || convo?.from?.name || 'Unknown';
-            console.log('✅ [Preselect Match] Selecting conversation:', {
-                id: convo.id,
-                name: convoName,
-                ...context,
-            });
+          
             handleSelectConvo(convo);
             return true;
         };
@@ -1382,7 +1788,12 @@ export default function ChatClient({
             }
         }
 
-        
+      
+       console.log('🔍 [Preselect Match] Best match:', best ? {
+            id: best.id,
+            name: best?.customers?.[0]?.name || best?.from?.name || 'Unknown',
+            score: bestScore
+        } : 'None');
 
         // Only select if score is high enough (at least partial match with 2+ words)
         if (bestScore >= 600 && trySelect(best, { reason: 'score-match', score: bestScore })) return;
@@ -1422,6 +1833,14 @@ export default function ChatClient({
         fileInputRef.current?.click();
     }, [selectedConvo]);
 
+    const triggerPickVideo = useCallback(() => {
+        if (!selectedConvo) {
+            toast.warning('Hãy chọn một hội thoại trước khi đính kèm video.');
+            return;
+        }
+        videoInputRef.current?.click();
+    }, [selectedConvo]);
+
     const onPickImage = useCallback(async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
@@ -1442,18 +1861,72 @@ export default function ChatClient({
                 // 1) Show preview immediately
                 try {
                     const dataUrl = await readAsDataUrl(f);
-                    setPendingImages((prev) => [...prev, { id: null, url: String(dataUrl), localId }]);
+                    setPendingImages((prev) => [
+                        ...prev,
+                        {
+                            contentId: null,
+                            attachmentId: null,
+                            remoteUrl: null,
+                            contentUrl: null,
+                            previewUrl: null,
+                            url: String(dataUrl),
+                            localId,
+                            name: f.name,
+                            mime: f.type,
+                            size: f.size,
+                            width: null,
+                            height: null,
+                        },
+                    ]);
                 } catch (_) {
-                    setPendingImages((prev) => [...prev, { id: null, url: '', localId }]);
+                    setPendingImages((prev) => [
+                        ...prev,
+                        {
+                            contentId: null,
+                            attachmentId: null,
+                            remoteUrl: null,
+                            contentUrl: null,
+                            previewUrl: null,
+                            url: '',
+                            localId,
+                            name: f.name,
+                            mime: f.type,
+                            size: f.size,
+                            width: null,
+                            height: null,
+                        },
+                    ]);
                 }
                 // 2) Upload in background; store returned id for sending
                 try {
-                    const res = await uploadImageToDriveAction(f);
+                    const res = await uploadImageToPancakeAction(f, {
+                        pageId: pageConfig.id,
+                        accessToken: token,
+                    });
                     if (!res?.success) {
                         toast.error(`Tải ảnh thất bại: ${res?.error || ''}`);
                         continue;
                     }
-                    setPendingImages((prev) => prev.map((it) => it.localId === localId ? { ...it, id: res.id } : it));
+                    setPendingImages((prev) =>
+                        prev.map((it) =>
+                            it.localId === localId
+                                ? {
+                                      ...it,
+                                      contentId: res.contentId,
+                                      attachmentId: res.attachmentId,
+                                      remoteUrl: res.url,
+                                      contentUrl: res.url,
+                                      previewUrl: res.previewUrl || res.url,
+                                      thumbnailUrl: res.thumbnailUrl || null,
+                                      name: res.name || it.name,
+                                      mime: res.mimeType || it.mime,
+                                      size: res.size ?? it.size,
+                                      width: res.width ?? it.width,
+                                      height: res.height ?? it.height,
+                                  }
+                                : it
+                        )
+                    );
                 } catch (err) {
                     toast.error(`Tải ảnh thất bại: ${err?.message || ''}`);
                 }
@@ -1468,23 +1941,106 @@ export default function ChatClient({
         setPendingImages((prev) => prev.filter((x) => x.localId !== localId));
     }, []);
 
-    // Gửi tin nhắn
+    const onPickVideo = useCallback(async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        setIsUploadingVideo(true);
+
+        try {
+            for (const f of files) {
+                if (!f.type?.startsWith('video/')) {
+                    toast.error('Vui lòng chọn tệp video hợp lệ');
+                    continue;
+                }
+                const localId = `local-video-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                const objectUrl = URL.createObjectURL(f);
+                setPendingVideos((prev) => [
+                    ...prev,
+                    {
+                        contentId: null,
+                        attachmentId: null,
+                        remoteUrl: null,
+                        previewUrl: null,
+                        thumbnailUrl: null,
+                        url: objectUrl,
+                        localId,
+                        name: f.name,
+                        size: f.size,
+                        mime: f.type,
+                        width: null,
+                        height: null,
+                        length: null,
+                    },
+                ]);
+
+                try {
+                    const res = await uploadVideoToPancakeAction(f, {
+                        pageId: pageConfig.id,
+                        accessToken: token,
+                    });
+                    if (!res?.success) {
+                        toast.error(`Tải video thất bại: ${res?.error || ''}`);
+                        continue;
+                    }
+                    setPendingVideos((prev) =>
+                        prev.map((it) =>
+                            it.localId === localId
+                                ? {
+                                      ...it,
+                                      contentId: res.contentId,
+                                      attachmentId: res.attachmentId,
+                                      remoteUrl: res.url,
+                                      previewUrl: res.previewUrl || res.url,
+                                      thumbnailUrl: res.thumbnailUrl || null,
+                                      name: res.name || it.name,
+                                      mime: res.mimeType || it.mime,
+                                      size: res.size ?? it.size,
+                                      width: res.width ?? it.width,
+                                      height: res.height ?? it.height,
+                                      length: res.length ?? it.length,
+                                  }
+                                : it
+                        )
+                    );
+                } catch (err) {
+                    toast.error(`Tải video thất bại: ${err?.message || ''}`);
+                }
+            }
+            if (videoInputRef.current) videoInputRef.current.value = '';
+        } finally {
+            setIsUploadingVideo(false);
+        }
+    }, [pageConfig.id, token]);
+
+    const removePendingVideo = useCallback((localId) => {
+        setPendingVideos((prev) => {
+            const target = prev.find((x) => x.localId === localId);
+            if (target?.url && target.url.startsWith('blob:')) {
+                URL.revokeObjectURL(target.url);
+            }
+            return prev.filter((x) => x.localId !== localId);
+        });
+    }, []);
+
     const handleSendMessage = async (formData) => {
-        
-        
+      
         if (!selectedConvo) {
-            console.log('❌ No selected conversation');
-            return;
+             return;
         }
         
         const text = (formData.get('message') || '').trim();
         const hasImages = pendingImages.length > 0;
-        console.log('Message text:', text);
-        console.log('Has images:', hasImages);
+        const hasVideos = pendingVideos.length > 0;
+        const hasUnreadyImages = pendingImages.some((img) => !img?.contentId || !img?.remoteUrl);
+        const hasUnreadyVideos = pendingVideos.some((v) => !v?.contentId || !v?.remoteUrl);
         
-        if (!text && !hasImages) {
-            console.log('❌ No text or images to send');
+        if (hasUnreadyImages || hasUnreadyVideos) {
+            toast.error('Tệp đang được tải lên, vui lòng chờ hoàn tất trước khi gửi.');
             return;
+        }
+
+        if (!text && !hasImages && !hasVideos) {
+             return;
         }
 
         // Optimistic UI - chỉ hiển thị loading state, không tạo tin nhắn tạm
@@ -1500,6 +2056,19 @@ export default function ChatClient({
                 content: {
                     type: 'images',
                     images: pendingImages.map((p) => ({ url: p.url })),
+                },
+            });
+        }
+        if (hasVideos) {
+            const optimisticIdVideos = `optimistic-video-${Date.now()}`;
+            optimisticEntries.push({
+                id: optimisticIdVideos,
+                inserted_at: now,
+                senderType: 'page',
+                status: 'sending',
+                content: {
+                    type: 'videos',
+                    videos: pendingVideos.map((p) => ({ url: p.url, name: p.name })),
                 },
             });
         }
@@ -1526,47 +2095,79 @@ export default function ChatClient({
         }
 
         // Gửi thật
-       
         let overallOk = true;
         let lastError = null;
+        let remainingText = text;
         try {
             if (hasImages) {
-                
-                const first = pendingImages[0];
-                const res1 = await sendImageAction(
-                    pageConfig.id,
-                    pageConfig.accessToken,
-                    selectedConvo.id,
-                    first.id,
-                    text || ''
-                );
-                
-                if (!res1?.success) {
-                    overallOk = false;
-                    lastError = res1?.error || 'SEND_IMAGE_FAILED';
-                }
-                for (let i = 1; i < pendingImages.length; i++) {
+                for (let i = 0; i < pendingImages.length; i++) {
                     const it = pendingImages[i];
-                    const r = await sendImageAction(
+                    const messageToSend = i === 0 ? remainingText : '';
+                    const res = await sendImageAction(
                         pageConfig.id,
                         pageConfig.accessToken,
                         selectedConvo.id,
-                        it.id,
-                        ''
+                        {
+                            contentId: it.contentId,
+                            attachmentId: it.attachmentId,
+                            url: it.remoteUrl || it.contentUrl,
+                            previewUrl: it.previewUrl,
+                            thumbnailUrl: it.thumbnailUrl,
+                            mimeType: it.mime,
+                            name: it.name,
+                            size: it.size,
+                            width: it.width,
+                            height: it.height,
+                        },
+                        messageToSend
                     );
-                   
-                    if (!r?.success) {
+                    if (!res?.success) {
                         overallOk = false;
-                        lastError = r?.error || 'SEND_IMAGE_FAILED';
+                        lastError = res?.error || 'SEND_IMAGE_FAILED';
+                    } else if (i === 0 && messageToSend) {
+                        remainingText = '';
                     }
                 }
-            } else if (text) {
-                
+            }
+
+            if (hasVideos) {
+                 for (let i = 0; i < pendingVideos.length; i++) {
+                    const it = pendingVideos[i];
+                    const messageToSend = !hasImages && i === 0 ? remainingText : '';
+                    const res = await sendVideoAction(
+                        pageConfig.id,
+                        pageConfig.accessToken,
+                        selectedConvo.id,
+                        {
+                            contentId: it.contentId,
+                            attachmentId: it.attachmentId,
+                            url: it.remoteUrl || it.url,
+                            previewUrl: it.previewUrl || it.remoteUrl || it.url,
+                            thumbnailUrl: it.thumbnailUrl,
+                            mimeType: it.mime,
+                            name: it.name,
+                        },
+                        messageToSend
+                    );
+                    if (!res?.success) {
+                        overallOk = false;
+                        lastError = res?.error || 'SEND_VIDEO_FAILED';
+                        console.warn('🎬 Video send failure payload:', {
+                            request: it,
+                            response: res,
+                        });
+                    } else if (!hasImages && i === 0 && messageToSend) {
+                        remainingText = '';
+                    }
+                }
+            }
+
+            if (!hasImages && !hasVideos && remainingText) {
                 const r = await sendMessageAction(
                     pageConfig.id,
                     pageConfig.accessToken,
                     selectedConvo.id,
-                    text,
+                    remainingText,
                 );
                 if (!r?.success) {
                     overallOk = false;
@@ -1598,7 +2199,13 @@ export default function ChatClient({
             setConversations((prev) => {
                 const updated = {
                     ...selectedConvo,
-                    snippet: text ? text : '[Ảnh]',
+                    snippet: text
+                        ? text
+                        : hasImages
+                            ? '[Ảnh]'
+                            : hasVideos
+                                ? '[Video]'
+                                : selectedConvo.snippet,
                     updated_at: new Date().toISOString(),
                     last_sent_by: {
                         id: pageConfig.id,
@@ -1609,7 +2216,13 @@ export default function ChatClient({
                 const merged = mergeConversations(prev, [updated]);
                 return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
             });
+            pendingVideos.forEach((v) => {
+                if (v?.url && v.url.startsWith('blob:')) {
+                    URL.revokeObjectURL(v.url);
+                }
+            });
             setPendingImages([]);
+            setPendingVideos([]);
             formRef.current?.reset();
             messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             
@@ -1641,33 +2254,119 @@ export default function ChatClient({
         setSearchResults([]);
     }, []);
 
+    // Load conversations từ label filter
+    useEffect(() => {
+       
+        const loadLabelFilterConversations = async () => {
+            if (selectedFilterLabelIds.length === 0) {
+               setLabelFilterConversations([]);
+                return;
+            }
+
+            setIsLoadingLabelFilter(true);
+            
+            try {
+                // Lấy conversation_ids và conversationCustomerMap từ database
+                const result = await getConversationIdsByLabelsAndPage({
+                    labelIds: selectedFilterLabelIds,
+                    pageId: pageConfig.id
+                });
+
+               
+                const { conversationIds, conversationCustomerMap } = result;
+
+              
+
+                if (!conversationIds || conversationIds.length === 0) {
+                    console.warn('⚠️ [loadLabelFilterConversations] No conversations found in database');
+                    setLabelFilterConversations([]);
+                    setIsLoadingLabelFilter(false);
+                    return;
+                }
+
+                // Gọi API để lấy thông tin conversations, truyền conversationCustomerMap để sử dụng customer_id từ database
+                const conversationsFromIds = await getConversationsFromIds(
+                    pageConfig.id,
+                    conversationIds,
+                    token,
+                    conversationCustomerMap
+                );
+
+                
+                setLabelFilterConversations(conversationsFromIds);
+            } catch (error) {
+                console.error('❌ [loadLabelFilterConversations] Error loading label filter conversations:', error);
+                console.error('❌ [loadLabelFilterConversations] Error stack:', error.stack);
+                toast.error('Không thể tải danh sách hội thoại theo thẻ: ' + (error.message || 'Unknown error'));
+                setLabelFilterConversations([]);
+            } finally {
+                setIsLoadingLabelFilter(false);
+            }
+        };
+
+        loadLabelFilterConversations();
+    }, [selectedFilterLabelIds, pageConfig.id, token]);
+
     // ===================== Dữ liệu hiển thị =====================
     const listForSidebar = isSearching ? searchResults : conversations;
 
     const filteredSortedConversations = useMemo(() => {
+        // Nếu có filter theo label, sử dụng conversations từ label filter
+        if (selectedFilterLabelIds.length > 0) {
+            // Merge conversations từ label filter với conversations hiện tại
+            const merged = [...labelFilterConversations];
+            const existingIds = new Set(merged.map(c => c.id));
+            
+            // Thêm các conversations từ listForSidebar nếu chưa có
+            listForSidebar.forEach((convo) => {
+                const conversationId = convo?.id;
+                if (conversationId && !existingIds.has(conversationId)) {
+                    // Kiểm tra xem conversation có thuộc các label đã chọn không (theo cấu trúc mới)
+                    const customerLabelIds = allLabels
+                        .filter((label) => {
+                            const customerData = label.customer || {};
+                            const pageData = customerData[pageConfig.id];
+                            if (pageData && Array.isArray(pageData.IDconversation)) {
+                                return pageData.IDconversation.includes(conversationId);
+                            }
+                            return false;
+                        })
+                        .map((label) => label._id);
+                    const hasAll = selectedFilterLabelIds.every((id) => customerLabelIds.includes(id));
+                    if (hasAll) {
+                        merged.push(convo);
+                        existingIds.add(conversationId);
+                    }
+                }
+            });
+
+            return merged.sort((a, b) => {
+                const timeA = new Date(a.updated_at || 0).getTime();
+                const timeB = new Date(b.updated_at || 0).getTime();
+                return timeB - timeA;
+            });
+        }
+
+        // Nếu không có filter, chỉ filter theo label nếu cần
         const list = (listForSidebar || []).filter((convo) => {
-            if (selectedFilterLabelIds.length > 0) {
-                const psid = getConvoPsid(convo);
-                if (!psid) return false;
-                const customerLabelIds = allLabels
-                    .filter((label) => Array.isArray(label.customer) && label.customer.includes(psid))
-                    .map((label) => label._id);
-                const hasAll = selectedFilterLabelIds.every((id) => customerLabelIds.includes(id));
-                if (!hasAll) return false;
-            }
+            // Không filter gì nếu không chọn label
             return true;
         });
-        return list.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    }, [listForSidebar, selectedFilterLabelIds, allLabels]);
+        return list.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
+    }, [listForSidebar, selectedFilterLabelIds, allLabels, labelFilterConversations]);
 
     const assignedLabelsForSelectedConvo = useMemo(() => {
-        if (!selectedConvo) return [];
-        const psid = getConvoPsid(selectedConvo);
-        if (!psid) return [];
-        return allLabels.filter(
-            (label) => Array.isArray(label.customer) && label.customer.includes(psid)
-        );
-    }, [selectedConvo, allLabels]);
+        if (!selectedConvo || !selectedConvo.id) return [];
+        const conversationId = selectedConvo.id;
+        return allLabels.filter((label) => {
+            const customerData = label.customer || {};
+            const pageData = customerData[pageConfig.id];
+            if (pageData && Array.isArray(pageData.IDconversation)) {
+                return pageData.IDconversation.includes(conversationId);
+            }
+            return false;
+        });
+    }, [selectedConvo, allLabels, pageConfig.id]);
 
     // ===================== Render =====================
     return (
@@ -1776,17 +2475,28 @@ export default function ChatClient({
                 {!hideSidebar && (
                 <div className="w-full max-w-sm border-r border-gray-200 flex flex-col">
                     <ul className="flex-1 overflow-y-auto" ref={sidebarRef}>
+                        {isLoadingLabelFilter && (
+                            <li className="flex items-center justify-center p-4">
+                                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                                <span className="ml-2 text-sm text-gray-500">Đang tải hội thoại theo thẻ...</span>
+                            </li>
+                        )}
                         {filteredSortedConversations.map((convo) => {
                             const idUserForAvatar = getConvoAvatarId(convo);
                             const avatarUrl = avatarUrlFor({ idpage: pageConfig.id, iduser: idUserForAvatar, token });
                             const customerName = getConvoDisplayName(convo);
                             const formattedDateTime = fmtDateTimeVN(convo.updated_at);
 
-                            const psid = getConvoPsid(convo);
-                            const assignedLabels = psid
-                                ? allLabels.filter(
-                                    (label) => Array.isArray(label.customer) && label.customer.includes(psid)
-                                )
+                            const conversationId = convo?.id;
+                            const assignedLabels = conversationId
+                                ? allLabels.filter((label) => {
+                                    const customerData = label.customer || {};
+                                    const pageData = customerData[pageConfig.id];
+                                    if (pageData && Array.isArray(pageData.IDconversation)) {
+                                        return pageData.IDconversation.includes(conversationId);
+                                    }
+                                    return false;
+                                })
                                 : [];
 
                             const lastFromPage = isLastFromPage(convo);
@@ -1881,15 +2591,18 @@ export default function ChatClient({
                                 </div>
 
                                 <div>
-                                    {getConvoPsid(selectedConvo) ? (
+                                    {selectedConvo?.id ? (
                                         <LabelDropdown
                                             labels={allLabels}
                                             selectedLabelIds={(allLabels || [])
-                                                .filter(
-                                                    (l) =>
-                                                        Array.isArray(l.customer) &&
-                                                        l.customer.includes(getConvoPsid(selectedConvo))
-                                                )
+                                                .filter((l) => {
+                                                    const customerData = l.customer || {};
+                                                    const pageData = customerData[pageConfig.id];
+                                                    if (pageData && Array.isArray(pageData.IDconversation)) {
+                                                        return pageData.IDconversation.includes(selectedConvo.id);
+                                                    }
+                                                    return false;
+                                                })
                                                 .map((l) => l._id)}
                                             style="right"
                                             onLabelChange={handleToggleLabel}
@@ -1914,9 +2627,20 @@ export default function ChatClient({
                             </div>
 
                             <div ref={messagesScrollRef} className="flex-1 p-6 space-y-1 overflow-y-auto">
+                                {/* Loading more indicator at top - giống testpancake */}
                                 {isLoadingOlder && (
-                                    <div className="text-center text-xs text-gray-400 mb-2">
-                                        Đang tải tin nhắn cũ…
+                                    <div className="flex items-center justify-center py-2 mb-2">
+                                        <div className="text-sm text-gray-500 flex items-center gap-2">
+                                            <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+                                            Đang tải thêm tin nhắn...
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {/* No more messages indicator */}
+                                {!hasMore && messages.length > 0 && (
+                                    <div className="flex items-center justify-center py-2 mb-2">
+                                        <div className="text-xs text-gray-400">Đã hiển thị tất cả tin nhắn</div>
                                     </div>
                                 )}
 
@@ -1929,8 +2653,12 @@ export default function ChatClient({
                                     const formattedTime = fmtDateTimeVN(msg.inserted_at);
                                     
                                     
-                                    return msg.content?.type === 'system' ? (
-                                        <MessageContent key={msg.id || `msg-${index}`} content={msg.content} />
+                                return msg.content?.type === 'system' ? (
+                                    <MessageContent
+                                        key={msg.id || `msg-${index}`}
+                                        content={msg.content}
+                                        onVideoClick={setVideoPreview}
+                                    />
                                     ) : (
                                         <div
                                             key={msg.id || `msg-${index}`}
@@ -1944,7 +2672,7 @@ export default function ChatClient({
                                                         : 'bg-white text-gray-800'
                                                         }`}
                                                 >
-                                                    <MessageContent content={msg.content} />
+                                                <MessageContent content={msg.content} onVideoClick={setVideoPreview} />
                                                     <div
                                                         className={`text-xs mt-1 ${msg.senderType === 'page'
                                                             ? 'text-right text-blue-100/80'
@@ -1961,7 +2689,18 @@ export default function ChatClient({
                                                                         Array.isArray(msg.content.reactions) && 
                                                                         msg.content.reactions.length > 0;
                                                     
-                                                   
+                                                    // Debug log để kiểm tra
+                                                    // if (msg.content?.type === 'text') {
+                                                    //     console.log('🎨 [Render] Message check:', {
+                                                    //         id: msg.id,
+                                                    //         content: msg.content.content,
+                                                    //         hasReactions,
+                                                    //         reactions: msg.content?.reactions,
+                                                    //         reactionsType: typeof msg.content?.reactions,
+                                                    //         reactionsIsArray: Array.isArray(msg.content?.reactions),
+                                                    //         fullContent: msg.content
+                                                    //     });
+                                                    // }
                                                     
                                                     return hasReactions ? (
                                                         <div 
@@ -2000,7 +2739,7 @@ export default function ChatClient({
                             </div>
 
                             <form ref={formRef} action={handleSendMessage} className="p-4 border-t border-gray-200 bg-white">
-                                {!!pendingImages.length && (
+                                {(pendingImages.length > 0 || pendingVideos.length > 0) && (
                                     <div className="mb-2 flex flex-wrap gap-2">
                                         {pendingImages.map((img) => (
                                             <div key={img.localId} className="relative">
@@ -2014,6 +2753,25 @@ export default function ChatClient({
                                                     onClick={() => removePendingImage(img.localId)}
                                                     className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5 shadow hover:bg-gray-50"
                                                     title="Xoá ảnh"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {pendingVideos.map((video) => (
+                                            <div key={video.localId} className="relative">
+                                                <video
+                                                    src={video.url}
+                                                    muted
+                                                    playsInline
+                                                    preload="metadata"
+                                                    className="h-20 w-20 rounded border object-cover bg-black"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removePendingVideo(video.localId)}
+                                                    className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5 shadow hover:bg-gray-50"
+                                                    title="Xoá video"
                                                 >
                                                     <X className="h-4 w-4" />
                                                 </button>
@@ -2041,18 +2799,43 @@ export default function ChatClient({
                                         onChange={onPickImage}
                                     />
 
+                                    <button
+                                        type="button"
+                                        className="text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                                        onClick={triggerPickVideo}
+                                        disabled={isUploadingVideo}
+                                        title="Đính kèm video"
+                                    >
+                                        <VideoIcon className="h-5 w-5" />
+                                    </button>
                                     <input
-                                        name="message"
-                                        placeholder={isUploadingImage ? 'Đang tải ảnh...' : 'Nhập tin nhắn...'}
-                                        className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
-                                        autoComplete="off"
-                                        disabled={isUploadingImage}
+                                        ref={videoInputRef}
+                                        type="file"
+                                        accept="video/*"
+                                        className="hidden"
+                                        onChange={onPickVideo}
                                     />
 
-                                <button
+                                    <input
+                                        name="message"
+                                        placeholder={
+                                            isUploadingImage || isUploadingVideo
+                                                ? 'Đang tải tệp...'
+                                                : 'Nhập tin nhắn...'
+                                        }
+                                        className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
+                                        autoComplete="off"
+                                        disabled={isUploadingImage || isUploadingVideo}
+                                    />
+
+                                    <button
                                         type="submit"
-                                    className={`disabled:opacity-60 ${isUploadingImage || hasPendingUploads ? 'text-gray-400 cursor-not-allowed' : 'text-blue-500 hover:text-blue-700'}`}
-                                    disabled={isUploadingImage || hasPendingUploads}
+                                        className={`disabled:opacity-60 ${
+                                            isUploadingImage || isUploadingVideo || hasPendingUploads
+                                                ? 'text-gray-400 cursor-not-allowed'
+                                                : 'text-blue-500 hover:text-blue-700'
+                                        }`}
+                                        disabled={isUploadingImage || isUploadingVideo || hasPendingUploads}
                                     >
                                         <Send className="h-5 w-5" />
                                     </button>
@@ -2066,6 +2849,36 @@ export default function ChatClient({
                     )}
                 </div>
             </div>
+            {videoPreview && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div
+                        className="absolute inset-0 bg-black/70"
+                        onClick={() => setVideoPreview(null)}
+                    />
+                    <div className="relative z-10 w-full max-w-3xl px-4">
+                        <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl">
+                            <button
+                                type="button"
+                                className="absolute right-4 top-4 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                                onClick={() => setVideoPreview(null)}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                            <video
+                                src={videoPreview.url}
+                                controls
+                                autoPlay
+                                className="w-full max-h-[75vh] bg-black"
+                            />
+                            {videoPreview.name && (
+                                <div className="px-4 py-3 text-sm text-white/90">
+                                    {videoPreview.name}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

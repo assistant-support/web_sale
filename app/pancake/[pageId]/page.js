@@ -22,15 +22,8 @@ export default async function ChatPage({ params }) {
     } else {
         pageConfig = pageConfig.find(p => p.id === pageId);
         if (!pageConfig) {
-            console.error('Page not found in API response, using fallback');
-            // Fallback: tạo pageConfig mặc định
-            pageConfig = {
-                id: pageId,
-                name: 'Page Facebook',
-                platform: 'facebook',
-                avatar: '/default-avatar.png',
-                accessToken: PANCAKE_USER_ACCESS_TOKEN
-            };
+            console.error('Page not found in API response or filtered by keyword');
+            return notFound();
         }
     }
 

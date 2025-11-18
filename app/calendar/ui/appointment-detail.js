@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CalendarCheck, Clock, User, MapPin, FileText, Phone, XCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CalendarCheck, Clock, User, MapPin, FileText, Phone, XCircle, CheckCircle2, AlertTriangle, Gift } from 'lucide-react';
 import { updateAppointmentStatusAction, cancelAppointmentAction } from '@/app/actions/appointment.actions';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -161,6 +161,16 @@ export default function AppointmentDetail({ appointment, onClose, onUpdate, curr
                                         <h5>{appointment.customer.phone}</h5>
                                     </div>
                                 )}
+                                <div className="flex items-start gap-2 mt-2 text-sm text-muted-foreground">
+                                    <Gift className="w-3.5 h-3.5 mt-0.5" />
+                                    <div>
+                                        <h5>
+                                            {Array.isArray(appointment.interestedServices) && appointment.interestedServices.length > 0
+                                                ? appointment.interestedServices.join(', ')
+                                                : 'Không có thông tin cho dịch vụ quan tâm'}
+                                        </h5>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -179,7 +189,7 @@ export default function AppointmentDetail({ appointment, onClose, onUpdate, curr
                             <div>
                                 <h6 className="font-semibold">Người tạo</h6>
                                 <div className="flex items-center gap-2 mt-1">
-                                    <h5 className="text-sm">{appointment.createdBy?.name || 'Không xác định'}</h5>
+                                    <h5 className="text-sm">{appointment.createdBy?.name || 'Không xác định appointment-detail.js'}</h5>
                                 </div>
                             </div>
                         </div>

@@ -106,11 +106,12 @@ export async function deleteLabel(id) {
 }
 
 /**
- * Gán hoặc bỏ gán một nhãn cho một khách hàng (dựa trên PSID).
+ * Gán hoặc bỏ gán một nhãn cho một khách hàng.
+ * Cấu trúc mới: customer là object với page_id làm key, mỗi page_id chứa IDconversation và IDcustomer arrays
  */
-export async function toggleLabelForCustomer({ labelId, psid }) {
-    if (!labelId || !psid) {
-        return { success: false, error: 'Thiếu thông tin nhãn hoặc khách hàng.' };
+export async function toggleLabelForCustomer({ labelId, pageId, conversationId, customerId }) {
+    if (!labelId || !pageId || !conversationId) {
+        return { success: false, error: 'Thiếu thông tin nhãn, page_id hoặc conversation_id.' };
     }
 
     try {
@@ -121,23 +122,193 @@ export async function toggleLabelForCustomer({ labelId, psid }) {
             return { success: false, error: 'Không tìm thấy nhãn.' };
         }
 
-        const customerExists = label.customer.includes(psid);
-        let updateOperation;
-
-        if (customerExists) {
-            // Nếu khách hàng đã có trong nhãn -> Bỏ gán (xóa psid khỏi mảng)
-            updateOperation = { $pull: { customer: psid } };
+        // Xử lý trường hợp customer là array cũ hoặc object mới
+        let customerData = {};
+        if (Array.isArray(label.customer)) {
+            // Nếu là array, có thể là:
+            // 1. Array cũ: [] hoặc ["conversation_id1", "conversation_id2"]
+            // 2. Array chứa object: [{ pzl_xxx: {...} }] - đây là format mới nhưng lưu sai
+            if (label.customer.length > 0 && typeof label.customer[0] === 'object' && !Array.isArray(label.customer[0])) {
+                // Trường hợp array chứa object - merge tất cả objects lại
+                
+                label.customer.forEach((item) => {
+                    if (item && typeof item === 'object') {
+                        customerData = { ...customerData, ...item };
+                    }
+                });
+            } else {
+                // Array cũ - chuyển sang object rỗng
+                
+                customerData = {};
+            }
+        } else if (label.customer && typeof label.customer === 'object' && !Array.isArray(label.customer)) {
+            // Nếu là object (không phải array), sử dụng trực tiếp
+            // Tạo deep copy để tránh mutation
+            customerData = JSON.parse(JSON.stringify(label.customer));
         } else {
-            // Nếu khách hàng chưa có trong nhãn -> Gán (thêm psid vào mảng)
-            updateOperation = { $addToSet: { customer: psid } };
+            // Nếu null/undefined/không hợp lệ, khởi tạo object rỗng
+            customerData = {};
         }
 
-        await Label.updateOne({ _id: labelId }, updateOperation);
+        // Khởi tạo pageData nếu chưa có
+        if (!customerData[pageId]) {
+            customerData[pageId] = { IDconversation: [], IDcustomer: [] };
+        }
+        const pageData = customerData[pageId];
+
+        // Đảm bảo pageData có đầy đủ cấu trúc
+        if (!Array.isArray(pageData.IDconversation)) {
+            pageData.IDconversation = [];
+        }
+        if (!Array.isArray(pageData.IDcustomer)) {
+            pageData.IDcustomer = [];
+        }
+
+        // Kiểm tra xem conversation_id đã tồn tại chưa
+        const conversationIndex = pageData.IDconversation.findIndex(id => String(id) === String(conversationId));
+        const exists = conversationIndex !== -1;
+
+       
+
+        if (exists) {
+            // Bỏ gán: xóa conversation_id và customer_id ở cùng index
+            pageData.IDconversation.splice(conversationIndex, 1);
+            if (pageData.IDcustomer[conversationIndex] !== undefined) {
+                pageData.IDcustomer.splice(conversationIndex, 1);
+            }
+        } else {
+            // Gán: thêm conversation_id và customer_id vào cùng index
+            pageData.IDconversation.push(conversationId);
+            pageData.IDcustomer.push(customerId || '');
+        }
+
+        // Cập nhật customer object
+        customerData[pageId] = pageData;
+
+        // Đảm bảo customerData là object hợp lệ trước khi lưu (không phải array)
+        let finalCustomerData = {};
+        if (typeof customerData === 'object' && !Array.isArray(customerData)) {
+            finalCustomerData = customerData;
+        } else if (Array.isArray(customerData) && customerData.length > 0 && typeof customerData[0] === 'object') {
+            // Nếu vẫn là array chứa object, merge lại
+            customerData.forEach((item) => {
+                if (item && typeof item === 'object') {
+                    finalCustomerData = { ...finalCustomerData, ...item };
+                }
+            });
+        }
+        
+       
+
+        // Đảm bảo lưu đúng format object, không phải array
+        const updateResult = await Label.updateOne(
+            { _id: labelId }, 
+            { $set: { customer: finalCustomerData } }
+        );
+        
+       
+        
+        // Verify sau khi update
+        const updatedLabel = await Label.findById(labelId);
+       
+
         revalidateTag('labels');
 
-        return { success: true, message: `Đã ${customerExists ? 'bỏ gán' : 'gán'} nhãn.` };
+        return { success: true, message: `Đã ${exists ? 'bỏ gán' : 'gán'} nhãn.` };
     } catch (error) {
-        console.error('Lỗi khi cập nhật nhãn cho khách hàng:', error);
-        return { success: false, error: 'Không thể cập nhật nhãn.' };
+        console.error('❌ [toggleLabelForCustomer] Lỗi khi cập nhật nhãn cho khách hàng:', error);
+        return { success: false, error: 'Không thể cập nhật nhãn: ' + (error.message || 'Unknown error') };
+    }
+}
+
+/**
+ * Lấy danh sách conversation_id và customer_id mapping từ các label và page id.
+ * Cấu trúc mới: customer là object với page_id làm key
+ * Trả về mapping conversation_id -> customer_id để có thể sử dụng khi gọi API
+ */
+export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
+    if (!labelIds || !Array.isArray(labelIds) || labelIds.length === 0 || !pageId) {
+        return { success: false, error: 'Thiếu thông tin nhãn hoặc page id.', conversationIds: [], conversationCustomerMap: {} };
+    }
+
+    try {
+       
+        await dbConnect();
+        const labels = await Label.find({ _id: { $in: labelIds } });
+
+      
+        if (labels.length === 0) {
+            console.warn('⚠️ [getConversationIdsByLabelsAndPage] Không tìm thấy nhãn');
+            return { success: false, error: 'Không tìm thấy nhãn.', conversationIds: [], conversationCustomerMap: {} };
+        }
+
+        // Lấy tất cả conversation_ids và mapping với customer_ids từ các labels theo cấu trúc mới
+        const allConversationIds = new Set();
+        const conversationCustomerMap = {}; // Map conversation_id -> customer_id
+        
+        labels.forEach((label, labelIndex) => {
+           
+            
+            // Xử lý trường hợp customer là array cũ hoặc object mới
+            let customerData = {};
+            if (Array.isArray(label.customer)) {
+                // Nếu là array, có thể là:
+                // 1. Array cũ: [] hoặc ["conversation_id1", "conversation_id2"]
+                // 2. Array chứa object: [{ pzl_xxx: {...} }] - đây là format mới nhưng lưu sai
+                if (label.customer.length > 0 && typeof label.customer[0] === 'object' && !Array.isArray(label.customer[0])) {
+                    // Trường hợp array chứa object - merge tất cả objects lại
+                    
+                    label.customer.forEach((item) => {
+                        if (item && typeof item === 'object') {
+                            customerData = { ...customerData, ...item };
+                        }
+                    });
+                } else {
+                    // Array cũ - chuyển sang object rỗng
+                    console.log(`⚠️ [getConversationIdsByLabelsAndPage] Label ${label.name} có customer là array cũ, chuyển sang object rỗng`);
+                    customerData = {};
+                }
+            } else if (label.customer && typeof label.customer === 'object' && !Array.isArray(label.customer)) {
+                // Object trực tiếp - sử dụng luôn
+                customerData = label.customer;
+            }
+            
+           
+            
+            const pageData = customerData[pageId];
+            
+           
+            
+            if (pageData && Array.isArray(pageData.IDconversation) && Array.isArray(pageData.IDcustomer)) {
+                
+                
+                pageData.IDconversation.forEach((convId, index) => {
+                    if (convId) {
+                        const convIdStr = String(convId);
+                        allConversationIds.add(convIdStr);
+                        // Lưu mapping conversation_id -> customer_id (cùng index)
+                        if (pageData.IDcustomer[index] !== undefined && pageData.IDcustomer[index] !== '') {
+                            conversationCustomerMap[convIdStr] = String(pageData.IDcustomer[index]);
+                        }
+                        
+                    }
+                });
+            } else {
+                console.log(`⚠️ [getConversationIdsByLabelsAndPage] Không tìm thấy page data hoặc không đúng format cho pageId: ${pageId}`);
+            }
+        });
+
+        const result = { 
+            success: true, 
+            conversationIds: Array.from(allConversationIds),
+            conversationCustomerMap // Map để có thể lấy customer_id khi gọi API
+        };
+        
+        
+
+        return result;
+    } catch (error) {
+        console.error('❌ [getConversationIdsByLabelsAndPage] Lỗi khi lấy conversation_id từ labels và page:', error);
+        return { success: false, error: 'Không thể lấy danh sách conversation: ' + (error.message || 'Unknown error'), conversationIds: [], conversationCustomerMap: {} };
     }
 }

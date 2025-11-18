@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, AlertCircle, Loader2, MessageCircle, Bell } from 'lucide-react';
+import { Check, AlertCircle, Loader2, MessageCircle, Play, X } from 'lucide-react';
 
 // Component hiển thị tin nhắn với animation
-const AnimatedMessage = ({ message, isNew = false, pageId }) => {
+const AnimatedMessage = ({ message, isNew = false, pageId, onVideoClick }) => {
     const formattedTime = useMemo(() => {
         if (!message?.inserted_at) return 'Thời gian không xác định';
         try {
@@ -51,7 +51,7 @@ const AnimatedMessage = ({ message, isNew = false, pageId }) => {
                 )}
 
                 {/* Message content */}
-                <MessageContent content={message?.content} />
+                <MessageContent content={message?.content} onVideoClick={onVideoClick} />
                 
                 {/* Message time */}
                 <div
@@ -74,7 +74,7 @@ const AnimatedMessage = ({ message, isNew = false, pageId }) => {
 };
 
 // Component hiển thị nội dung tin nhắn
-const MessageContent = ({ content }) => {
+const MessageContent = ({ content, onVideoClick }) => {
     if (!content) {
         return (
             <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
@@ -103,6 +103,51 @@ const MessageContent = ({ content }) => {
                                 loading="lazy"
                             />
                         </a>
+                    ))}
+                </div>
+            );
+
+        case 'videos':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {content.videos.map((video, i) => (
+                        <button
+                            key={i}
+                            type="button"
+                            className="group relative overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            onClick={() => onVideoClick?.(video)}
+                        >
+                            <div className="relative w-[260px] max-w-full rounded-lg overflow-hidden border border-gray-200 bg-black">
+                                {video.thumbnail ? (
+                                    <img
+                                        src={video.thumbnail}
+                                        alt={video.name || `Video ${i + 1}`}
+                                        className="w-full aspect-video object-cover opacity-80 group-hover:opacity-60 transition"
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    <video
+                                        src={video.url}
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        className="w-full aspect-video object-cover opacity-80 group-hover:opacity-60 transition"
+                                    />
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/60 text-white shadow-lg">
+                                        <Play className="h-6 w-6" />
+                                    </div>
+                                </div>
+                            </div>
+                            {video.name && (
+                                <div className="mt-1 flex justify-center">
+                                    <span className="max-w-[240px] truncate text-sm text-blue-600 group-hover:underline">
+                                        {video.name}
+                                    </span>
+                                </div>
+                            )}
+                        </button>
                     ))}
                 </div>
             );
@@ -183,6 +228,7 @@ const EnhancedMessageList = ({
     const [newMessageIds, setNewMessageIds] = useState(new Set());
     const [isNearBottom, setIsNearBottom] = useState(true);
     const lastMessageCountRef = useRef(messages.length);
+    const [selectedVideo, setSelectedVideo] = useState(null);
 
     // Theo dõi tin nhắn mới
     useEffect(() => {
@@ -260,13 +306,18 @@ const EnhancedMessageList = ({
                         const isNew = newMessageIds.has(msg.id);
                         
                         return msg.content?.type === 'system' ? (
-                            <MessageContent key={msg.id || `msg-${index}`} content={msg.content} />
+                            <MessageContent
+                                key={msg.id || `msg-${index}`}
+                                content={msg.content}
+                                onVideoClick={setSelectedVideo}
+                            />
                         ) : (
                             <AnimatedMessage
                                 key={msg.id || `msg-${index}`}
                                 message={msg}
                                 isNew={isNew}
                                 pageId={pageId}
+                                onVideoClick={setSelectedVideo}
                             />
                         );
                     })}
@@ -290,6 +341,37 @@ const EnhancedMessageList = ({
                 {/* End of messages marker */}
                 <div ref={messagesEndRef} />
             </div>
+
+            {selectedVideo && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div
+                        className="absolute inset-0 bg-black/70"
+                        onClick={() => setSelectedVideo(null)}
+                    />
+                    <div className="relative z-10 w-full max-w-3xl px-4">
+                        <div className="relative overflow-hidden rounded-2xl bg-black shadow-2xl">
+                            <button
+                                type="button"
+                                className="absolute right-4 top-4 rounded-full bg-black/60 p-2 text-white transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                                onClick={() => setSelectedVideo(null)}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                            <video
+                                src={selectedVideo.url}
+                                controls
+                                autoPlay
+                                className="w-full max-h-[75vh] bg-black"
+                            />
+                            {selectedVideo.name && (
+                                <div className="px-4 py-3 text-sm text-white/90">
+                                    {selectedVideo.name}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

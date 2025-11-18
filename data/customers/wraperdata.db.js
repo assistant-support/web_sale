@@ -4,7 +4,10 @@ import { revalidateTag } from 'next/cache';
 import mongoose from 'mongoose';
 import Customer from '@/models/customer.model';
 import Service from '@/models/services.model';
+import Logs from '@/models/log.model';
+import Zalo from '@/models/zalo.model';
 import { uploadFileToDrive } from '@/function/drive/image';
+import { actionZalo } from '@/function/drive/appscript';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
 import { getCustomersAll } from '@/data/customers/handledata.db';
@@ -30,6 +33,258 @@ async function pushCareLog(customerId, content, userId, step = 6) {
             },
         }
     );
+}
+
+const toStringId = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && typeof value.toString === 'function') return value.toString();
+    return null;
+};
+
+async function loadPreSurgeryMessageTemplate(serviceId, courseName) {
+    if (!serviceId || !courseName) return null;
+    const doc = await Service.findById(serviceId).select('name preSurgeryMessages').lean();
+    if (!doc) return null;
+    const matched = (doc.preSurgeryMessages || []).find(
+        (msg) => msg?.appliesToCourse === courseName && typeof msg?.content === 'string' && msg.content.trim().length > 0
+    );
+    if (!matched) return null;
+    return {
+        serviceName: doc.name || '',
+        courseName,
+        content: matched.content.trim(),
+    };
+}
+
+async function pickZaloAccountForCustomer(customerData, session) {
+    const uidEntries = Array.isArray(customerData?.uid) ? customerData.uid : [];
+    for (const entry of uidEntries) {
+        const zaloId = toStringId(entry?.zalo);
+        if (!zaloId) continue;
+        const zaloAccount = await Zalo.findById(zaloId).lean();
+        if (zaloAccount) {
+            return {
+                zalo: zaloAccount,
+                existingUid: entry?.uid ? String(entry.uid).trim() : null,
+                entry,
+            };
+        }
+    }
+
+    const sessionZaloId = toStringId(session?.zalo);
+    if (sessionZaloId) {
+        const zaloAccount = await Zalo.findById(sessionZaloId).lean();
+        if (zaloAccount) {
+            return { zalo: zaloAccount, existingUid: null, entry: null };
+        }
+    }
+
+    const fallback = await Zalo.findOne().sort({ updatedAt: -1 }).lean();
+    if (fallback) {
+        return { zalo: fallback, existingUid: null, entry: null };
+    }
+
+    return null;
+}
+
+async function resolveCustomerUidForZalo(customerData, zaloInfo, phone) {
+    const customerId = customerData?._id;
+    if (!customerId) {
+        return { error: 'Không xác định được khách hàng.' };
+    }
+    if (!phone) {
+        return { error: 'Thiếu số điện thoại khách hàng.' };
+    }
+    const targetZaloId = toStringId(zaloInfo?.zalo?._id);
+    if (!targetZaloId) {
+        return { error: 'Không xác định được tài khoản Zalo.' };
+    }
+
+    const uidEntries = Array.isArray(customerData?.uid) ? customerData.uid : [];
+    const existingEntry = uidEntries.find(
+        (entry) => toStringId(entry?.zalo) === targetZaloId
+    );
+
+    if (existingEntry?.uid) {
+        return { uid: String(existingEntry.uid).trim(), findUidResult: null };
+    }
+
+    const findUidResult = await actionZalo({
+        phone,
+        uid: zaloInfo.zalo.uid,
+        actionType: 'findUid',
+    });
+
+    if (!findUidResult?.status) {
+        const errorMessage =
+            findUidResult?.content?.error_message ||
+            findUidResult?.message ||
+            'Không tìm thấy UID Zalo của khách hàng.';
+        return { error: errorMessage, findUidResult };
+    }
+
+    const rawUid = findUidResult?.content?.data?.uid;
+    const normalizedUid = typeof rawUid === 'string' ? rawUid.trim() : '';
+    if (!normalizedUid) {
+        return { error: 'UID trả về từ AppScript bị trống.', findUidResult };
+    }
+
+    if (existingEntry) {
+        await Customer.updateOne(
+            { _id: customerId, 'uid.zalo': existingEntry.zalo },
+            {
+                $set: {
+                    'uid.$.uid': normalizedUid,
+                    'uid.$.isFriend': 0,
+                    'uid.$.isReques': 0,
+                    zaloavt: findUidResult?.content?.data?.avatar || customerData.zaloavt || null,
+                    zaloname: findUidResult?.content?.data?.zalo_name || customerData.zaloname || null,
+                },
+            }
+        );
+    } else {
+        await Customer.updateOne(
+            { _id: customerId },
+            {
+                $push: {
+                    uid: {
+                        zalo: zaloInfo.zalo._id,
+                        uid: normalizedUid,
+                        isFriend: 0,
+                        isReques: 0,
+                    },
+                },
+                $set: {
+                    zaloavt: findUidResult?.content?.data?.avatar || customerData.zaloavt || null,
+                    zaloname: findUidResult?.content?.data?.zalo_name || customerData.zaloname || null,
+                },
+            }
+        );
+    }
+
+    return { uid: normalizedUid, findUidResult };
+}
+
+export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session }) {
+    const customerData = customer?.toObject ? customer.toObject() : customer;
+    if (!customerData?._id || !detail) {
+        return { skipped: 'Thiếu dữ liệu khách hàng hoặc đơn dịch vụ.' };
+    }
+
+    const selectedServiceId = detail?.selectedService?._id
+        ? detail.selectedService._id
+        : detail?.selectedService;
+    const courseName = detail?.selectedCourse?.name || '';
+
+    if (!selectedServiceId || !courseName) {
+        return { skipped: 'Đơn không có thông tin dịch vụ hoặc liệu trình.' };
+    }
+
+    const template = await loadPreSurgeryMessageTemplate(selectedServiceId, courseName);
+    if (!template) {
+        return { skipped: 'Không tìm thấy nội dung tin nhắn trước phẫu thuật phù hợp.' };
+    }
+
+    const phone = String(customerData.phone || '').trim();
+    if (!phone) {
+        await pushCareLog(
+            customerData._id,
+            `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''} vì thiếu số điện thoại.`,
+            session?.id
+        );
+        return { error: 'Thiếu số điện thoại khách hàng.' };
+    }
+
+    const zaloInfo = await pickZaloAccountForCustomer(customerData, session);
+    if (!zaloInfo?.zalo) {
+        await pushCareLog(
+            customerData._id,
+            `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''} vì không có tài khoản Zalo khả dụng.`,
+            session?.id
+        );
+        return { error: 'Không tìm thấy tài khoản Zalo khả dụng.' };
+    }
+
+    let uidPerson = zaloInfo.existingUid;
+    if (!uidPerson) {
+        const uidResult = await resolveCustomerUidForZalo(customerData, zaloInfo, phone);
+        if (uidResult?.error) {
+            await pushCareLog(
+                customerData._id,
+                `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${uidResult.error}`,
+                session?.id
+            );
+            return { error: uidResult.error };
+        }
+        uidPerson = uidResult.uid;
+    }
+
+    if (!uidPerson) {
+        const msg = 'Không có UID Zalo của khách hàng.';
+        await pushCareLog(
+            customerData._id,
+            `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${msg}`,
+            session?.id
+        );
+        return { error: msg };
+    }
+
+    const messageContent = template.content;
+    const sendResult = await actionZalo({
+        phone,
+        uidPerson,
+        actionType: 'sendMessage',
+        message: messageContent,
+        uid: zaloInfo.zalo.uid,
+    });
+
+    const logCreateBy =
+        session?.id ||
+        detail?.approvedBy ||
+        detail?.closedBy ||
+        (Array.isArray(zaloInfo.zalo.roles) && zaloInfo.zalo.roles.length > 0 ? zaloInfo.zalo.roles[0] : null);
+
+    if (logCreateBy) {
+        await Logs.create({
+            status: {
+                status: sendResult?.status || false,
+                message: messageContent,
+                data: {
+                    error_code: sendResult?.content?.error_code || null,
+                    error_message:
+                        sendResult?.content?.error_message ||
+                        (sendResult?.status ? '' : sendResult?.message || 'Invalid response from AppScript'),
+                },
+            },
+            type: 'sendMessage',
+            createBy: logCreateBy,
+            customer: customerData._id,
+            zalo: zaloInfo.zalo._id,
+        });
+    }
+
+    if (sendResult?.status) {
+        await pushCareLog(
+            customerData._id,
+            `[Auto] Đã gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}.`,
+            session?.id
+        );
+        return { success: true };
+    }
+
+    const errorMessage =
+        sendResult?.content?.error_message ||
+        sendResult?.message ||
+        'Không thể gửi tin nhắn trước phẫu thuật qua Zalo.';
+
+    await pushCareLog(
+        customerData._id,
+        `[Auto] Gửi tin nhắn trước phẫu thuật thất bại cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${errorMessage}`,
+        session?.id
+    );
+
+    return { error: errorMessage };
 }
 
 /* ============================================================
@@ -675,6 +930,8 @@ export async function approveServiceDealAction(prevState, formData) {
         detail.approvedBy = session.id;
         detail.approvedAt = new Date();
 
+        const detailSnapshot = detail.toObject ? detail.toObject() : JSON.parse(JSON.stringify(detail));
+
         await customer.save();
 
         const newPipeline = pipelineFromServiceStatus(detail.status);
@@ -682,6 +939,24 @@ export async function approveServiceDealAction(prevState, formData) {
         customer.pipelineStatus[0] = newPipeline;
         customer.pipelineStatus[6] = newPipeline;
         await customer.save();
+
+        try {
+            const { default: initAgenda } = await import('@/config/agenda');
+            const agenda = await initAgenda();
+            const sendAt = new Date(Date.now() + 60 * 60 * 1000); // đổi thời gian gửi tin nhắn trước phẫu thuật thành 1 giờ sau khi duyệt đơn
+            await agenda.schedule(sendAt, 'servicePreSurgeryMessage', {
+                customerId,
+                serviceDetailId,
+                triggeredBy: session.id,
+            });
+        } catch (scheduleError) {
+            console.error('[approveServiceDealAction] Lỗi khi schedule gửi tin nhắn trước phẫu thuật:', scheduleError);
+            await pushCareLog(
+                customerId,
+                `[Auto] Không thể schedule tin nhắn trước phẫu thuật: ${scheduleError?.message || scheduleError}`,
+                session.id
+            );
+        }
 
         await pushCareLog(
             customerId,

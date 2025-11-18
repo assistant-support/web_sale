@@ -15,11 +15,11 @@ export default function CallPopupWrapper({ customer, user }) {
     useEffect(() => {
         const initializeSDK = async () => {
             try {
-                
+               
                 await omicallSDKManager.initialize();
                 await omicallSDKManager.connect();
                 setIsInitialized(true);
-               
+              
             } catch (error) {
                 console.error('[CallPopupWrapper] ❌ SDK initialization failed:', error);
             }
@@ -29,7 +29,7 @@ export default function CallPopupWrapper({ customer, user }) {
 
         // Setup event listeners
         const handleStatus = (status) => {
-            
+            console.log('[CallPopupWrapper] 📡 Status update:', status);
             setConnectionStatus(status);
         };
 
@@ -37,13 +37,13 @@ export default function CallPopupWrapper({ customer, user }) {
 
         // Handle tab switching
         const handleTabSwitch = () => {
-            
+            console.log('[CallPopupWrapper] 🔄 Tab switch detected');
             omicallSDKManager.handleTabSwitch();
         };
 
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-               
+                console.log('[CallPopupWrapper] 👁️ Tab became visible');
                 omicallSDKManager.handleTabSwitch();
             }
         };

@@ -1,6 +1,7 @@
 'use server'
 
 import { getAreaOne, getAreaAll } from '@/data/database/area'
+import { getAreaCustomerAll, getAreaCustomerOne } from '@/data/database/area_customer'
 import { getUserAll, getUserOne } from '@/data/database/user'
 import { getLabelAll } from '../database/label'
 import { getFormAll } from '../database/form'
@@ -14,6 +15,21 @@ import mongoose from "mongoose";
 export async function area_data(_id) {
     let data = _id ? await getAreaOne(_id) : await getAreaAll()
     return _id && data ? data[0] || null : data || null
+}
+
+// Lấy dữ liệu khu vực khách hàng
+export async function area_customer_data(_id) {
+    try {
+      
+        let data = _id ? await getAreaCustomerOne(_id) : await getAreaCustomerAll()
+        
+        const result = _id && data ? data[0] || null : data || null
+       
+        return result
+    } catch (error) {
+        console.error('❌ [area_customer_data] Lỗi:', error)
+        return null
+    }
 }
 
 // Lấy tài khoản zalo

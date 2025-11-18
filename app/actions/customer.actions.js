@@ -10,9 +10,164 @@ import ScheduledJob from "@/models/schedule";
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
 import Service from '@/models/services.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
+import { uploadFileToDrive } from '@/function/drive/image';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
+
+/**
+ * Build history_service từ serviceDetails
+ * Format: { "Tên dịch vụ": ["Liệu trình 1", "Liệu trình 2", ...] }
+ */
+function buildHistoryService(serviceDetails = [], services = []) {
+    if (!Array.isArray(serviceDetails) || serviceDetails.length === 0) {
+        return {};
+    }
+
+    // Tạo map serviceId -> serviceName
+    const serviceMap = new Map();
+    services.forEach((svc) => {
+        if (svc?._id) {
+            serviceMap.set(String(svc._id), svc.name || 'Không rõ dịch vụ');
+        }
+    });
+
+    // Nhóm theo tên dịch vụ, mỗi dịch vụ có Set các liệu trình (tự động loại bỏ trùng)
+    const grouped = {}; // { "Tên dịch vụ": Set(["Liệu trình 1", "Liệu trình 2"]) }
+
+   
+    serviceDetails.forEach((detail, index) => {
+        if (!detail) {
+            
+            return;
+        }
+        
+       
+        
+        // Lấy serviceId
+        let serviceId = null;
+        if (detail.selectedService) {
+            if (typeof detail.selectedService === 'string') {
+                serviceId = detail.selectedService;
+            } else if (detail.selectedService._id) {
+                serviceId = String(detail.selectedService._id);
+            }
+        }
+
+        if (!serviceId) {
+           
+            return;
+        }
+        
+        // Lấy serviceName từ serviceMap hoặc từ detail
+        const serviceName =
+            serviceMap.get(serviceId) ||
+            detail.selectedService?.name ||
+            'Không rõ dịch vụ';
+
+       
+        // Lấy courseName từ selectedCourse.name
+        const courseName = detail.selectedCourse?.name || '';
+        
+       
+        
+        if (!courseName) {
+          
+            return; // Bỏ qua nếu không có tên liệu trình
+        }
+
+        // Khởi tạo Set cho dịch vụ nếu chưa có
+        if (!grouped[serviceName]) {
+            grouped[serviceName] = new Set();
+        }
+
+        // Thêm liệu trình vào Set (tự động loại bỏ trùng lặp)
+        grouped[serviceName].add(courseName);
+       
+    });
+
+    // Chuyển Set thành Array (mảng với index 0, 1, 2, ...)
+    const historyService = {};
+    Object.keys(grouped).forEach((serviceName) => {
+        historyService[serviceName] = Array.from(grouped[serviceName]);
+    });
+
+    
+
+    return historyService;
+}
+
+/**
+ * Đồng bộ history_service từ serviceDetails cho 1 customer
+ */
+export async function syncHistoryService(customerId) {
+    try {
+        await connectDB();
+        if (!mongoose.Types.ObjectId.isValid(customerId)) {
+            return { success: false, error: 'customerId không hợp lệ.' };
+        }
+
+        const customerDoc = await Customer.findById(customerId)
+            .populate('serviceDetails.selectedService', 'name')
+            .lean();
+
+        if (!customerDoc) {
+            return { success: false, error: 'Không tìm thấy khách hàng.' };
+        }
+
+       
+        const serviceIds = new Set();
+        customerDoc.serviceDetails?.forEach((detail) => {
+            if (detail?.selectedService) {
+                if (typeof detail.selectedService === 'string') {
+                    serviceIds.add(detail.selectedService);
+                } else if (detail.selectedService._id) {
+                    serviceIds.add(String(detail.selectedService._id));
+                }
+            }
+        });
+
+       
+        const services = await Service.find({
+            _id: { $in: Array.from(serviceIds) },
+        })
+            .select('name')
+            .lean();
+
+        
+        const history = buildHistoryService(
+            customerDoc.serviceDetails || [],
+            services
+        );
+
+        
+        // Sử dụng updateOne với $set để lưu Mixed type (giống như cover_customer)
+        const updateResult = await Customer.updateOne(
+            { _id: customerDoc._id },
+            { $set: { history_service: history || {} } }
+        );
+
+        
+        
+        // Đợi một chút để đảm bảo database đã cập nhật
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Kiểm tra lại document sau save (không dùng lean để xem document thật)
+        const afterSave = await Customer.findById(customerDoc._id);
+        
+        // Verify sau khi update - load lại document để kiểm tra
+        const verifyDoc = await Customer.findById(customerDoc._id).lean();
+        
+
+        return { success: true, history_service: history };
+    } catch (error) {
+        console.error('❌ [syncHistoryService] Lỗi:', error);
+        return {
+            success: false,
+            error: error?.message || 'Lỗi khi đồng bộ history_service.',
+        };
+    }
+}
 
 export async function getCombinedData(params) {
     const cachedData = nextCache(
@@ -305,44 +460,177 @@ export async function updateCustomerInfo(previousState, formData) {
     if (!id) return { success: false, error: 'Thiếu ID khách hàng.' };
 
     try {
-        // console.log('🚩Đi qua hàm updateCustomerInfo');
+       
         await connectDB();
 
-        // Lấy các trường cơ bản từ form
-        const payload = {
-            name: formData.get('name'),
-            email: formData.get('email'),
-            area: formData.get('area'),
-            bd: formData.get('bd') ? new Date(formData.get('bd')) : null,
-            // --- MỚI: Xử lý trường tags ---
-            // formData.getAll() sẽ lấy tất cả giá trị có key là 'tags' thành một mảng
-            tags: formData.getAll('tags'),
-        };
-
-        // Lọc ra các giá trị null hoặc undefined
-        Object.keys(payload).forEach(key => {
-            const value = payload[key];
-            if (value === null || value === undefined || value === '') {
-                delete payload[key];
+        // Xử lý upload ảnh nếu có (giống logic trong closeServiceAction)
+        const coverImage = formData.get('cover_customer');
+        let coverCustomerId = formData.get('cover_customer_id') || null;
+        
+        // Kiểm tra nếu có file ảnh được upload (kiểm tra size > 0 giống closeServiceAction)
+        if (coverImage && coverImage.size > 0) {
+            try {
+                const CUSTOMER_IMAGE_FOLDER_ID = '1QllmKTdN6hYg5hBKXMojZf_dwjiNTPAl';
+                const uploadedFile = await uploadFileToDrive(coverImage, CUSTOMER_IMAGE_FOLDER_ID);
+                if (uploadedFile?.id) {
+                    coverCustomerId = uploadedFile.id;  // ← Lấy ID từ kết quả upload
+                    console.log('✅ Upload ảnh khách hàng thành công, ID:', coverCustomerId);
+                } else {
+                    console.error('❌ Upload ảnh khách hàng thất bại - không có ID trả về');
+                }
+            } catch (uploadError) {
+                console.error('❌ Lỗi khi upload ảnh khách hàng:', uploadError);
+                // Không throw lỗi, tiếp tục cập nhật các trường khác
             }
+        }
+
+        // Lấy document (giống closeServiceAction - không dùng findByIdAndUpdate)
+        const customerDoc = await Customer.findById(id);
+        if (!customerDoc) {
+            return { success: false, error: 'Không tìm thấy khách hàng.' };
+        }
+
+        // Cập nhật các trường cơ bản
+        const name = formData.get('name');
+        const email = formData.get('email');
+        const area = formData.get('area');
+        const Id_area_customer = formData.get('Id_area_customer') || null; // _id của area_customer (hoặc null nếu xóa)
+        const bd = formData.get('bd');
+        const tags = formData.getAll('tags');
+        const service_start_date = formData.get('service_start_date');
+        const service_last_date = formData.get('service_last_date');
+
+        // Lấy khu vực cũ (là _id) để xóa customer khỏi mảng id_customer
+        const oldAreaCustomerId = customerDoc.Id_area_customer;
+
+        console.log('🔄 [updateCustomerInfo] Cập nhật Id_area_customer:', {
+            old: oldAreaCustomerId,
+            new: Id_area_customer
         });
 
-        await Customer.findByIdAndUpdate(id, payload);
+        if (name) customerDoc.name = name;
+        if (email !== undefined) customerDoc.email = email || null;
+        if (area !== undefined) customerDoc.area = area || null;
+        
+        // Cập nhật Id_area_customer với _id của area_customer (luôn cập nhật, kể cả khi null/empty)
+        customerDoc.Id_area_customer = Id_area_customer;
+        
+        if (bd) customerDoc.bd = new Date(bd);
+        if (tags && tags.length > 0) customerDoc.tags = tags;
+        
+        // Cập nhật lịch sử sử dụng dịch vụ
+        if (service_start_date !== undefined) {
+            customerDoc.service_start_date = service_start_date ? new Date(service_start_date) : null;
+        }
+        if (service_last_date !== undefined) {
+            customerDoc.service_last_date = service_last_date ? new Date(service_last_date) : null;
+        }
 
+        // Lưu các trường khác bằng .save()
+        await customerDoc.save();
+        
+        // Cập nhật mảng id_customer trong area_customer
+        try {
+            const AreaCustomer = (await import('@/models/area_customer.model')).default;
+            
+            // Xóa customer khỏi mảng id_customer của khu vực cũ (nếu có thay đổi hoặc xóa)
+            if (oldAreaCustomerId && oldAreaCustomerId !== Id_area_customer && mongoose.Types.ObjectId.isValid(oldAreaCustomerId)) {
+                const pullResult = await AreaCustomer.updateOne(
+                    { _id: new mongoose.Types.ObjectId(oldAreaCustomerId) },
+                    { $pull: { id_customer: new mongoose.Types.ObjectId(id) } }
+                );
+                
+            }
+
+            // Thêm customer vào mảng id_customer của khu vực mới (nếu có chọn khu vực mới)
+            if (Id_area_customer && mongoose.Types.ObjectId.isValid(Id_area_customer)) {
+                const updateResult = await AreaCustomer.updateOne(
+                    { _id: new mongoose.Types.ObjectId(Id_area_customer) },
+                    { 
+                        $addToSet: { id_customer: new mongoose.Types.ObjectId(id) } // $addToSet để tránh trùng lặp
+                    }
+                );
+                
+            } else if (Id_area_customer) {
+                console.warn('⚠️ [updateCustomerInfo] Id_area_customer không phải là ObjectId hợp lệ:', Id_area_customer);
+            } else {
+                // Nếu Id_area_customer là null/empty, chỉ xóa khỏi khu vực cũ (đã xử lý ở trên)
+                console.log('ℹ️ [updateCustomerInfo] Không có khu vực mới được chọn, chỉ xóa khỏi khu vực cũ (nếu có)');
+            }
+        } catch (areaError) {
+            console.error('❌ [updateCustomerInfo] Lỗi khi cập nhật area_customer:', areaError);
+            // Không throw lỗi, tiếp tục xử lý các bước khác
+        }
+
+        // Cập nhật cover_customer bằng updateOne trực tiếp (để tránh vấn đề với Mongoose)
+        if (coverCustomerId) {
+            const updateResult = await Customer.updateOne(
+                { _id: id },
+                { $set: { cover_customer: coverCustomerId } }
+            );
+            
+        } else if (formData.get('cover_customer_id') === '') {
+            // Nếu gửi chuỗi rỗng, xóa ảnh
+            await Customer.updateOne(
+                { _id: id },
+                { $set: { cover_customer: null } }
+            );
+        }
+        
+        // Verify ngay sau khi update
+        const verifyAfterUpdate = await Customer.findById(id).select('cover_customer').lean();
+        
         // Nếu vừa chọn dịch vụ (tags) và chưa có người phụ trách thì auto-assign ngay
         try {
-            if (Array.isArray(payload.tags) && payload.tags.length > 0) {
+            if (tags && tags.length > 0) {
                 const fresh = await Customer.findById(id).select('assignees tags').lean();
                 if (!fresh?.assignees || fresh.assignees.length === 0) {
-                    // console.log('🚩Gọi autoAssignForCustomer từ updateCustomerInfo');
-                    await autoAssignForCustomer(id, { serviceId: payload.tags[0] });
+                    
+                    await autoAssignForCustomer(id, { serviceId: tags[0] });
+                    
+                    // QUAN TRỌNG: Cập nhật lại cover_customer sau auto-assign để tránh bị ghi đè
+                    if (coverCustomerId) {
+                        const docAfterAssign = await Customer.findById(id);
+                        if (docAfterAssign) {
+                            docAfterAssign.cover_customer = coverCustomerId;
+                            await docAfterAssign.save();
+                            
+                        }
+                    }
                 }
             }
         } catch (e) {
             console.error('[updateCustomerInfo] Auto-assign after tag update error:', e?.message || e);
         }
 
+        // QUAN TRỌNG: Cập nhật lại cover_customer sau auto-assign bằng updateOne
+        if (coverCustomerId) {
+            
+            const updateAfterAssign = await Customer.updateOne(
+                { _id: id },
+                { $set: { cover_customer: coverCustomerId } }
+            );
+           
+        }
+
+        // Revalidate data (sau khi đã cập nhật cover_customer)
         revalidateData();
+
+        // QUAN TRỌNG: Cập nhật lại cover_customer sau revalidate bằng updateOne (để đảm bảo không bị cache cũ ghi đè)
+        if (coverCustomerId) {
+            
+            const updateAfterRevalidate = await Customer.updateOne(
+                { _id: id },
+                { $set: { cover_customer: coverCustomerId } }
+            );
+            
+        }
+
+        // Verify cuối cùng (đợi một chút để đảm bảo database đã cập nhật)
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const finalVerify = await Customer.findById(id).select('cover_customer').lean();
+        
+
         return { success: true, message: 'Cập nhật thông tin thành công!' };
     } catch (error) {
         console.error("Lỗi khi cập nhật khách hàng:", error);
@@ -430,9 +718,12 @@ export async function updateCustomerStatusAction(previousState, formData) {
  * Đồng thời cập nhật trạng thái pipeline và ghi log chăm sóc (care).
  */
 export async function assignRoleToCustomersAction(prevState, formData) {
-    // console.log('🚩Đi qua hàm assignRoleToCustomersAction');
+   
     // 1. Xác thực và phân quyền người dùng
     const user = await checkAuthToken();
+    if (!user || !user.id) {
+        return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
+    }
     // 2. Lấy và kiểm tra dữ liệu đầu vào
     const customersJSON = formData.get('selectedCustomersJSON');
     const userIdToAssign = formData.get('userId');
@@ -489,15 +780,16 @@ export async function assignRoleToCustomersAction(prevState, formData) {
         const result = await Customer.updateMany(
             { _id: { $in: customerIds } },
             {
-                // Thay thế hoàn toàn danh sách phụ trách bằng nhân viên được chọn
                 $set: {
+                    // Thay thế toàn bộ danh sách phụ trách bằng nhân sự mới
                     assignees: [assigneeObject],
-                    // Cập nhật trạng thái pipeline
                     'pipelineStatus.0': newPipelineStatus, // Trạng thái tổng quan gần nhất
                     'pipelineStatus.3': newPipelineStatus, // Trạng thái cho Bước 3: Phân bổ
                 },
                 // Ghi log hành động
-                $push: { care: careNote }
+                $push: {
+                    care: careNote,
+                }
             }
         );
 

@@ -206,7 +206,7 @@ export default function SyncChatMessages({
     // Socket connection and event handlers
     useEffect(() => {
         if (!pageConfig?.id || !token) {
-            console.log('[SyncChatMessages] Missing pageConfig or token');
+          
             return;
         }
 
@@ -223,12 +223,12 @@ export default function SyncChatMessages({
 
         // Connection events
         socket.on('connect', () => {
-            console.log('[SyncChatMessages] ✅ Connected to socket');
+          
             setIsConnected(true);
         });
 
         socket.on('disconnect', (reason) => {
-            console.log('[SyncChatMessages] ❌ Disconnected:', reason);
+           
             setIsConnected(false);
         });
 
@@ -255,7 +255,6 @@ export default function SyncChatMessages({
                 setMessages((prev) => {
                     // Avoid duplicates
                     if (prev.some(m => m.id === normalizedMessage.id)) {
-                        console.log('[SyncChatMessages] Message already exists, skipping');
                         return prev;
                     }
                     
@@ -271,8 +270,7 @@ export default function SyncChatMessages({
             } else {
                 // Increment new message count for other conversations
                 setNewMessageCount(prev => prev + 1);
-               
-            }
+               }
 
             // Update conversations list
             if (targetId) {
@@ -309,7 +307,7 @@ export default function SyncChatMessages({
 
         // Conversation events
         socket.on('conv:patch', (patch) => {
-            
+           
             if (patch?.pageId && String(patch.pageId) !== String(pageConfig.id)) return;
             
             setConversations((prev) => {
@@ -330,7 +328,6 @@ export default function SyncChatMessages({
         });
 
         // Initial data load
-        
         socket.emit('conv:get', { 
             pageId: pageConfig.id, 
             token, 
@@ -343,7 +340,7 @@ export default function SyncChatMessages({
                     const merged = [...prev.filter(c => !incoming.some(i => i.id === c.id)), ...incoming];
                     return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
                 });
-                
+               
             } else if (res?.error) {
                 console.error('[SyncChatMessages] conv:get error:', res.error);
             }
@@ -372,12 +369,11 @@ export default function SyncChatMessages({
         // Prevent too frequent refreshes
         const now = Date.now();
         if (!forceRefresh && now - lastRefreshTimeRef.current < 2000) {
-            
+           
             return;
         }
         lastRefreshTimeRef.current = now;
 
-        
         setIsLoadingMessages(true);
         
         try {
@@ -388,26 +384,26 @@ export default function SyncChatMessages({
                 customerId: null,
                 count: 0 // Always get latest messages
             }, (res) => {
-                
+               
                 if (res?.ok && Array.isArray(res.items)) {
                     const normalizedMessages = res.items.map(msg => 
                         normalizePancakeMessage(msg, pageConfig.id)
                     );
                     const sortedMessages = sortAscByTime(normalizedMessages);
                     setMessages(sortedMessages);
-                    
+                   
                     // Auto scroll to bottom after loading
                     setTimeout(() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
                     }, 100);
                 } else if (res?.error) {
-                    
+                    console.error('[SyncChatMessages] msg:get error:', res.error);
                     toast.error('Không thể tải tin nhắn: ' + res.error);
                 }
                 setIsLoadingMessages(false);
             });
         } catch (error) {
-            
+            console.error('[SyncChatMessages] Error loading messages:', error);
             setIsLoadingMessages(false);
             toast.error('Lỗi khi tải tin nhắn: ' + error.message);
         }
@@ -417,7 +413,6 @@ export default function SyncChatMessages({
     const startWatching = useCallback((conversationId) => {
         if (!socketRef.current || !pageConfig?.id || !token) return;
 
-        
         socketRef.current.emit('msg:watchStart', {
             pageId: pageConfig.id,
             token,
@@ -426,11 +421,11 @@ export default function SyncChatMessages({
             count: 20,
             intervalMs: 1500 // Faster polling for better sync
         }, (res) => {
-            console.log('[SyncChatMessages] msg:watchStart response:', res);
+           
             if (res?.ok) {
                 console.log('[SyncChatMessages] ✅ Started watching messages');
             } else if (res?.error) {
-                
+                console.error('[SyncChatMessages] ❌ Error starting watcher:', res.error);
                 toast.error('Không thể theo dõi tin nhắn: ' + res.error);
             }
         });
@@ -440,7 +435,6 @@ export default function SyncChatMessages({
     const stopWatching = useCallback((conversationId) => {
         if (!socketRef.current || !pageConfig?.id) return;
 
-        
         socketRef.current.emit('msg:watchStop', {
             pageId: pageConfig.id,
             conversationId
@@ -468,8 +462,7 @@ export default function SyncChatMessages({
     const handleRefreshMessages = useCallback(() => {
         if (!selectedConvo?.id) return;
         
-        
-        setIsRefreshing(true);
+       setIsRefreshing(true);
         loadMessages(selectedConvo.id, true).finally(() => {
             setIsRefreshing(false);
         });
@@ -480,7 +473,7 @@ export default function SyncChatMessages({
         const message = formData.get('message');
         if (!message?.trim() || !selectedConvo?.id) return;
 
-        
+       
         // Add optimistic message
         const tempMessageId = Date.now().toString();
         const tempMessage = {

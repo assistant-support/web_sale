@@ -55,7 +55,7 @@ export default function QuickFixChat({ pageConfig, token }) {
     useEffect(() => {
         if (!pageConfig?.id || !token) return;
 
-        
+      
         const socket = io(SOCKET_URL, {
             path: '/socket.io',
             reconnection: true,
@@ -67,19 +67,18 @@ export default function QuickFixChat({ pageConfig, token }) {
         socketRef.current = socket;
 
         socket.on('connect', () => {
-            
+          
             setIsConnected(true);
         });
 
         socket.on('disconnect', () => {
-            
+           
             setIsConnected(false);
         });
 
         // Handle new messages
         socket.on('msg:new', (rawMsg) => {
-            
-            
+           
             const current = selectedConvoRef.current;
             const msgConvId = rawMsg?.conversationId || rawMsg?.conversation?.id;
             
@@ -96,7 +95,6 @@ export default function QuickFixChat({ pageConfig, token }) {
                 setMessages(prev => {
                     // Avoid duplicates
                     if (prev.some(m => m.id === normalizedMsg.id)) {
-                        
                         return prev;
                     }
                     
@@ -104,8 +102,7 @@ export default function QuickFixChat({ pageConfig, token }) {
                         (a, b) => new Date(a.inserted_at) - new Date(b.inserted_at)
                     );
                     
-                    
-                    
+                   
                     // Auto scroll
                     setTimeout(() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -145,7 +142,6 @@ export default function QuickFixChat({ pageConfig, token }) {
             token, 
             current_count: 0 
         }, (res) => {
-            
             if (res?.ok && Array.isArray(res.items)) {
                 setConversations(res.items.filter(c => c?.type === 'INBOX'));
             }
@@ -160,7 +156,7 @@ export default function QuickFixChat({ pageConfig, token }) {
     const loadMessages = useCallback(async (conversationId) => {
         if (!socketRef.current || !conversationId) return;
 
-        
+    
         setIsLoading(true);
         
         socketRef.current.emit('msg:get', {
@@ -170,7 +166,7 @@ export default function QuickFixChat({ pageConfig, token }) {
             customerId: null,
             count: 0
         }, (res) => {
-            
+          
             if (res?.ok && Array.isArray(res.items)) {
                 const normalizedMessages = res.items.map(msg => normalizeMessage(msg, pageConfig.id));
                 setMessages(normalizedMessages.sort(
@@ -190,7 +186,7 @@ export default function QuickFixChat({ pageConfig, token }) {
     const startWatching = useCallback((conversationId) => {
         if (!socketRef.current || !conversationId) return;
 
-        
+      
         socketRef.current.emit('msg:watchStart', {
             pageId: pageConfig.id,
             token,
@@ -205,7 +201,7 @@ export default function QuickFixChat({ pageConfig, token }) {
 
     // Select conversation
     const selectConversation = useCallback(async (conversation) => {
-        
+       
         // Stop watching previous conversation
         if (selectedConvo?.id) {
             socketRef.current?.emit('msg:watchStop', {
@@ -227,7 +223,7 @@ export default function QuickFixChat({ pageConfig, token }) {
     const forceRefresh = useCallback(() => {
         if (!selectedConvo?.id) return;
         
-        
+       
         setIsLoading(true);
         
         // Stop current watching

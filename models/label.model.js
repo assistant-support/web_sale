@@ -14,8 +14,8 @@ const LabelSchema = new mongoose.Schema({
         trim: true,
     },
     customer: {
-        type: [],
-        default: [],
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
     },
 }, { timestamps: true });
 

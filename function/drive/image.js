@@ -18,7 +18,7 @@ async function setFilePermissionReader(drive, fileId) {
             supportsAllDrives: true,
             sendNotificationEmail: false,
         });
-        console.log(`Đã cấp quyền xem công khai cho file ${fileId}`);
+       
     } catch (error) {
         const reason = error?.errors?.[0]?.reason || error?.code;
         const message = error?.errors?.[0]?.message || error?.message;

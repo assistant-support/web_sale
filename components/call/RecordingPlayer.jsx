@@ -65,7 +65,7 @@ export default function RecordingPlayer({ callId, className }) {
         // Đảm bảo âm lượng tối đa
         audioRef.current.volume = 1.0;
         audioRef.current.muted = false;
-        
+        console.log('🎵 Audio loaded with volume:', audioRef.current.volume);
     };
 
     const onTimeUpdate = () => {
@@ -84,16 +84,24 @@ export default function RecordingPlayer({ callId, className }) {
         setReady(false);
         setPlaying(false);
         
-        
+        console.error('🎵 Audio error details:', {
+            error: e,
+            src,
+            callId,
+            webmSupported,
+            timestamp: new Date().toISOString()
+        });
         
         // Test API response directly
         if (src && src.includes('/api/calls/')) {
             const callIdFromSrc = src.split('/api/calls/')[1]?.split('/')[0];
+            console.error('🎵 Failed to load audio for callId:', callIdFromSrc);
             
             // Test API response
             fetch(src)
                 .then(response => {
-                    
+                    console.error('🎵 API Response Status:', response.status);
+                    console.error('🎵 API Response Headers:', Object.fromEntries(response.headers.entries()));
                     return response.text();
                 })
                 .then(text => {
@@ -141,6 +149,7 @@ export default function RecordingPlayer({ callId, className }) {
                 // Đảm bảo âm lượng tối đa trước khi phát
                 audioRef.current.volume = 1.0;
                 audioRef.current.muted = false;
+                console.log('🎵 Playing audio with volume:', audioRef.current.volume);
                 
                 await audioRef.current.play();
                 setPlaying(true);

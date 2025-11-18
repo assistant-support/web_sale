@@ -1,6 +1,7 @@
 // data/db/appointment.db.js
 
 import Appointment from '@/models/appointment.model'
+import Customer from '@/models/customer.model'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache'
 import mongoose from 'mongoose'
@@ -72,6 +73,15 @@ export async function dataAppointment(params = {}) {
                     as: 'serviceInfo'
                 }
             },
+            {
+                $lookup: {
+                    from: 'services',
+                    localField: 'customerInfo.tags',
+                    foreignField: '_id',
+                    as: 'interestedServicesInfo'
+                }
+            },
+            { $addFields: { originalCustomerId: '$customer' } },
             // Dùng $unwind để chuyển array thành object
             { $unwind: { path: "$customerInfo", preserveNullAndEmptyArrays: true } },
             { $unwind: { path: "$creatorInfo", preserveNullAndEmptyArrays: true } },
@@ -85,15 +95,61 @@ export async function dataAppointment(params = {}) {
                     createdAt: 1,
                     appointmentType: 1,
                     treatmentCourse: 1, // THÊM MỚI
+                    customerId: "$originalCustomerId",
                     customer: { _id: "$customerInfo._id", name: "$customerInfo.name", phone: "$customerInfo.phone" },
                     createdBy: { _id: "$creatorInfo._id", name: "$creatorInfo.name", group: "$creatorInfo.group" },
                     // CẬP NHẬT: Thêm thông tin dịch vụ
                     service: { _id: "$serviceInfo._id", name: "$serviceInfo.name" },
+                    interestedServices: "$interestedServicesInfo.name",
                 }
             }
         ];
 
         const appointments = await Appointment.aggregate(aggregationPipeline);
+
+        if (appointments.length > 0) {
+            const missingCustomerIds = [
+                ...new Set(
+                    appointments
+                        .filter(app => (!app.customer || !app.customer.name) && app.customerId)
+                        .map(app => String(app.customerId))
+                )
+            ];
+
+            if (missingCustomerIds.length > 0) {
+                const customers = await Customer.find({ _id: { $in: missingCustomerIds } })
+                    .select('name phone tags')
+                    .lean();
+                const customerMap = new Map(customers.map(c => [String(c._id), c]));
+
+                appointments.forEach(app => {
+                    const key = app.customerId ? String(app.customerId) : null;
+                    if (key && (!app.customer || !app.customer.name)) {
+                        const info = customerMap.get(key);
+                        if (info) {
+                            app.customer = {
+                                _id: info._id,
+                                name: info.name,
+                                phone: info.phone,
+                                interestedServices: Array.isArray(info.tags) ? info.tags : []
+                            };
+                        }
+                    }
+                    delete app.customerId;
+                    if (!app.interestedServices || app.interestedServices.length === 0) {
+                        app.interestedServices = Array.isArray(app.customer?.interestedServices) ? app.customer.interestedServices : [];
+                    }
+                });
+            } else {
+                appointments.forEach(app => {
+                    delete app.customerId;
+                    if (!app.interestedServices || app.interestedServices.length === 0) {
+                        app.interestedServices = Array.isArray(app.customer?.interestedServices) ? app.customer.interestedServices : [];
+                    }
+                });
+            }
+        }
+
         return JSON.parse(JSON.stringify(appointments));
     } catch (error) {
         console.error('Lỗi trong dataAppointment:', error);

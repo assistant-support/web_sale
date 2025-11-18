@@ -600,15 +600,15 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                 deletedCustomerPhotoIds.forEach(id => formData.append('deletedCustomerPhotoIds', id));
             }
             
-        
+           
             await runFormAction(updateServiceDetailAction, [null, formData], {
                 successMessage: 'Cập nhật đơn thành công!',
                 errorMessage: (err) => {
-                   
+                    console.error('❌ [onSubmit] Update failed:', err);
                     return err?.error || "Cập nhật thất bại.";
                 },
                 onSuccess: (res) => {
-        
+                   
                     handleSuccess();
                 },
             });

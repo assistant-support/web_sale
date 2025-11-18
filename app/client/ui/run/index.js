@@ -157,6 +157,15 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
 
     const totalCustomers = selectedCustomers.size;
 
+    const canManageAssignments = useMemo(() => {
+        if (!auth?.role) return false;
+        const allowedRoles = ['Sale', 'Admin Sale', 'Manager', 'Admin'];
+        const roleList = Array.isArray(auth.role) ? auth.role : [auth.role];
+        return roleList.some((role) =>
+            allowedRoles.some((allowed) => typeof role === 'string' && role.includes(allowed))
+        );
+    }, [auth]);
+
     const actionOptions = useMemo(() => {
         const baseActions = [
             { value: 'sendMessage', name: 'Gửi tin nhắn Zalo' },
@@ -164,14 +173,13 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
             { value: 'addFriend', name: 'Gửi kết bạn' },
             { value: 'workflow', name: 'Chạy theo Workflow' }
         ];
-        const canManageAssignees = ['Sale', 'Admin Sale', 'Manager', 'Admin'].some((role) => auth.role.includes(role));
-        if (canManageAssignees) {
+        if (canManageAssignments) {
             baseActions.push({ value: 'assignRole', name: 'Gán người phụ trách' });
             baseActions.push({ value: 'unassignRole', name: 'Bỏ gán người phụ trách' });
         }
         const customerActions = [];
         return !currentType ? [...baseActions, ...customerActions] : baseActions;
-    }, [currentType, auth]);
+    }, [currentType, canManageAssignments]);
 
     const isScheduleAction = useMemo(() => ['findUid', 'sendMessage', 'checkFriend', 'addFriend'].includes(actionType), [actionType]);
     const isAssignAction = useMemo(() => actionType === 'assignRole', [actionType]);
