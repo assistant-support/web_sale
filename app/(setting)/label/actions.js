@@ -130,7 +130,7 @@ export async function toggleLabelForCustomer({ labelId, pageId, conversationId, 
             // 2. Array chứa object: [{ pzl_xxx: {...} }] - đây là format mới nhưng lưu sai
             if (label.customer.length > 0 && typeof label.customer[0] === 'object' && !Array.isArray(label.customer[0])) {
                 // Trường hợp array chứa object - merge tất cả objects lại
-                
+                console.log('⚠️ [toggleLabelForCustomer] Customer là array chứa object, merge thành object');
                 label.customer.forEach((item) => {
                     if (item && typeof item === 'object') {
                         customerData = { ...customerData, ...item };
@@ -138,7 +138,7 @@ export async function toggleLabelForCustomer({ labelId, pageId, conversationId, 
                 });
             } else {
                 // Array cũ - chuyển sang object rỗng
-                
+                console.log('⚠️ [toggleLabelForCustomer] Converting old array format to new object format');
                 customerData = {};
             }
         } else if (label.customer && typeof label.customer === 'object' && !Array.isArray(label.customer)) {
@@ -198,7 +198,7 @@ export async function toggleLabelForCustomer({ labelId, pageId, conversationId, 
             });
         }
         
-       
+        
 
         // Đảm bảo lưu đúng format object, không phải array
         const updateResult = await Label.updateOne(
@@ -206,11 +206,14 @@ export async function toggleLabelForCustomer({ labelId, pageId, conversationId, 
             { $set: { customer: finalCustomerData } }
         );
         
-       
+        
         
         // Verify sau khi update
         const updatedLabel = await Label.findById(labelId);
-       
+        console.log('🔍 [toggleLabelForCustomer] Verified after update:', {
+            customerType: Array.isArray(updatedLabel.customer) ? 'array' : typeof updatedLabel.customer,
+            customer: updatedLabel.customer
+        });
 
         revalidateTag('labels');
 
@@ -232,11 +235,12 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
     }
 
     try {
-       
+      
         await dbConnect();
         const labels = await Label.find({ _id: { $in: labelIds } });
 
-      
+        console.log('📋 [getConversationIdsByLabelsAndPage] Found labels:', labels.length);
+
         if (labels.length === 0) {
             console.warn('⚠️ [getConversationIdsByLabelsAndPage] Không tìm thấy nhãn');
             return { success: false, error: 'Không tìm thấy nhãn.', conversationIds: [], conversationCustomerMap: {} };
@@ -248,7 +252,6 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
         
         labels.forEach((label, labelIndex) => {
            
-            
             // Xử lý trường hợp customer là array cũ hoặc object mới
             let customerData = {};
             if (Array.isArray(label.customer)) {
@@ -273,14 +276,12 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
                 customerData = label.customer;
             }
             
-           
+            
             
             const pageData = customerData[pageId];
             
-           
             
             if (pageData && Array.isArray(pageData.IDconversation) && Array.isArray(pageData.IDcustomer)) {
-                
                 
                 pageData.IDconversation.forEach((convId, index) => {
                     if (convId) {
@@ -290,7 +291,7 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
                         if (pageData.IDcustomer[index] !== undefined && pageData.IDcustomer[index] !== '') {
                             conversationCustomerMap[convIdStr] = String(pageData.IDcustomer[index]);
                         }
-                        
+                        console.log(`  - Conversation ${index + 1}: ${convIdStr} -> customer: ${pageData.IDcustomer[index] || 'N/A'}`);
                     }
                 });
             } else {
@@ -304,7 +305,11 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
             conversationCustomerMap // Map để có thể lấy customer_id khi gọi API
         };
         
-        
+        console.log('✅ [getConversationIdsByLabelsAndPage] Result:', {
+            conversationIdsCount: result.conversationIds.length,
+            conversationIds: result.conversationIds,
+            conversationCustomerMap: result.conversationCustomerMap
+        });
 
         return result;
     } catch (error) {

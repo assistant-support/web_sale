@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { user_data, label_data, zalo_data } from "@/data/actions/get";
-import { form_data } from '@/data/form_database/wraperdata.db'
+import { form_data, message_sources_data } from '@/data/form_database/wraperdata.db'
 import { getCombinedData } from "../actions/customer.actions";
 import checkAuthToken from "@/utils/checktoken";
 import CustomerView from './index';
@@ -10,6 +10,7 @@ import { workflow_data } from '@/data/workflow/wraperdata.db';
 import { service_data } from '@/data/services/wraperdata.db';
 import { maskPhoneNumber } from '@/function';
 import { customer_data } from '@/data/customers/wraperdata.db';
+import { area_customer_data, filter_customer_data } from '@/data/actions/get';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -19,18 +20,21 @@ export default async function Page({ searchParams }) {
     let c = await searchParams
     const user = await checkAuthToken()
     if (!user) return null
-    const [customer, initialResult, userAuth, sources, label, zalo, users, variant, running, workflow, service] = await Promise.all([
+    const [customer, initialResult, userAuth, sources, messageSources, label, zalo, users, variant, running, workflow, service, areaCustomers, filterCustomer] = await Promise.all([
         customer_data(),
         getCombinedData(c),
         user_data({ _id: user.id }),
         form_data(),
+        message_sources_data(),
         label_data(),
         zalo_data(),
         user_data({}),
         variant_data(),
         getRunningSchedulesAction(),
         workflow_data(),
-        service_data()
+        service_data(),
+        area_customer_data(),
+        filter_customer_data()
     ]);
     const reversedLabel = [...label].reverse();
     if (userAuth[0].role.includes('Sale')) {
@@ -51,6 +55,21 @@ export default async function Page({ searchParams }) {
         initialResult.total = filteredData.length;
     }
     console.log(initialResult);
+    console.log('📊 [Page] filterCustomer data:', filterCustomer);
+    console.log('📊 [Page] Số lượng mỗi tháng:', {
+        month1: filterCustomer?.month1?.length || 0,
+        month2: filterCustomer?.month2?.length || 0,
+        month3: filterCustomer?.month3?.length || 0,
+        month4: filterCustomer?.month4?.length || 0,
+        month5: filterCustomer?.month5?.length || 0,
+        month6: filterCustomer?.month6?.length || 0,
+        month7: filterCustomer?.month7?.length || 0,
+        month8: filterCustomer?.month8?.length || 0,
+        month9: filterCustomer?.month9?.length || 0,
+        month10: filterCustomer?.month10?.length || 0,
+        month11: filterCustomer?.month11?.length || 0,
+        month12: filterCustomer?.month12?.length || 0,
+    });
     
     return (
         <Suspense fallback={<PageSkeleton />}>
@@ -58,6 +77,7 @@ export default async function Page({ searchParams }) {
                 initialResult={initialResult}
                 user={userAuth}
                 sources={sources}
+                messageSources={messageSources}
                 labelData={reversedLabel}
                 formData={sources}
                 zaloData={zalo}
@@ -68,6 +88,8 @@ export default async function Page({ searchParams }) {
                 workflow={workflow}
                 service={service}
                 customer={customer}
+                areaCustomers={areaCustomers || []}
+                filterCustomer={filterCustomer || {}}
             />
         </Suspense>
     );

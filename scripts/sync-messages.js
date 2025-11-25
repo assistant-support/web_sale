@@ -24,7 +24,7 @@ function checkMessageSync() {
         });
     });
     
-    console.log('📋 Sidebar messages:', sidebarMessages);
+   
     
     // Lấy thông tin từ chat area
     const chatMessages = [];
@@ -45,16 +45,16 @@ function checkMessageSync() {
         });
     });
     
-    console.log('💬 Chat messages:', chatMessages);
+    // console.log('💬 Chat messages:', chatMessages);
     
     // So sánh tin nhắn mới nhất
     if (sidebarMessages.length > 0 && chatMessages.length > 0) {
         const latestSidebar = sidebarMessages[0]; // Tin nhắn mới nhất trong sidebar
         const latestChat = chatMessages[chatMessages.length - 1]; // Tin nhắn mới nhất trong chat
         
-        console.log('🔍 So sánh:');
-        console.log('  Sidebar latest:', latestSidebar.snippet, latestSidebar.time);
-        console.log('  Chat latest:', latestChat.content, latestChat.time);
+        // console.log('🔍 So sánh:');
+        // console.log('  Sidebar latest:', latestSidebar.snippet, latestSidebar.time);
+        // console.log('  Chat latest:', latestChat.content, latestChat.time);
         
         if (latestSidebar.snippet !== latestChat.content) {
             console.log('❌ KHÔNG ĐỒNG BỘ! Tin nhắn mới nhất không khớp');
@@ -128,8 +128,7 @@ function testSendMessage(message = 'Test message from script') {
 
 // Hàm monitor tin nhắn realtime
 function monitorRealtimeMessages() {
-    console.log('👁️ Bắt đầu monitor tin nhắn realtime...');
-    
+   
     let messageCount = 0;
     
     // Monitor DOM changes
@@ -173,8 +172,7 @@ function monitorRealtimeMessages() {
 
 // Hàm debug toàn bộ
 function debugChatSync() {
-    console.log('🐛 === DEBUG CHAT SYNC ===');
-    
+   
     // 1. Kiểm tra kết nối
     const isConnected = checkSocketConnection();
     console.log('1. Socket connection:', isConnected ? '✅' : '❌');

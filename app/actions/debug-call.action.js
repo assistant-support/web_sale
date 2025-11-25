@@ -7,8 +7,7 @@ import Call from '@/models/call.model';
 
 export async function debugSpecificCall(callId) {
     try {
-        
-        
+      
         const session = await checkAuthToken();
         if (!session?.id) {
             return { success: false, error: 'Unauthorized' };
@@ -18,7 +17,7 @@ export async function debugSpecificCall(callId) {
 
         // 1. Get call data
         const call = await Call.findById(callId).populate({ path: 'user', select: 'name role' }).lean();
-      
+       
         
         if (!call) {
             return { success: false, error: 'Call not found' };
@@ -29,7 +28,7 @@ export async function debugSpecificCall(callId) {
         const isOwner = String(call.user?._id || call.user) === String(session.id);
         const hasPermission = isAdmin || isOwner;
         
-        
+       
 
         if (!hasPermission) {
             return { success: false, error: 'Access denied' };
@@ -39,8 +38,7 @@ export async function debugSpecificCall(callId) {
         const drive = await getDriveClient();
         const fileId = call.file;
         
-        
-        
+       
         // Test metadata access
         const metaRes = await drive.files.get({
             fileId,
@@ -48,7 +46,7 @@ export async function debugSpecificCall(callId) {
             supportsAllDrives: true 
         });
         
-        
+        console.log('🔍 [debugSpecificCall] Drive metadata:', metaRes.data);
         
         // Test file access (without downloading)
         const fileRes = await drive.files.get({
@@ -57,7 +55,7 @@ export async function debugSpecificCall(callId) {
             supportsAllDrives: true
         });
         
-      
+        console.log('🔍 [debugSpecificCall] Drive file access:', fileRes.data);
 
         return {
             success: true,

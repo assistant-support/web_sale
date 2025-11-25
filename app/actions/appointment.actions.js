@@ -84,7 +84,8 @@ export async function createAppointmentAction(prevState, formData) {
             appointmentId: newAppointment._id.toString(),
             customerId: customerId.toString(),
         });
-       
+        console.log(`[Agenda] Đã lên lịch nhắc hẹn (1 ngày) cho Appointment: ${newAppointment._id} vào lúc: ${scheduledTime1Day}`);
+
         // 2. Nếu là lịch phẫu thuật, đặt thêm lịch gửi dặn dò (trước 3 ngày)
         if (appointmentType === 'surgery') {
             const remindAt3Days = new Date(apptTime - 3 * 24 * 60 * 60 * 1000);
@@ -97,7 +98,7 @@ export async function createAppointmentAction(prevState, formData) {
                 appointmentId: newAppointment._id.toString(),
                 customerId: customerId.toString(),
             });
-            
+            console.log(`[Agenda] Đã lên lịch gửi dặn dò (3 ngày) cho Appointment: ${newAppointment._id} vào lúc: ${scheduledTime3Days}`);
         }
 
         // Cập nhật Customer

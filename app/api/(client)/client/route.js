@@ -49,7 +49,7 @@ async function findNextAvailableZaloAccount() {
     const selectedAccount = allAccounts[currentIndex];
 
     if (selectedAccount.rateLimitPerHour > 0 && selectedAccount.rateLimitPerDay > 0) {
-      
+      console.log(`[Zalo Finder] Đã tìm thấy tài khoản hợp lệ: ${selectedAccount.name} tại chỉ số ${currentIndex}`);
       await Setting.updateOne(
         { key: ZALO_ROTATION_KEY },
         { $set: { value: currentIndex } },
@@ -57,11 +57,11 @@ async function findNextAvailableZaloAccount() {
       );
       return selectedAccount;
     } else {
-      
+      console.log(`[Zalo Finder] Tài khoản ${selectedAccount.name} bị chặn (rate limit = 0), thử tài khoản tiếp theo.`);
     }
   }
 
-  
+  console.error("[Zalo Finder] Không tìm thấy tài khoản Zalo hợp lệ sau các lần thử.");
   return null;
 }
 
@@ -70,7 +70,7 @@ async function findNextAvailableZaloAccount() {
 
 export async function POST(req) {
   try {
-    
+    // console.log('🚩Đi qua API POST /api/(client)/client (tạo khách hàng)');
     await connectDB();
     let selectedZalo = await findNextAvailableZaloAccount();
     if (!selectedZalo) {
@@ -95,10 +95,22 @@ export async function POST(req) {
     const doc = await Customer.create({
       name: data?.name, bd: data?.bd, email: data?.email, phone, nameparent: data?.nameparent, area: data?.area, source: data?.source, roles: selectedZalo.roles || [],
     });
+    console.log(`[Create Customer] Đã tạo khách hàng mới: ${String(doc._id)} với SĐT: ${phone}`);
+    
+    // Cập nhật Fillter_customer nếu có bd
+    if (data?.bd) {
+      const birthDate = new Date(data.bd);
+      if (!isNaN(birthDate.getTime())) {
+        const { updateFilterCustomer } = await import('@/utils/updateFilterCustomer');
+        updateFilterCustomer(doc._id, birthDate, null).catch(err => {
+          console.error('[API client/create] Lỗi khi cập nhật Fillter_customer:', err);
+        });
+      }
+    }
     
     // Gán tự động theo dịch vụ (nếu có)
     try {
-      
+      // console.log('🚩Gọi autoAssignForCustomer từ API client/create');
       await autoAssignForCustomer(doc._id, { serviceId: data?.service });
     } catch (e) {
       console.error('[API client/create] Auto-assign tĩnh lỗi:', e?.message || e);
@@ -140,6 +152,7 @@ export async function POST(req) {
 
         // Nếu tài khoản Zalo ngừng hoạt động, thử với tài khoản khác
         if (!findUidResponse.status && findUidResponse.message?.includes('ngừng hoạt động')) {
+          console.log(`[BG] ⚠️ Tài khoản Zalo ${selectedZalo.name} (${selectedZalo.uid}) đã ngừng hoạt động. Đang thử với tài khoản khác...`);
           
           // Tìm tài khoản Zalo khác (bỏ qua tài khoản hiện tại)
           const allAccounts = await ZaloAccount.find({ _id: { $ne: selectedZalo._id } }).sort({ _id: 1 }).lean();
@@ -147,6 +160,7 @@ export async function POST(req) {
           
           for (const retryZalo of allAccounts) {
             if (retryZalo.rateLimitPerHour > 0 && retryZalo.rateLimitPerDay > 0) {
+              console.log(`[BG] 🔄 Thử lại với tài khoản Zalo: ${retryZalo.name} (${retryZalo.uid})`);
               
               findUidResponse = await actionZalo({
                 phone, uid: retryZalo.uid, actionType: "findUid",
@@ -156,7 +170,8 @@ export async function POST(req) {
                 // Retry thành công - XÓA LOG ĐẦU TIÊN (thất bại) và chỉ giữ log thành công
                 if (firstLogId) {
                   await Logs.deleteOne({ _id: firstLogId });
-                  }
+                  console.log(`[BG] 🗑️ Đã xóa log thất bại đầu tiên (ID: ${firstLogId}) vì retry thành công`);
+                }
                 
                 // Log retry thành công
                 await Logs.create({
@@ -178,7 +193,7 @@ export async function POST(req) {
                 selectedZalo = retryZalo;
                 findUidStatus = "thành công (retry)";
                 retrySuccess = true;
-               
+                console.log(`[BG] ✅ Retry thành công với tài khoản: ${retryZalo.name}`);
                 break;
               } else {
                 // Retry thất bại - log lại nhưng không xóa log đầu tiên
@@ -219,7 +234,8 @@ export async function POST(req) {
             { $set: { zaloavt: raw?.data?.avatar || null, zaloname: raw?.data?.zalo_name || null, }, $push: { uid: { zalo: selectedZalo._id, uid: normalizedUid } } }
           );
           doc.zaloname = raw?.data?.zalo_name || "";
-         
+          console.log(`[BG] Đã cập nhật UID (${normalizedUid}) cho KH: ${String(customerId)}`);
+
           renameStatus = "thất bại";
           try {
             const form = await Form.findById(doc.source).select('name').lean();
@@ -228,7 +244,8 @@ export async function POST(req) {
             const renameResponse = await actionZalo({
               uid: selectedZalo.uid, uidPerson: normalizedUid, actionType: 'tag', message: newZaloName, phone: phone
             });
-            
+            console.log(renameResponse, 'Gợi nhớ ', newZaloName);
+
             // --- Log cho hành động tag --- (Lưu ý: type 'tag' không có trong enum, có thể cần cập nhật model)
             await Logs.create({
               message: newZaloName,

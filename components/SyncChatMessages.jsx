@@ -50,6 +50,34 @@ const normalizePancakeMessage = (raw, pageId) => {
     // Handle image attachments
     const imageAtts = atts.filter((a) => a?.type === 'photo' && a?.url);
     if (imageAtts.length > 0) {
+        // Kiểm tra xem có text kèm theo không
+        let text =
+            typeof raw.original_message === 'string' && raw.original_message.trim().length > 0
+                ? raw.original_message.trim()
+                : htmlToPlainText(raw.message || '');
+        
+        const hasText = text && text.trim().length > 0;
+        
+        // Nếu có cả ảnh và text, trả về type 'images_with_text'
+        if (hasText) {
+            return {
+                id: raw.id,
+                inserted_at: ts,
+                senderType,
+                status: raw.status || 'sent',
+                content: {
+                    type: 'images_with_text',
+                    images: imageAtts.map((a) => ({
+                        url: a.url,
+                        width: a?.image_data?.width,
+                        height: a?.image_data?.height,
+                    })),
+                    text: text.trim(),
+                },
+            };
+        }
+        
+        // Chỉ có ảnh, không có text
         return {
             id: raw.id,
             inserted_at: ts,
@@ -118,8 +146,62 @@ const fmtDateTimeVN = (dateLike) => {
     }
 };
 
+// Helper function để convert URLs trong text thành clickable links
+const renderTextWithLinks = (text, isFromPage = false) => {
+    if (!text || typeof text !== 'string') return text;
+    
+    // Regex để detect URLs (http://, https://, www.)
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = urlRegex.exec(text)) !== null) {
+        // Thêm text trước URL
+        if (match.index > lastIndex) {
+            parts.push(text.substring(lastIndex, match.index));
+        }
+        
+        // Xử lý URL
+        let url = match[0];
+        // Nếu là www. thì thêm https://
+        if (url.startsWith('www.')) {
+            url = 'https://' + url;
+        }
+        
+        // Style khác nhau cho tin nhắn từ page (nền xanh) và từ customer (nền trắng)
+        const linkClassName = isFromPage 
+            ? "text-blue-100 hover:text-white underline break-all font-medium"
+            : "text-blue-600 hover:text-blue-800 underline break-all";
+        
+        // Thêm link
+        parts.push(
+            <a
+                key={match.index}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClassName}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {match[0]}
+            </a>
+        );
+        
+        lastIndex = match.index + match[0].length;
+    }
+    
+    // Thêm phần text còn lại
+    if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+    }
+    
+    // Nếu không có URL nào, trả về text gốc
+    return parts.length > 0 ? parts : text;
+};
+
 // Message Content Component
-const MessageContent = ({ content }) => {
+const MessageContent = ({ content, isFromPage = false }) => {
     if (!content) {
         return (
             <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
@@ -132,7 +214,7 @@ const MessageContent = ({ content }) => {
         case 'text':
             return (
                 <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
-                    {content.content}
+                    {renderTextWithLinks(content.content, isFromPage)}
                 </h5>
             );
         case 'images':
@@ -148,6 +230,30 @@ const MessageContent = ({ content }) => {
                             />
                         </a>
                     ))}
+                </div>
+            );
+        case 'images_with_text':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {/* Hiển thị text trước */}
+                    {content.text && (
+                        <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
+                            {renderTextWithLinks(content.text, isFromPage)}
+                        </h5>
+                    )}
+                    {/* Hiển thị ảnh sau */}
+                    <div className="flex flex-wrap gap-2">
+                        {content.images.map((img, i) => (
+                            <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                                <img
+                                    src={img.url}
+                                    alt={`Attachment ${i + 1}`}
+                                    className="max-w-[240px] max-h-[240px] rounded-lg object-cover"
+                                    loading="lazy"
+                                />
+                            </a>
+                        ))}
+                    </div>
                 </div>
             );
         case 'files':
@@ -206,10 +312,11 @@ export default function SyncChatMessages({
     // Socket connection and event handlers
     useEffect(() => {
         if (!pageConfig?.id || !token) {
-          
+            console.log('[SyncChatMessages] Missing pageConfig or token');
             return;
         }
 
+        console.log('[SyncChatMessages] Initializing socket connection to:', SOCKET_URL);
         
         const socket = io(SOCKET_URL, {
             path: '/socket.io',
@@ -223,12 +330,12 @@ export default function SyncChatMessages({
 
         // Connection events
         socket.on('connect', () => {
-          
+            console.log('[SyncChatMessages] ✅ Connected to socket');
             setIsConnected(true);
         });
 
         socket.on('disconnect', (reason) => {
-           
+            console.log('[SyncChatMessages] ❌ Disconnected:', reason);
             setIsConnected(false);
         });
 
@@ -239,7 +346,8 @@ export default function SyncChatMessages({
 
         // Message events
         socket.on('msg:new', (rawMessage) => {
-           
+            console.log('[SyncChatMessages] 📨 New message received:', rawMessage);
+            
             const normalizedMessage = normalizePancakeMessage(rawMessage, pageConfig.id);
             const current = selectedConvoRef.current;
             const targetId = rawMessage?.conversationId || rawMessage?.conversation?.id;
@@ -255,10 +363,12 @@ export default function SyncChatMessages({
                 setMessages((prev) => {
                     // Avoid duplicates
                     if (prev.some(m => m.id === normalizedMessage.id)) {
+                        console.log('[SyncChatMessages] Message already exists, skipping');
                         return prev;
                     }
                     
                     const newMessages = sortAscByTime([...prev, normalizedMessage]);
+                    console.log('[SyncChatMessages] ✅ Added message to current conversation. Total:', newMessages.length);
                     
                     // Auto scroll to bottom
                     setTimeout(() => {
@@ -270,7 +380,8 @@ export default function SyncChatMessages({
             } else {
                 // Increment new message count for other conversations
                 setNewMessageCount(prev => prev + 1);
-               }
+                console.log('[SyncChatMessages] New message from other conversation, count:', newMessageCount + 1);
+            }
 
             // Update conversations list
             if (targetId) {
@@ -307,7 +418,7 @@ export default function SyncChatMessages({
 
         // Conversation events
         socket.on('conv:patch', (patch) => {
-           
+            console.log('[SyncChatMessages] 📋 Conversation patch:', patch);
             if (patch?.pageId && String(patch.pageId) !== String(pageConfig.id)) return;
             
             setConversations((prev) => {
@@ -328,26 +439,27 @@ export default function SyncChatMessages({
         });
 
         // Initial data load
+        console.log('[SyncChatMessages] Loading initial conversations...');
         socket.emit('conv:get', { 
             pageId: pageConfig.id, 
             token, 
             current_count: 0 
         }, (res) => {
-           
+            console.log('[SyncChatMessages] conv:get response:', res);
             if (res?.ok && Array.isArray(res.items)) {
                 const incoming = res.items.filter(c => c?.type === 'INBOX');
                 setConversations(prev => {
                     const merged = [...prev.filter(c => !incoming.some(i => i.id === c.id)), ...incoming];
                     return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
                 });
-               
+                console.log('[SyncChatMessages] Loaded conversations:', incoming.length);
             } else if (res?.error) {
                 console.error('[SyncChatMessages] conv:get error:', res.error);
             }
         });
 
         return () => {
-           
+            console.log('[SyncChatMessages] Cleaning up socket connection');
             if (selectedConvoRef.current?.id) {
                 try {
                     socket.emit('msg:watchStop', {
@@ -369,11 +481,12 @@ export default function SyncChatMessages({
         // Prevent too frequent refreshes
         const now = Date.now();
         if (!forceRefresh && now - lastRefreshTimeRef.current < 2000) {
-           
+            console.log('[SyncChatMessages] Refresh too frequent, skipping');
             return;
         }
         lastRefreshTimeRef.current = now;
 
+        console.log('[SyncChatMessages] Loading messages for conversation:', conversationId, forceRefresh ? '(forced)' : '');
         setIsLoadingMessages(true);
         
         try {
@@ -384,14 +497,15 @@ export default function SyncChatMessages({
                 customerId: null,
                 count: 0 // Always get latest messages
             }, (res) => {
-               
+                console.log('[SyncChatMessages] msg:get response:', res);
                 if (res?.ok && Array.isArray(res.items)) {
                     const normalizedMessages = res.items.map(msg => 
                         normalizePancakeMessage(msg, pageConfig.id)
                     );
                     const sortedMessages = sortAscByTime(normalizedMessages);
                     setMessages(sortedMessages);
-                   
+                    console.log('[SyncChatMessages] ✅ Loaded messages:', sortedMessages.length);
+                    
                     // Auto scroll to bottom after loading
                     setTimeout(() => {
                         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -413,6 +527,7 @@ export default function SyncChatMessages({
     const startWatching = useCallback((conversationId) => {
         if (!socketRef.current || !pageConfig?.id || !token) return;
 
+        console.log('[SyncChatMessages] Starting to watch messages for:', conversationId);
         socketRef.current.emit('msg:watchStart', {
             pageId: pageConfig.id,
             token,
@@ -421,7 +536,7 @@ export default function SyncChatMessages({
             count: 20,
             intervalMs: 1500 // Faster polling for better sync
         }, (res) => {
-           
+            console.log('[SyncChatMessages] msg:watchStart response:', res);
             if (res?.ok) {
                 console.log('[SyncChatMessages] ✅ Started watching messages');
             } else if (res?.error) {
@@ -435,6 +550,7 @@ export default function SyncChatMessages({
     const stopWatching = useCallback((conversationId) => {
         if (!socketRef.current || !pageConfig?.id) return;
 
+        console.log('[SyncChatMessages] Stopping to watch messages for:', conversationId);
         socketRef.current.emit('msg:watchStop', {
             pageId: pageConfig.id,
             conversationId
@@ -443,6 +559,7 @@ export default function SyncChatMessages({
 
     // Handle conversation selection
     const handleSelectConversation = useCallback(async (conversation) => {
+        console.log('[SyncChatMessages] Selecting conversation:', conversation);
         
         if (selectedConvo?.id) {
             stopWatching(selectedConvo.id);
@@ -462,7 +579,8 @@ export default function SyncChatMessages({
     const handleRefreshMessages = useCallback(() => {
         if (!selectedConvo?.id) return;
         
-       setIsRefreshing(true);
+        console.log('[SyncChatMessages] Manual refresh requested');
+        setIsRefreshing(true);
         loadMessages(selectedConvo.id, true).finally(() => {
             setIsRefreshing(false);
         });
@@ -473,7 +591,8 @@ export default function SyncChatMessages({
         const message = formData.get('message');
         if (!message?.trim() || !selectedConvo?.id) return;
 
-       
+        console.log('[SyncChatMessages] Sending message:', message.trim());
+        
         // Add optimistic message
         const tempMessageId = Date.now().toString();
         const tempMessage = {
@@ -649,7 +768,7 @@ export default function SyncChatMessages({
                                                     : 'bg-white text-gray-800'
                                             }`}
                                         >
-                                            <MessageContent content={msg.content} />
+                                            <MessageContent content={msg.content} isFromPage={isFromPage} />
                                             <div
                                                 className={`text-xs mt-1 ${
                                                     isFromPage

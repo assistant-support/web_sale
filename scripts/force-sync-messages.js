@@ -65,16 +65,15 @@ function checkSyncStatus() {
         return { content, time, element: item };
     });
     
-    console.log('📋 Sidebar messages:', sidebarMessages.slice(0, 3));
-    console.log('💬 Chat messages:', chatMessages.slice(-3));
+    
     
     if (sidebarMessages.length > 0 && chatMessages.length > 0) {
         const latestSidebar = sidebarMessages[0];
         const latestChat = chatMessages[chatMessages.length - 1];
         
-        console.log('🔍 Latest comparison:');
-        console.log('  Sidebar:', latestSidebar.snippet, latestSidebar.time);
-        console.log('  Chat:', latestChat.content, latestChat.time);
+        // console.log('🔍 Latest comparison:');
+        // console.log('  Sidebar:', latestSidebar.snippet, latestSidebar.time);
+        // console.log('  Chat:', latestChat.content, latestChat.time);
         
         if (latestSidebar.snippet === latestChat.content) {
             console.log('✅ SYNCED - Messages are in sync');
@@ -90,8 +89,7 @@ function checkSyncStatus() {
 
 // Hàm auto-sync mỗi 3 giây
 function startAutoSync() {
-    console.log('⏰ Starting auto-sync every 3 seconds...');
-    
+  
     const interval = setInterval(() => {
         const isSynced = checkSyncStatus();
         if (!isSynced) {
@@ -105,7 +103,7 @@ function startAutoSync() {
 
 // Hàm test gửi tin nhắn
 function testSendMessage(message = 'Test sync message') {
-    console.log('📤 Testing send message:', message);
+   
     
     const messageInput = document.querySelector('input[name="message"]');
     const sendButton = document.querySelector('button[type="submit"]');
@@ -158,7 +156,7 @@ function debugAll() {
 
 // Hàm fix ngay lập tức
 function quickFix() {
-    console.log('⚡ QUICK FIX - Force sync now...');
+  
     
     // 1. Force reload messages
     forceReloadMessages();
@@ -183,13 +181,7 @@ window.testSendMessage = testSendMessage;
 window.debugAll = debugAll;
 window.quickFix = quickFix;
 
-console.log('🔧 Force sync functions loaded:');
-console.log('  - quickFix() - Fix ngay lập tức');
-console.log('  - forceReloadMessages() - Reload messages');
-console.log('  - checkSyncStatus() - Kiểm tra sync');
-console.log('  - startAutoSync() - Auto sync');
-console.log('  - debugAll() - Debug toàn bộ');
+
 
 // Auto-run quick fix
-console.log('⚡ Auto-running quick fix...');
 setTimeout(quickFix, 1000);

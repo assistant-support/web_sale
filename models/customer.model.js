@@ -252,6 +252,7 @@ FormSchema.pre('save', function (next) {
 FormSchema.index({ phone: 1 }, { unique: true });
 FormSchema.index({ source: 1 });
 FormSchema.index({ tags: 1 });
+FormSchema.index({ sourceDetails: 1 }); // Index cho lọc nguồn từ sourceDetails
 
 const Customer = models.customer || model('customer', FormSchema);
 export default Customer;

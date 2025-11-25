@@ -23,7 +23,7 @@ function TableSkeleton() {
     );
 }
 
-export default function CustomerView({ customer, c, running, initialResult, user, sources, labelData, formData, zaloData, users, variant, workflow, service }) {
+export default function CustomerView({ customer, c, running, initialResult, user, sources, messageSources = [], labelData, formData, zaloData, users, variant, workflow, service, areaCustomers = [], filterCustomer = {} }) {
     const router = useRouter();
     const intervalRef = useRef(null);
 
@@ -133,7 +133,10 @@ export default function CustomerView({ customer, c, running, initialResult, user
                         users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
                         labels={labelData}
                         sources={sources}
+                        messageSources={messageSources}
                         service={service}
+                        areaCustomers={areaCustomers}
+                        filterCustomer={filterCustomer}
                     />
                 </>
             )}

@@ -47,7 +47,13 @@ export default function ZaloPancake({ customer }) {
             uid: latestUid,
             zaloAccountId: latestZaloAccountId,
         };
-        
+        console.log('🔍 [ZaloPancake] Preselect data:', {
+            customerName: name,
+            phones: phoneCandidates,
+            customerId: customer?._id,
+            uid: latestUid,
+            zaloAccountId: latestZaloAccountId,
+        });
         return result;
     }, [customer]);
 

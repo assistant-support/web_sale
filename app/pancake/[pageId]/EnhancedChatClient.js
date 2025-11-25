@@ -122,7 +122,22 @@ export default function EnhancedChatClient({
     // Handle sending message
     const handleSendMessage = useCallback(async (formData) => {
         const message = formData.get('message');
-        if (!message?.trim() || !selectedConvo?.id) return;
+        const messageText = message?.trim() || '';
+        
+        if (!selectedConvo?.id) return;
+        
+        // Nếu có ảnh pending, gửi ảnh kèm text
+        if (pendingImages.length > 0) {
+            await handleSendImages(messageText);
+            // Clear form
+            if (formRef.current) {
+                formRef.current.reset();
+            }
+            return;
+        }
+        
+        // Nếu không có ảnh và không có text, không làm gì
+        if (!messageText) return;
 
         const tempMessageId = Date.now().toString();
         const tempMessage = {
@@ -130,7 +145,7 @@ export default function EnhancedChatClient({
             inserted_at: new Date().toISOString(),
             senderType: 'page',
             status: 'sending',
-            content: { type: 'text', content: message.trim() }
+            content: { type: 'text', content: messageText }
         };
 
         // Add optimistic message
@@ -146,7 +161,7 @@ export default function EnhancedChatClient({
                 pageId: pageConfig.id,
                 token,
                 conversationId: selectedConvo.id,
-                message: message.trim()
+                message: messageText
             });
 
             if (result.success) {
@@ -177,21 +192,38 @@ export default function EnhancedChatClient({
         if (formRef.current) {
             formRef.current.reset();
         }
-    }, [selectedConvo?.id, pageConfig.id, token, setMessages]);
+    }, [selectedConvo?.id, pageConfig.id, token, setMessages, pendingImages.length, handleSendImages]);
 
-    // Handle image upload
-    const handleImageUpload = useCallback(async (files) => {
+    // Handle image selection - chỉ thêm vào pending, chưa gửi
+    const handleImageSelect = useCallback((files) => {
         if (!files.length || !selectedConvo?.id) return;
+        
+        const newImages = Array.from(files).map((file) => ({
+            file,
+            localId: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            url: URL.createObjectURL(file),
+        }));
+        
+        setPendingImages((prev) => [...prev, ...newImages]);
+    }, [selectedConvo?.id]);
+
+    // Handle sending images with optional text
+    const handleSendImages = useCallback(async (textMessage = '') => {
+        if (!pendingImages.length || !selectedConvo?.id) return;
 
         setIsUploadingImage(true);
         
         try {
-            for (const file of files) {
-                const uploadResult = await uploadImageToPancakeAction(file, {
+            for (const pendingImg of pendingImages) {
+                const uploadResult = await uploadImageToPancakeAction(pendingImg.file, {
                     pageId: pageConfig.id,
                     accessToken: token,
                 });
                 if (uploadResult.success && uploadResult.contentId && uploadResult.attachmentId) {
+                    // Gửi ảnh với text (chỉ gửi text cho ảnh đầu tiên để tránh lặp)
+                    const isFirstImage = pendingImages.indexOf(pendingImg) === 0;
+                    const messageToSend = isFirstImage ? textMessage : '';
+                    
                     const sendResult = await sendImageAction(
                         pageConfig.id,
                         token,
@@ -202,13 +234,13 @@ export default function EnhancedChatClient({
                             url: uploadResult.url,
                             previewUrl: uploadResult.previewUrl,
                             thumbnailUrl: uploadResult.thumbnailUrl || null,
-                            mimeType: uploadResult.mimeType || file.type,
-                            name: uploadResult.name || file.name,
-                            size: uploadResult.size ?? file.size,
+                            mimeType: uploadResult.mimeType || pendingImg.file.type,
+                            name: uploadResult.name || pendingImg.file.name,
+                            size: uploadResult.size ?? pendingImg.file.size,
                             width: uploadResult.width ?? null,
                             height: uploadResult.height ?? null,
                         },
-                        ''
+                        messageToSend
                     );
                     
                     if (!sendResult.success) {
@@ -224,7 +256,7 @@ export default function EnhancedChatClient({
             setIsUploadingImage(false);
             setPendingImages([]);
         }
-    }, [selectedConvo?.id, pageConfig.id, token]);
+    }, [pendingImages, selectedConvo?.id, pageConfig.id, token]);
 
     // Handle notification view
     const handleNotificationView = useCallback((notification) => {
@@ -392,8 +424,12 @@ export default function EnhancedChatClient({
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setPendingImages(prev => prev.filter(p => p.localId !== img.localId))}
+                                                onClick={() => {
+                                                    URL.revokeObjectURL(img.url);
+                                                    setPendingImages(prev => prev.filter(p => p.localId !== img.localId));
+                                                }}
                                                 className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5 shadow hover:bg-gray-50"
+                                                disabled={isUploadingImage}
                                             >
                                                 <X className="h-4 w-4" />
                                             </button>
@@ -419,14 +455,24 @@ export default function EnhancedChatClient({
                                     multiple
                                     className="hidden"
                                     onChange={(e) => {
-                                        const files = Array.from(e.target.files);
-                                        handleImageUpload(files);
+                                        const files = Array.from(e.target.files || []);
+                                        if (files.length > 0) {
+                                            handleImageSelect(files);
+                                        }
+                                        // Reset input để có thể chọn lại file cùng tên
+                                        e.target.value = '';
                                     }}
                                 />
 
                                 <input
                                     name="message"
-                                    placeholder={isUploadingImage ? 'Đang tải ảnh...' : 'Nhập tin nhắn...'}
+                                    placeholder={
+                                        pendingImages.length > 0 
+                                            ? 'Nhập tin nhắn kèm ảnh...' 
+                                            : isUploadingImage 
+                                                ? 'Đang tải ảnh...' 
+                                                : 'Nhập tin nhắn...'
+                                    }
                                     className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
                                     autoComplete="off"
                                     disabled={isUploadingImage}

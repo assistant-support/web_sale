@@ -76,12 +76,12 @@ const useRealtimeMessages = (pageId, token, selectedConversationId) => {
         // Kết nối events
         socket.on('connect', () => {
             setIsConnected(true);
-          
+            console.log('[RealtimeMessages] Connected to socket');
         });
 
         socket.on('disconnect', () => {
             setIsConnected(false);
-           
+            console.log('[RealtimeMessages] Disconnected from socket');
         });
 
         // Lắng nghe tin nhắn mới

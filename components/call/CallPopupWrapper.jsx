@@ -15,11 +15,11 @@ export default function CallPopupWrapper({ customer, user }) {
     useEffect(() => {
         const initializeSDK = async () => {
             try {
-               
+                console.log('[CallPopupWrapper] 🚀 Initializing SDK...');
                 await omicallSDKManager.initialize();
                 await omicallSDKManager.connect();
                 setIsInitialized(true);
-              
+                console.log('[CallPopupWrapper] ✅ SDK initialized and connected');
             } catch (error) {
                 console.error('[CallPopupWrapper] ❌ SDK initialization failed:', error);
             }

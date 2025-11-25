@@ -3,7 +3,7 @@ const nextConfig = {
     experimental: {
         instrumentationHook: true,
         serverActions: {
-            bodySizeLimit: '25mb',
+            bodySizeLimit: '500mb', // hỗ trợ upload video / file lớn hơn 25mb
         },
     },
     images: {

@@ -1,11 +1,11 @@
 // Patch trực tiếp cho ChatClient hiện tại để fix sync issue
 // Chạy trong browser console
 
-console.log('🔧 Patching ChatClient for sync fix...');
+
 
 // Hàm patch message loading
 function patchMessageLoading() {
-    console.log('📝 Patching message loading...');
+   
     
     // Tìm và patch socket event handlers
     const socket = window.socket || window.socketRef?.current;
@@ -51,7 +51,7 @@ function patchMessageLoading() {
         }, 100);
     });
     
-    console.log('✅ Message loading patched');
+  
 }
 
 // Hàm patch conversation selection
@@ -207,8 +207,7 @@ function patchRefreshButton() {
     
     if (refreshButton) {
         refreshButton.onclick = () => {
-            console.log('🔄 Manual refresh triggered');
-            
+           
             // Force reload current conversation
             const selectedConv = document.querySelector('.bg-blue-50, .border-blue-200');
             if (selectedConv) {
@@ -241,7 +240,7 @@ function applyAllPatches() {
     
     // Test patches
     setTimeout(() => {
-        console.log('🧪 Testing patches...');
+       
         const socket = window.socket || window.socketRef?.current;
         if (socket && socket.connected) {
             console.log('✅ Socket is connected and patched');
@@ -252,7 +251,7 @@ function applyAllPatches() {
 }
 
 // Auto-apply patches
-console.log('🚀 Auto-applying patches...');
+
 applyAllPatches();
 
 // Export functions
@@ -262,12 +261,3 @@ window.patchConversationSelection = patchConversationSelection;
 window.patchSocketConnection = patchSocketConnection;
 window.patchMessageDisplay = patchMessageDisplay;
 window.patchRefreshButton = patchRefreshButton;
-
-console.log('🔧 ChatClient patches loaded and applied!');
-console.log('📋 Available functions:');
-console.log('  - applyAllPatches() - Apply all patches');
-console.log('  - patchMessageLoading() - Patch message loading');
-console.log('  - patchConversationSelection() - Patch conversation selection');
-console.log('  - patchSocketConnection() - Patch socket connection');
-console.log('  - patchMessageDisplay() - Patch message display');
-console.log('  - patchRefreshButton() - Patch refresh button');

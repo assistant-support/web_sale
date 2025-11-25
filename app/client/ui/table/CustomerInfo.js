@@ -4,12 +4,13 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import './CustomerInfo.css';
 
-// --- MỚI: Import toast từ sonner ---
-import { toast } from "sonner";
+// --- Import Noti component ---
+import Noti from '@/components/(features)/(noti)/noti';
 
 // --- Icon Imports ---
-import { Loader2, ChevronsUpDown, Check, X, Upload, Image as ImageIcon } from 'lucide-react';
+import { Loader2, ChevronsUpDown, Check, X, Upload, Image as ImageIcon, Plus, Trash2, Pencil } from 'lucide-react';
 
 // --- Action & Data Function Imports ---
 import { updateCustomerInfo, syncHistoryService } from '@/app/actions/customer.actions';
@@ -18,7 +19,7 @@ import { cn } from "@/lib/utils";
 
 // --- Shadcn UI Component Imports ---
 import { Button } from "@/components/ui/button";
-import { DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -26,14 +27,27 @@ import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 
 // =============================================================
 // == COMPONENT PHỤ: SingleSelect (Chọn một giá trị - lazy load)
 // =============================================================
-function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange, isLoading, options = [] }) {
+function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange, isLoading, options = [], onDelete, onEdit }) {
     const [open, setOpen] = useState(false);
     const selectedOption = options.find(opt => opt.value === value);
+    const commandListRef = useRef(null);
+    const [deletingId, setDeletingId] = useState(null);
+
+    const handleDelete = async (areaId, areaName) => {
+        if (!onDelete) return;
+        setDeletingId(areaId);
+        try {
+            await onDelete(areaId, areaName);
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     const handleOpenChange = (newOpen) => {
         setOpen(newOpen);
@@ -41,6 +55,49 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
             onOpenChange(); // Load dữ liệu khi mở
         }
     };
+
+    // Xử lý wheel event để cho phép cuộn bằng chuột lăn
+    useEffect(() => {
+        if (!open) return;
+
+        let cleanup = null;
+
+        // Đợi một chút để element được mount
+        const timer = setTimeout(() => {
+            const element = commandListRef.current;
+            if (!element) return;
+
+            const handleWheel = (e) => {
+                const { scrollTop, scrollHeight, clientHeight } = element;
+                
+                // Nếu có thể scroll trong element
+                if (scrollHeight > clientHeight) {
+                    const isAtTop = scrollTop <= 0;
+                    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 1;
+
+                    // Nếu đang ở đầu và cuộn lên, hoặc ở cuối và cuộn xuống
+                    if ((isAtTop && e.deltaY < 0) || (isAtBottom && e.deltaY > 0)) {
+                        // Cho phép scroll page nếu đã đến đầu/cuối
+                        return;
+                    }
+                    
+                    // Ngăn scroll page khi đang scroll trong element
+                    e.stopPropagation();
+                }
+            };
+
+            element.addEventListener('wheel', handleWheel, { passive: true });
+
+            cleanup = () => {
+                element.removeEventListener('wheel', handleWheel);
+            };
+        }, 100);
+
+        return () => {
+            clearTimeout(timer);
+            if (cleanup) cleanup();
+        };
+    }, [open]);
 
     return (
         <Popover open={open} onOpenChange={handleOpenChange}>
@@ -50,10 +107,31 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
                     <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                <Command>
-                    <CommandInput placeholder="Tìm kiếm..." />
-                    <CommandList>
+            <PopoverContent 
+                className="w-[--radix-popover-trigger-width] p-0"
+                style={{ maxHeight: '150px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            >
+                <Command className="flex flex-col h-full">
+                    <CommandInput placeholder="Tìm kiếm..." className="flex-shrink-0" />
+                    <div 
+                        ref={commandListRef}
+                        style={{
+                            maxHeight: '150px',
+                            height: '150px',
+                            overflowY: 'auto',
+                            overflowX: 'hidden',
+                            WebkitOverflowScrolling: 'touch'
+                        }}
+                        className="area-select-scroll"
+                    >
+                    <CommandList 
+                        className={cn("flex-1")}
+                        style={{ 
+                            overflow: 'visible',
+                            maxHeight: 'none',
+                            height: 'auto'
+                        }}
+                    >
                         {isLoading ? (
                             <div className="p-4 text-center">
                                 <Loader2 className="h-4 w-4 animate-spin mx-auto" />
@@ -70,15 +148,54 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
                                                 onChange(option.value === value ? '' : option.value);
                                                 setOpen(false);
                                             }}
+                                            className="flex items-center justify-between group"
                                         >
-                                            <Check className={cn("mr-2 h-4 w-4", value === option.value ? "opacity-100" : "opacity-0")} />
-                                            {option.label}
+                                            <div className="flex items-center flex-1">
+                                                <Check className={cn("mr-2 h-4 w-4", value === option.value ? "opacity-100" : "opacity-0")} />
+                                                {option.label}
+                                            </div>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                {onEdit && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 hover:bg-blue-50 hover:text-blue-600"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onEdit(option.value, option.label, option.type_area);
+                                                        }}
+                                                    >
+                                                        <Pencil className="h-3 w-3" />
+                                                    </Button>
+                                                )}
+                                                {onDelete && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDelete(option.value, option.label);
+                                                        }}
+                                                        disabled={deletingId === option.value}
+                                                    >
+                                                        {deletingId === option.value ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <Trash2 className="h-3 w-3" />
+                                                        )}
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </CommandItem>
                                     ))}
                                 </CommandGroup>
                             </>
                         )}
                     </CommandList>
+                    </div>
                 </Command>
             </PopoverContent>
         </Popover>
@@ -158,6 +275,23 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
     const [areaCustomerOptions, setAreaCustomerOptions] = useState([]);
     const [isLoadingAreaCustomers, setIsLoadingAreaCustomers] = useState(false);
     const [selectedAreaType, setSelectedAreaType] = useState(null); // Lưu type_area của khu vực được chọn
+    const [isAddAreaDialogOpen, setIsAddAreaDialogOpen] = useState(false);
+    const [isAddingArea, setIsAddingArea] = useState(false);
+    const [newAreaName, setNewAreaName] = useState('');
+    const [newAreaType, setNewAreaType] = useState('');
+    const [isEditAreaDialogOpen, setIsEditAreaDialogOpen] = useState(false);
+    const [isEditingArea, setIsEditingArea] = useState(false);
+    const [editingAreaId, setEditingAreaId] = useState(null);
+    const [editAreaName, setEditAreaName] = useState('');
+    const [editAreaType, setEditAreaType] = useState('');
+    const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
+
+    // Danh sách loại khu vực
+    const areaTypeOptions = [
+        { value: 'lân cận HCM', label: 'lân cận HCM' },
+        { value: 'TP HCM', label: 'TP HCM' },
+        { value: 'xa HCM', label: 'xa HCM' }
+    ];
 
     const [historyService, setHistoryService] = useState(customer.history_service || {});
     const [isHistorySyncing, setIsHistorySyncing] = useState(false);
@@ -240,12 +374,14 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
         if (hasServiceDetails) {
             const syncHistory = async () => {
                 try {
+                    console.log('🔄 [CustomerInfo] Bắt đầu sync history_service cho customer:', customer._id);
                     setIsHistorySyncing(true);
                     const result = await syncHistoryService(customer._id);
-                     if (isMounted) {
+                    console.log('📦 [CustomerInfo] Kết quả sync:', result);
+                    if (isMounted) {
                         if (result?.success && result?.history_service) {
                             setHistoryService(result.history_service);
-                            
+                            console.log('✅ [CustomerInfo] Đã sync và cập nhật history_service:', result.history_service);
                         } else if (result?.error) {
                             console.error('❌ [CustomerInfo] Lỗi từ syncHistoryService:', result.error);
                         }
@@ -392,15 +528,21 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
     // Load danh sách khu vực khách hàng
     const loadAreaCustomersData = async () => {
         if (areaCustomerOptions.length > 0) {
-           
+            console.log('✅ [loadAreaCustomersData] Đã có dữ liệu, không load lại');
             return; // Đã load rồi thì không load lại
         }
         
         try {
-           
+            console.log('🔄 [loadAreaCustomersData] Bắt đầu load dữ liệu...');
             setIsLoadingAreaCustomers(true);
             const areaCustomers = await area_customer_data();
-           
+            console.log('📦 [loadAreaCustomersData] Dữ liệu nhận được:', {
+                type: typeof areaCustomers,
+                isArray: Array.isArray(areaCustomers),
+                data: areaCustomers,
+                length: areaCustomers?.length,
+                sample: areaCustomers?.[0]
+            });
             
             if (areaCustomers) {
                 // Xử lý cả trường hợp là array hoặc không phải array
@@ -416,7 +558,7 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                             type_area: area.type_area || null // Lưu type_area vào option
                         }));
                     
-                    
+                    console.log('✅ [loadAreaCustomersData] Options đã tạo:', options);
                     setAreaCustomerOptions(options);
                     
                     // Nếu đã có giá trị được chọn, tìm type_area tương ứng
@@ -439,15 +581,15 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                     }
                 } else {
                     console.warn('⚠️ [loadAreaCustomersData] Mảng dữ liệu rỗng');
-                    toast.error('Không có dữ liệu khu vực');
+                    setNotification({ open: true, status: false, mes: 'Không có dữ liệu khu vực' });
                 }
             } else {
                 console.warn('⚠️ [loadAreaCustomersData] Dữ liệu trả về null/undefined');
-                toast.error('Không thể tải danh sách khu vực');
+                setNotification({ open: true, status: false, mes: 'Không thể tải danh sách khu vực' });
             }
         } catch (error) {
             console.error('❌ [loadAreaCustomersData] Lỗi khi tải danh sách khu vực khách hàng:', error);
-            toast.error('Không thể tải danh sách khu vực: ' + (error?.message || 'Lỗi không xác định'));
+            setNotification({ open: true, status: false, mes: 'Không thể tải danh sách khu vực: ' + (error?.message || 'Lỗi không xác định') });
         } finally {
             setIsLoadingAreaCustomers(false);
         }
@@ -456,6 +598,238 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
     // Load danh sách khu vực khách hàng khi user mở Select Menu
     const handleLoadAreaCustomers = () => {
         loadAreaCustomersData();
+    };
+
+    // Xử lý thêm khu vực mới
+    const handleAddArea = async () => {
+        if (!newAreaName || !newAreaName.trim()) {
+            setNotification({ open: true, status: false, mes: 'Vui lòng nhập tên khu vực' });
+            return;
+        }
+
+        setIsAddingArea(true);
+        try {
+            console.log('🔄 [handleAddArea] Bắt đầu thêm khu vực:', newAreaName.trim());
+            
+            // Cookies sẽ được gửi tự động với fetch request
+            const response = await fetch('/api/area_customer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include', // Đảm bảo cookies được gửi
+                body: JSON.stringify({
+                    name: newAreaName.trim(),
+                    type_area: newAreaType.trim() || null
+                })
+            });
+
+            console.log('📡 [handleAddArea] Response status:', response.status, 'ok:', response.ok);
+
+            // Parse response dù có lỗi hay không để lấy thông báo từ server
+            let result;
+            try {
+                const responseText = await response.text();
+                console.log('📦 [handleAddArea] Response text:', responseText);
+                result = JSON.parse(responseText);
+                console.log('📦 [handleAddArea] Parsed result:', result);
+                console.log('📦 [handleAddArea] result.status:', result?.status);
+                console.log('📦 [handleAddArea] result.mes:', result?.mes);
+            } catch (parseError) {
+                console.error('❌ [handleAddArea] API Error - Cannot parse JSON:', parseError);
+                setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi thêm khu vực' });
+                return;
+            }
+
+            // Kiểm tra response.ok hoặc result.status
+            if (!response.ok || result?.status === false) {
+                // Hiển thị thông báo lỗi từ server (ví dụ: "Tên khu vực đã có")
+                const errorMessage = result?.mes || result?.message || 'Thêm khu vực thất bại';
+                console.log('❌ [handleAddArea] Đang hiển thị thông báo lỗi:', errorMessage);
+                console.log('❌ [handleAddArea] response.ok:', response.ok, 'result.status:', result?.status);
+                
+                // Hiển thị Noti
+                setNotification({ open: true, status: false, mes: errorMessage });
+                console.log('✅ [handleAddArea] Đã gọi setNotification');
+                return;
+            }
+
+            // Thành công
+            console.log('✅ [handleAddArea] Thêm khu vực thành công:', result);
+            setNotification({ open: true, status: true, mes: result.mes || 'Thêm khu vực thành công' });
+            
+            // Reset form
+            setNewAreaName('');
+            setNewAreaType('');
+            setIsAddAreaDialogOpen(false);
+            
+            // Reload danh sách khu vực
+            setAreaCustomerOptions([]); // Reset để force reload
+            await loadAreaCustomersData();
+            
+            // Tự động chọn khu vực vừa tạo
+            if (result.data && result.data._id) {
+                form.setValue('Id_area_customer', result.data._id);
+                if (result.data.type_area) {
+                    setSelectedAreaType(result.data.type_area);
+                }
+            }
+        } catch (error) {
+            console.error('❌ [handleAddArea] Lỗi khi thêm khu vực:', error);
+            setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi thêm khu vực' });
+        } finally {
+            setIsAddingArea(false);
+        }
+    };
+
+    const handleDeleteArea = async (areaId, areaName) => {
+        if (!areaId) {
+            setNotification({ open: true, status: false, mes: 'Không tìm thấy ID khu vực để xóa' });
+            return;
+        }
+
+        // Xác nhận trước khi xóa
+        if (!confirm(`Bạn có chắc chắn muốn xóa khu vực "${areaName}"?`)) {
+            return;
+        }
+
+        try {
+            console.log('🔄 [handleDeleteArea] Bắt đầu xóa khu vực:', areaId);
+            
+            const response = await fetch(`/api/area_customer/${areaId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+            });
+
+            console.log('📡 [handleDeleteArea] Response status:', response.status, 'ok:', response.ok);
+
+            let result;
+            try {
+                const responseText = await response.text();
+                console.log('📦 [handleDeleteArea] Response text:', responseText);
+                result = JSON.parse(responseText);
+                console.log('📦 [handleDeleteArea] Parsed result:', result);
+            } catch (parseError) {
+                console.error('❌ [handleDeleteArea] API Error - Cannot parse JSON:', parseError);
+                setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi xóa khu vực' });
+                return;
+            }
+
+            if (!response.ok || result?.status === false) {
+                const errorMessage = result?.mes || result?.message || 'Xóa khu vực thất bại';
+                setNotification({ open: true, status: false, mes: errorMessage });
+                return;
+            }
+
+            // Thành công
+            console.log('✅ [handleDeleteArea] Xóa khu vực thành công:', result);
+            setNotification({ open: true, status: true, mes: result.mes || 'Xóa khu vực thành công' });
+            
+            // Nếu khu vực đang được chọn, xóa selection
+            const currentValue = form.getValues('Id_area_customer');
+            if (currentValue === areaId) {
+                form.setValue('Id_area_customer', '');
+                setSelectedAreaType(null);
+            }
+            
+            // Reload danh sách khu vực
+            setAreaCustomerOptions([]);
+            await loadAreaCustomersData();
+        } catch (error) {
+            console.error('❌ [handleDeleteArea] Lỗi khi xóa khu vực:', error);
+            setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi xóa khu vực' });
+        }
+    };
+
+    const handleEditArea = (areaId, areaName, areaType) => {
+        setEditingAreaId(areaId);
+        setEditAreaName(areaName);
+        setEditAreaType(areaType || '');
+        setIsEditAreaDialogOpen(true);
+    };
+
+    const handleUpdateArea = async () => {
+        if (!editAreaName || !editAreaName.trim()) {
+            setNotification({ open: true, status: false, mes: 'Vui lòng nhập tên khu vực' });
+            return;
+        }
+
+        if (!editingAreaId) {
+            setNotification({ open: true, status: false, mes: 'Không tìm thấy ID khu vực để cập nhật' });
+            return;
+        }
+
+        setIsEditingArea(true);
+        try {
+            console.log('🔄 [handleUpdateArea] Bắt đầu cập nhật khu vực:', editingAreaId);
+            
+            const response = await fetch(`/api/area_customer/${editingAreaId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify({
+                    name: editAreaName.trim(),
+                    type_area: editAreaType.trim() || null
+                })
+            });
+
+            console.log('📡 [handleUpdateArea] Response status:', response.status, 'ok:', response.ok);
+
+            let result;
+            try {
+                const responseText = await response.text();
+                console.log('📦 [handleUpdateArea] Response text:', responseText);
+                result = JSON.parse(responseText);
+                console.log('📦 [handleUpdateArea] Parsed result:', result);
+            } catch (parseError) {
+                console.error('❌ [handleUpdateArea] API Error - Cannot parse JSON:', parseError);
+                setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi cập nhật khu vực' });
+                return;
+            }
+
+            if (!response.ok || result?.status === false) {
+                const errorMessage = result?.mes || result?.message || 'Cập nhật khu vực thất bại';
+                setNotification({ open: true, status: false, mes: errorMessage });
+                return;
+            }
+
+            // Thành công
+            console.log('✅ [handleUpdateArea] Cập nhật khu vực thành công:', result);
+            setNotification({ open: true, status: true, mes: result.mes || 'Cập nhật khu vực thành công' });
+            
+            // Lưu editingAreaId trước khi reset
+            const updatedAreaId = editingAreaId;
+            
+            // Reset form
+            setEditAreaName('');
+            setEditAreaType('');
+            setEditingAreaId(null);
+            setIsEditAreaDialogOpen(false);
+            
+            // Reload danh sách khu vực
+            setAreaCustomerOptions([]);
+            await loadAreaCustomersData();
+            
+            // Nếu khu vực đang được chọn, cập nhật lại type_area
+            const currentValue = form.getValues('Id_area_customer');
+            if (currentValue === updatedAreaId && result.data) {
+                if (result.data.type_area) {
+                    setSelectedAreaType(result.data.type_area);
+                } else {
+                    setSelectedAreaType(null);
+                }
+            }
+        } catch (error) {
+            console.error('❌ [handleUpdateArea] Lỗi khi cập nhật khu vực:', error);
+            setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi cập nhật khu vực' });
+        } finally {
+            setIsEditingArea(false);
+        }
     };
 
     const form = useForm({
@@ -508,11 +882,11 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
         const file = e.target.files?.[0];
         if (file) {
             if (file.size > 5 * 1024 * 1024) {
-                toast.error('Kích thước ảnh không được vượt quá 5MB');
+                setNotification({ open: true, status: false, mes: 'Kích thước ảnh không được vượt quá 5MB' });
                 return;
             }
             if (!file.type.startsWith('image/')) {
-                toast.error('Vui lòng chọn file ảnh');
+                setNotification({ open: true, status: false, mes: 'Vui lòng chọn file ảnh' });
                 return;
             }
             setCoverImage(file);
@@ -557,23 +931,35 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
         // Id_area_customer đã là _id rồi, không cần gửi thêm area_customer_id
         // (vì value của option đã là _id)
 
-        // CẬP NHẬT: Truyền thẳng promise từ server action vào
-        const promise = updateCustomerInfo(null, formData);
-
-        toast.promise(promise, {
-            loading: 'Đang cập nhật thông tin...',
-            success: (result) => {
-                setIsSubmitting(false);
-                if (result.success) {
-                    setCoverImage(null); // Reset sau khi lưu thành công
-                }
-                return result.message || 'Cập nhật thành công!';
-            },
-            error: (result) => {
-                setIsSubmitting(false);
-                return result.error || 'Cập nhật thất bại!';
-            },
-        });
+        // Xử lý promise thủ công
+        try {
+            setIsSubmitting(true);
+            const result = await updateCustomerInfo(null, formData);
+            
+            if (result.success) {
+                setCoverImage(null); // Reset sau khi lưu thành công
+                setNotification({ 
+                    open: true, 
+                    status: true, 
+                    mes: result.message || 'Cập nhật thành công!' 
+                });
+            } else {
+                setNotification({ 
+                    open: true, 
+                    status: false, 
+                    mes: result.error || 'Cập nhật thất bại!' 
+                });
+            }
+        } catch (error) {
+            console.error('Lỗi khi cập nhật thông tin:', error);
+            setNotification({ 
+                open: true, 
+                status: false, 
+                mes: 'Có lỗi xảy ra khi cập nhật thông tin' 
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -591,13 +977,25 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                         name="Id_area_customer" 
                         render={({ field }) => (
                             <FormItem>
-                                <div className="flex items-center gap-2">
-                                    <Label><h6>Khu vực</h6></Label>
-                                    {selectedAreaType && (
-                                        <Badge variant="secondary" className="text-xs">
-                                            {selectedAreaType}
-                                        </Badge>
-                                    )}
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <Label><h6>Khu vực</h6></Label>
+                                        {selectedAreaType && (
+                                            <Badge variant="secondary" className="text-xs">
+                                                {selectedAreaType}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 text-xs"
+                                        onClick={() => setIsAddAreaDialogOpen(true)}
+                                    >
+                                        <Plus className="h-3 w-3 mr-1" />
+                                        Thêm khu vực
+                                    </Button>
                                 </div>
                                 <FormControl>
                                     <SingleSelect
@@ -616,11 +1014,166 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                                         onOpenChange={handleLoadAreaCustomers}
                                         isLoading={isLoadingAreaCustomers}
                                         options={areaCustomerOptions}
+                                        onDelete={handleDeleteArea}
+                                        onEdit={handleEditArea}
                                     />
                                 </FormControl>
                             </FormItem>
                         )} 
                     />
+                    {/* Dialog thêm khu vực - đặt ngoài FormField để tránh xung đột */}
+                    <Dialog open={isAddAreaDialogOpen} onOpenChange={setIsAddAreaDialogOpen}>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle>Thêm khu vực mới</DialogTitle>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="area-name">
+                                        Tên khu vực <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="area-name"
+                                        value={newAreaName}
+                                        onChange={(e) => setNewAreaName(e.target.value)}
+                                        placeholder="Nhập tên khu vực"
+                                        disabled={isAddingArea}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && newAreaName.trim() && !isAddingArea) {
+                                                handleAddArea();
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="area-type">
+                                        Loại khu vực
+                                    </Label>
+                                    <Select
+                                        value={newAreaType}
+                                        onValueChange={setNewAreaType}
+                                        disabled={isAddingArea}
+                                    >
+                                        <SelectTrigger id="area-type" className="w-full">
+                                            <SelectValue placeholder="Chọn loại khu vực (tùy chọn)" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {areaTypeOptions.map((option) => (
+                                                <SelectItem key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setIsAddAreaDialogOpen(false);
+                                        setNewAreaName('');
+                                        setNewAreaType('');
+                                    }}
+                                    disabled={isAddingArea}
+                                >
+                                    Hủy
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={handleAddArea}
+                                    disabled={isAddingArea || !newAreaName.trim()}
+                                >
+                                    {isAddingArea ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Đang thêm...
+                                        </>
+                                    ) : (
+                                        'Thêm'
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                    {/* Dialog sửa khu vực */}
+                    <Dialog open={isEditAreaDialogOpen} onOpenChange={setIsEditAreaDialogOpen}>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle>Sửa khu vực</DialogTitle>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="edit-area-name">
+                                        Tên khu vực <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="edit-area-name"
+                                        value={editAreaName}
+                                        onChange={(e) => setEditAreaName(e.target.value)}
+                                        placeholder="Nhập tên khu vực"
+                                        disabled={isEditingArea}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && editAreaName.trim() && !isEditingArea) {
+                                                handleUpdateArea();
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="edit-area-type">
+                                        Loại khu vực
+                                    </Label>
+                                    <Select
+                                        value={editAreaType}
+                                        onValueChange={setEditAreaType}
+                                        disabled={isEditingArea}
+                                    >
+                                        <SelectTrigger id="edit-area-type" className="w-full">
+                                            <SelectValue placeholder="Chọn loại khu vực (tùy chọn)" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {areaTypeOptions.map((option) => (
+                                                <SelectItem key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setIsEditAreaDialogOpen(false);
+                                        setEditAreaName('');
+                                        setEditAreaType('');
+                                        setEditingAreaId(null);
+                                    }}
+                                    disabled={isEditingArea}
+                                >
+                                    Hủy
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={handleUpdateArea}
+                                    disabled={isEditingArea || !editAreaName.trim()}
+                                >
+                                    {isEditingArea ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Đang cập nhật...
+                                        </>
+                                    ) : (
+                                        'Cập nhật'
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                     <FormField control={form.control} name="bd" render={({ field }) => (<FormItem><Label><h6>Ngày Tháng Năm sinh</h6></Label><FormControl><Input type="date" {...field} /></FormControl></FormItem>)} />
                 </div>
                 
@@ -813,6 +1366,29 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                     </Button>
                 </DialogFooter>
             </form>
+            <Noti 
+                open={notification.open} 
+                onClose={() => setNotification({ ...notification, open: false })} 
+                status={notification.status} 
+                mes={notification.mes}
+                button={
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                        <Button 
+                            onClick={() => setNotification({ ...notification, open: false })}
+                            style={{ 
+                                padding: '8px 24px',
+                                borderRadius: 4,
+                                border: 'none',
+                                backgroundColor: notification.status ? 'var(--green)' : 'var(--red)',
+                                color: 'white',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Đóng
+                        </Button>
+                    </div>
+                }
+            />
         </Form>
     );
 }

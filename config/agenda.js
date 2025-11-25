@@ -96,7 +96,7 @@ async function processMessage(rawMessage, customer) {
  * Gửi yêu cầu revalidate cache tới Next.js API để cập nhật giao diện người dùng.
  */
 function triggerRevalidation() {
-   
+    console.log('[Agenda] Triggering revalidation via API for tag: customers');
     try {
         const host = process.env.URL || 'http://localhost:3000';
         const secret = process.env.REVALIDATE_SECRET_TOKEN;
@@ -225,7 +225,7 @@ async function genericJobProcessor(job) {
 async function allocationJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'allocation';
-   
+    console.log(`[Job ${jobName}] Bắt đầu xử lý cho KH: ${customerId}`);
     let newStatus = 'undetermined_3'
     try {
         const customer = await Customer.findById(customerId);
@@ -245,13 +245,15 @@ async function allocationJobProcessor(job) {
         for (const group of requiredGroups) {
             const isAlreadyAssigned = customer.assignees.some(a => a.group === group);
             if (isAlreadyAssigned) {
+                console.log(`[Job ${jobName}] KH đã được gán cho nhóm ${group}. Bỏ qua.`);
                 continue;
             }
             const nextSale = await findNextSaleForGroup(group, zaloAccountId);
             if (nextSale) {
                 customer.assignees.push({ user: nextSale._id, group: group, assignedAt: new Date() });
                 assignmentsMade++;
-               
+                console.log(`[Job ${jobName}] Đã gán KH ${customerId} cho Sale ${nextSale._id} nhóm ${group}.`);
+
                 // ==========================================================
                 // == THÊM LOGIC CẬP NHẬT newStatus TẠI ĐÂY ==
                 if (group === 'noi_khoa') {
@@ -286,7 +288,7 @@ async function allocationJobProcessor(job) {
 async function bellJobProcessor(job) {
     const { customerId, cwId } = job.attrs.data;
     const jobName = 'bell';
-   
+    console.log(`[Job ${jobName}] Bắt đầu gửi thông báo cho KH: ${customerId}`);
     try {
         const customer = await Customer.findById(customerId).populate('care.createBy', 'name').lean();
         if (!customer) throw new Error(`Không tìm thấy KH ID: ${customerId}`);
@@ -321,7 +323,7 @@ async function bellJobProcessor(job) {
 
         if (!success) throw new Error('Gửi thông báo qua Google Apps Script thất bại');
 
-        
+        console.log(`[Job ${jobName}] Đã gửi thông báo thành công cho KH ${customerId}.`);
         await logCareHistory(customerId, jobName, 'success');
         await updateStepStatus(cwId, jobName, 'completed', customerId);
     } catch (error) {
@@ -344,12 +346,12 @@ async function bellJobProcessor(job) {
 async function attachWorkflow(customerId, templateId) {
     const existingAssignment = await CustomerWorkflow.findOne({ customerId, templateId });
     if (existingAssignment) {
-        
+        console.log(`[attachWorkflow] Bỏ qua vì KH ${customerId} đã có WF ${templateId}.`);
         return;
     }
     const template = await WorkflowTemplate.findById(templateId);
     if (!template) {
-       
+        console.error(`[attachWorkflow] Không tìm thấy template ID: ${templateId}`);
         return;
     }
     const customerWorkflow = new CustomerWorkflow({

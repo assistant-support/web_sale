@@ -66,7 +66,8 @@ async function getSheetsClient() {
  * Xử lý yêu cầu GET để import dữ liệu từ Google Sheet.
  */
 export async function GET(request) {
-   
+    console.log('--- Bắt đầu Import Google Sheet ---');
+
     try {
         // 1. Kết nối MongoDB (Sử dụng hàm đã import)
         await connectDB();
@@ -86,7 +87,8 @@ export async function GET(request) {
             return NextResponse.json({ message: 'No data found in Google Sheet.', count: 0 }, { status: 200 });
         }
 
-      
+        console.log(`Tìm thấy ${rows.length} dòng dữ liệu.`);
+
         // 3. Xử lý và Chuẩn bị Bulk Write
         const bulkOps = [];
         let skippedCount = 0;
@@ -104,7 +106,7 @@ export async function GET(request) {
             // 3.1. Lọc lần 1: Có đủ A, B, C (cột 0, 1, 2)
             if (!colA || !colB_name || !colC_phone) {
                 skippedCount++;
-               
+                console.log(`Dòng ${rowIndex} bị bỏ qua: Thiếu dữ liệu ở cột A, B hoặc C.`);
                 continue;
             }
 

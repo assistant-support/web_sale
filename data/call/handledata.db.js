@@ -39,7 +39,8 @@ async function dataCallsByCustomer(customerId) {
     try {
         await connectDB();
         
-       
+        console.log('🔍 [dataCallsByCustomer] Searching for customer ID:', customerId);
+        
         const calls = await Call.find({ customer: customerId })
             .populate({
                 path: 'customer',

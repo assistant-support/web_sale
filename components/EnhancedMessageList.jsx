@@ -4,6 +4,60 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, AlertCircle, Loader2, MessageCircle, Play, X } from 'lucide-react';
 
+// Helper function để convert URLs trong text thành clickable links
+const renderTextWithLinks = (text, isFromPage = false) => {
+    if (!text || typeof text !== 'string') return text;
+    
+    // Regex để detect URLs (http://, https://, www.)
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = urlRegex.exec(text)) !== null) {
+        // Thêm text trước URL
+        if (match.index > lastIndex) {
+            parts.push(text.substring(lastIndex, match.index));
+        }
+        
+        // Xử lý URL
+        let url = match[0];
+        // Nếu là www. thì thêm https://
+        if (url.startsWith('www.')) {
+            url = 'https://' + url;
+        }
+        
+        // Style khác nhau cho tin nhắn từ page (nền xanh) và từ customer (nền trắng)
+        const linkClassName = isFromPage 
+            ? "text-blue-100 hover:text-white underline break-all font-medium"
+            : "text-blue-600 hover:text-blue-800 underline break-all";
+        
+        // Thêm link
+        parts.push(
+            <a
+                key={match.index}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClassName}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {match[0]}
+            </a>
+        );
+        
+        lastIndex = match.index + match[0].length;
+    }
+    
+    // Thêm phần text còn lại
+    if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+    }
+    
+    // Nếu không có URL nào, trả về text gốc
+    return parts.length > 0 ? parts : text;
+};
+
 // Component hiển thị tin nhắn với animation
 const AnimatedMessage = ({ message, isNew = false, pageId, onVideoClick }) => {
     const formattedTime = useMemo(() => {
@@ -74,7 +128,7 @@ const AnimatedMessage = ({ message, isNew = false, pageId, onVideoClick }) => {
 };
 
 // Component hiển thị nội dung tin nhắn
-const MessageContent = ({ content, onVideoClick }) => {
+const MessageContent = ({ content, onVideoClick, isFromPage = false }) => {
     if (!content) {
         return (
             <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
@@ -87,7 +141,7 @@ const MessageContent = ({ content, onVideoClick }) => {
         case 'text':
             return (
                 <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
-                    {content.content}
+                    {renderTextWithLinks(content.content, isFromPage)}
                 </h5>
             );
 
@@ -104,6 +158,31 @@ const MessageContent = ({ content, onVideoClick }) => {
                             />
                         </a>
                     ))}
+                </div>
+            );
+
+        case 'images_with_text':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {/* Hiển thị text trước */}
+                    {content.text && (
+                        <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
+                            {renderTextWithLinks(content.text, isFromPage)}
+                        </h5>
+                    )}
+                    {/* Hiển thị ảnh sau */}
+                    <div className="flex flex-wrap gap-2">
+                        {content.images.map((img, i) => (
+                            <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                                <img
+                                    src={img.url}
+                                    alt={`Attachment ${i + 1}`}
+                                    className="max-w-[240px] max-h-[240px] rounded-lg object-cover"
+                                    loading="lazy"
+                                />
+                            </a>
+                        ))}
+                    </div>
                 </div>
             );
 

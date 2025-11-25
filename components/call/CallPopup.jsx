@@ -95,12 +95,14 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     // ===== INITIALIZATION =====
     const initializeSDK = useCallback(async () => {
+        console.log('[CallPopup] 🔄 Checking SDK status...');
         
         // Check if SDK is already initialized and connected
         const status = omicallSDKManager.getStatus();
+        console.log('[CallPopup] 📊 Current SDK status:', status);
         
         if (status.isInitialized && status.isConnected) {
-           
+            
             setConnectionStatus(status.connectionStatus);
             setIsInitialized(true);
             setupEventListeners();
@@ -109,6 +111,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
         
         // If not connected, try to reconnect
         if (status.isInitialized && !status.isConnected) {
+            console.log('[CallPopup] 🔄 SDK initialized but not connected, attempting reconnect...');
             try {
                 await omicallSDKManager.connect();
                 setConnectionStatus({ status: 'connected', text: 'Đã kết nối' });
@@ -123,23 +126,26 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
         // If not initialized, initialize
         try {
             initializationAttemptsRef.current += 1;
-           
+            console.log(`[CallPopup] 🔄 Initializing SDK (attempt ${initializationAttemptsRef.current}/${maxInitAttempts})...`);
+            
             await omicallSDKManager.initialize();
+            console.log('[CallPopup] ✅ SDK initialized');
             
             await omicallSDKManager.connect();
-           
+            console.log('[CallPopup] ✅ Connected to server');
+            
             setupEventListeners();
             
             setConnectionStatus({ status: 'connected', text: 'Đã kết nối' });
             setIsInitialized(true);
             
-           
+            console.log('[CallPopup] ✅ Initialization completed successfully');
             
         } catch (error) {
             console.error('[CallPopup] ❌ Initialization failed:', error);
             
             if (initializationAttemptsRef.current < maxInitAttempts) {
-               
+                console.log(`[CallPopup] 🔄 Retrying initialization in 2 seconds...`);
                 setTimeout(() => {
                     initializeSDK();
                 }, 2000);
@@ -153,17 +159,17 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     // ===== EVENT LISTENERS =====
     const setupEventListeners = useCallback(() => {
-      
+        console.log('[CallPopup] 🔧 Setting up event listeners...');
         
         // Status events
         const handleStatus = (status) => {
-          
+            console.log('[CallPopup] 📡 Status update:', status);
             setConnectionStatus(status);
         };
 
         // Call events
         const handleCall = (data) => {
-          
+            
             handleCallEvent(data.event, data.data);
         };
 
@@ -171,15 +177,16 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
         omicallSDKManager.on('status', handleStatus);
         omicallSDKManager.on('call', handleCall);
         
-       
+        console.log('[CallPopup] ✅ Event listeners registered');
     }, []);
 
     // ===== CALL EVENT HANDLER =====
     const handleCallEvent = useCallback(async (event, data) => {
-       
+        console.log('[CallPopup] 📞 handleCallEvent:', event, data);
+        
         switch (event) {
             case 'connecting':
-               
+                console.log('[CallPopup] 📞 Connecting...');
                 currentCallRef.current = data;
                 resetCallFlags();
                 
@@ -192,7 +199,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
                 break;
                 
             case 'ringing':
-              
+                console.log('[CallPopup] 📞 Ringing...');
                 currentCallRef.current = data;
                 
                 flushSync(() => {
@@ -202,7 +209,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
                 break;
                 
             case 'accepted':
-               
+                console.log('[CallPopup] 📞 Accepted...');
                 currentCallRef.current = data;
                 
                 flushSync(() => {
@@ -216,7 +223,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
                 break;
                 
             case 'on_calling':
-              
+                console.log('[CallPopup] 📞 Duration update...');
                 const text = data?.callingDuration?.text || '00:00';
                 setDurationText(text);
                 lastDurationSecRef.current = hhmmssToSec(text);
@@ -247,7 +254,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     // ===== RECORDING FUNCTIONS =====
     const startRecording = async () => {
-     
+        console.log('[CallPopup] 🎤 Starting recording...');
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
@@ -269,12 +276,12 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
             };
             
             mediaRecorder.onstop = async () => {
-               
+                console.log('[CallPopup] 🎤 Recording stopped, processing...');
                 await processRecording();
             };
             
             mediaRecorder.start(1000);
-          
+            console.log('[CallPopup] 🎤 Recording started');
             
         } catch (error) {
             console.error('[CallPopup] ❌ Recording start failed:', error);
@@ -283,7 +290,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
     };
 
     const stopRecording = () => {
-       
+        console.log('[CallPopup] 🎤 Stopping recording...');
         try {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -294,7 +301,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
                 localStreamRef.current = null;
             }
             
-           
+            console.log('[CallPopup] 🎤 Recording stopped');
         } catch (error) {
             console.error('[CallPopup] ❌ Recording stop failed:', error);
         }
@@ -302,10 +309,11 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     const processRecording = async () => {
         try {
-           
+            console.log('[CallPopup] 🎤 Processing recording...');
             
             const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-           
+            console.log('[CallPopup] 🎤 Audio blob created:', audioBlob.size, 'bytes');
+            
             const formData = new FormData();
             formData.append('recordingFile', audioBlob, `recording-${Date.now()}.webm`);
             formData.append('recordingFileName', `recording-${Date.now()}.webm`);
@@ -318,7 +326,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
             const result = await saveCallAction(null, formData);
             
             if (result.success) {
-              
+                console.log('[CallPopup] 🎤 Call saved successfully');
                 toast.success('Cuộc gọi đã được lưu thành công');
                 
                 // Reload call history
@@ -337,28 +345,30 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     // ===== CALL FUNCTIONS =====
     const makeCall = async () => {
+        console.log('[CallPopup] 📞 makeCall() called');
         
         try {
             if (connectionStatus.status !== 'connected') {
-              
+                console.log('[CallPopup] ❌ Not connected');
                 toast.error('Chưa kết nối tổng đài');
                 return;
             }
 
             if (isCalling) {
-               
+                console.log('[CallPopup] ❌ Already calling');
                 toast.warning('Đang có cuộc gọi khác');
                 return;
             }
 
             const phoneNumber = customer?.phone;
             if (!phoneNumber) {
-              
+                console.log('[CallPopup] ❌ No phone number');
                 toast.error('Thiếu số điện thoại khách hàng');
                 return;
             }
 
-          
+            console.log('[CallPopup] 📞 Making call to:', phoneNumber);
+
             // Request microphone permission
             try {
                 await navigator.mediaDevices.getUserMedia({
@@ -372,7 +382,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
             }
             
             const makeCallResult = await omicallSDKManager.makeCall(phoneNumber, `Gọi từ web app - ${new Date().toLocaleString('vi-VN')}`);
-          
+            console.log('[CallPopup] 📞 SDK makeCall result:', makeCallResult);
             toast.success('Đang thực hiện cuộc gọi...');
             
         } catch (error) {
@@ -383,7 +393,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     const endCall = () => {
         try {
-         
+            console.log('[CallPopup] 📞 Ending call');
             
             // Reset UI state
             setCallStage('idle');
@@ -429,7 +439,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
 
     const forceReloadHistory = async () => {
         try {
-          
+            console.log('[CallPopup] 🔄 Force reloading call history...');
             await reloadCallsByCustomer(customer._id);
             
             const history = await call_data({ customerId: customer._id });
@@ -480,12 +490,14 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
     useEffect(() => {
         if (!isOpen) return;
         
-       
+        console.log('[CallPopup] 🚀 Component opened, checking SDK status...');
+        
         // Check if SDK is already initialized and connected
         const status = omicallSDKManager.getStatus();
-       
+        console.log('[CallPopup] 📊 SDK status:', status);
+        
         if (status.isInitialized && status.isConnected) {
-           
+            console.log('[CallPopup] ✅ SDK already ready, just setting up listeners...');
             setConnectionStatus(status.connectionStatus);
             setIsInitialized(true);
             setupEventListeners();
@@ -508,6 +520,7 @@ export default function CallPopup({ customer, user, onClose, isOpen }) {
         const loadCallHistory = async () => {
             try {
                 setLoading(true);
+                console.log('[CallPopup] 📚 Loading call history for customer:', customer._id);
                 
                 const history = await call_data({ customerId: customer._id });
                 setCallHistory(history || []);

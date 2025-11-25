@@ -1,6 +1,6 @@
 'use server'
 
-import { getFormAll, getFormOne } from './handledata.db'
+import { getFormAll, getFormOne, getMessageSources } from './handledata.db'
 import { revalidateTag } from 'next/cache'
 
 // Lấy danh sách form/Load dữ liệu
@@ -12,4 +12,9 @@ export async function form_data(id) {
 }
 export async function reloadForm() {
     revalidateTag('forms')
+}
+
+// Lấy danh sách nguồn tin nhắn
+export async function message_sources_data() {
+    return await getMessageSources()
 }

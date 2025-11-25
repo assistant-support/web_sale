@@ -87,7 +87,7 @@ export async function uploadImageToDriveAction(file) {
 
         const id = info?.id;
         if (!id) return { success: false, error: 'UPLOAD_OK_BUT_NO_ID' };
-       
+        console.log(info);
 
         const madePublic = await makeFilePublic(id);
         if (!madePublic) {
@@ -111,7 +111,7 @@ export async function uploadImageToDriveAction(file) {
     }
 }
 
-// 1b) Upload video lên Drive và trả về { id, url }
+// 1b) Upload video lên pancake và trả về { id, url }
 export async function uploadVideoToPancakeAction(file, { pageId, accessToken } = {}) {
     try {
         if (!file) return { success: false, error: 'NO_FILE' };
@@ -164,7 +164,7 @@ export async function uploadVideoToPancakeAction(file, { pageId, accessToken } =
         return { success: false, error: e?.message || 'UPLOAD_FAILED' };
     }
 }
-
+// thực hiện upload ảnh lên Pancake
 export async function uploadImageToPancakeAction(file, { pageId, accessToken } = {}) {
     try {
         if (!file) return { success: false, error: 'NO_FILE' };
@@ -323,7 +323,7 @@ export async function sendVideoAction(
         });
 
         if (res?.success) {
-           
+            console.log('[sendVideoAction] ✅ response', res);
             return res;
         }
 
@@ -360,11 +360,11 @@ export async function sendMessageAction(pageId, accessToken, conversationId, mes
             },
         });
         res = await res.json();
-       
+        console.log(res);
         if (res.success) return { success: true };
         return { success: false, error: 'Pancake API reported failure' };
     } catch (e) {
-       
+        console.log('[sendMessageAction] error:', e?.response?.data || e?.message || e);
         return { success: false, error: e?.response?.data?.message || 'Failed to send message' };
     }
 }

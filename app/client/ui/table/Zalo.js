@@ -20,26 +20,26 @@ export default function ZaloButton({ customer, user, zalo }) {
 
     // Handle success/error notifications
     React.useEffect(() => {
-       
+        console.log('🟢 [Client] State changed:', state);
         if (state) {
             if (state.success) {
-               
+                console.log('✅ [Client] Success!', state.message);
                 toast.success(state.message || 'Đã gửi tin nhắn thành công!');
                 setMessage(''); // Clear input on success
                 // Refresh the page data to show updated UID and care history
                 router.refresh();
             } else {
-               
+                console.log('❌ [Client] Failed!', state.message);
                 toast.error(state.message || 'Gửi tin nhắn thất bại!');
             }
         }
     }, [state, router]);
 
     const handleSubmit = (e) => {
-       
+        console.log('🟡 [Client] Form submit triggered');
         if (!message.trim()) {
             e.preventDefault();
-           
+            console.log('⚠️ [Client] Empty message, preventing submit');
             toast.error('Vui lòng nhập nội dung tin nhắn');
             return;
         }

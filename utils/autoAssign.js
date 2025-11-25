@@ -51,33 +51,25 @@ function isValidObjectId(id) {
 }
 
 export async function autoAssignForCustomer(customerId, options = {}) {
-    // console.log('🚩Đi qua hàm autoAssignForCustomer');
-    // console.log(`🚩[DEBUG] CustomerId: ${customerId}`);
-    // console.log(`🚩[DEBUG] Options:`, JSON.stringify(options, null, 2));
-    // console.log(`[AutoAssign] Starting for customer ${customerId}, options:`, options);
-    
+   
     let customer;
     try {
         customer = await Customer.findById(customerId);
-        // console.log('🚩[DEBUG] Customer lookup result:', customer ? 'FOUND' : 'NOT FOUND');
+       
     } catch (error) {
-        // console.error('🚩[ERROR] Lỗi khi tìm customer:', error?.message || error);
+        
         return { ok: false, reason: 'db_error', error: error?.message };
     }
     
     if (!customer) {
-        // console.log(`🚩[SKIP] Customer not found: ${customerId}`);
+        
         return { ok: false, reason: 'not_found' };
     }
     
-    console.log('🚩[DEBUG] Customer assignees check:', {
-        hasAssignees: !!customer.assignees?.length,
-        assigneesCount: customer.assignees?.length || 0,
-        assignees: customer.assignees
-    });
+    
     
     if (customer.assignees?.length) {
-        // console.log(`🚩[SKIP] Customer already has assignees:`, customer.assignees);
+        
         return { ok: false, reason: 'already_assigned' };
     }
 
@@ -130,10 +122,7 @@ export async function autoAssignForCustomer(customerId, options = {}) {
     }
 
     const serviceRef = options.serviceId || customer.tags?.[0];
-    // console.log(`🚩[DEBUG] Service reference:`, serviceRef);
-    // console.log(`🚩[DEBUG] Options.serviceId:`, options.serviceId);
-    // console.log(`🚩[DEBUG] Customer.tags[0]:`, customer.tags?.[0]);
-    // console.log(`[AutoAssign] Service reference:`, serviceRef);
+   
     
     if (!serviceRef) {
         // console.log(`🚩[FALLBACK] No service reference found -> try default group / any sale`);

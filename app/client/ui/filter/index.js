@@ -8,11 +8,14 @@ import Menu from '@/components/(ui)/(button)/menu';
 
 export default function FilterControls({
     sources = [],
+    messageSources = [],
     users = [],
     // Bạn có thể truyền "services" (mới) hoặc "service" (cũ). Ưu tiên "services".
     services: servicesProp = [],
     service = [],
     auth = { role: [] },
+    areaCustomers = [],
+    filterCustomer = {},
 }) {
     const services = servicesProp.length ? servicesProp : service;
 
@@ -29,6 +32,8 @@ export default function FilterControls({
     const [isPipelineStatusMenuOpen, setIsPipelineStatusMenuOpen] = useState(false);
     const [isTagsMenuOpen, setIsTagsMenuOpen] = useState(false);
     const [isAssigneeMenuOpen, setIsAssigneeMenuOpen] = useState(false);
+    const [isAreaCustomerMenuOpen, setIsAreaCustomerMenuOpen] = useState(false);
+    const [isBirthMonthMenuOpen, setIsBirthMonthMenuOpen] = useState(false);
 
     const createURL = useCallback((paramsToUpdate) => {
         const params = new URLSearchParams(searchParams);
@@ -85,13 +90,28 @@ export default function FilterControls({
         ],
     }), []);
 
+    // Nguồn đặc biệt (cố định)
+    const specialSources = useMemo(() => [
+        { _id: 'Trực tiếp', name: 'Trực tiếp', isSpecialSource: true }
+    ], []);
+
     const getSelectedName = useCallback((param, data, defaultText, keyField = '_id', nameField = 'name') => {
         const value = searchParams.get(param);
         if (!value) return defaultText;
         if (param === 'tags' && value === 'null') return 'Chưa xác định';
-        const selected = data.find((item) => String(item[keyField]) === value);
+        // Kiểm tra nguồn đặc biệt trước
+        if (param === 'source') {
+            const specialSource = specialSources.find((item) => String(item[keyField]) === value);
+            if (specialSource) return specialSource[nameField];
+        }
+        // Kiểm tra cả sources thường và messageSources
+        let selected = data.find((item) => String(item[keyField]) === value);
+        if (!selected && param === 'source') {
+            // Nếu không tìm thấy trong data, tìm trong messageSources
+            selected = messageSources.find((item) => String(item[keyField]) === value);
+        }
         return selected ? selected[nameField] : defaultText;
-    }, [searchParams]);
+    }, [searchParams, messageSources, specialSources]);
 
     return (
         <div className={styles.wrapper}>
@@ -157,6 +177,28 @@ export default function FilterControls({
                         />
                     </div>
                 )}
+
+                {/* Khu vực */}
+                <div style={{ flex: 1 }}>
+                    <Menu
+                        isOpen={isAreaCustomerMenuOpen}
+                        onOpenChange={setIsAreaCustomerMenuOpen}
+                        customButton={<div className="input text_6_400">{getSelectedName('areaCustomer', areaCustomers, 'Khu vực', '_id', 'name')}</div>}
+                        menuItems={
+                            <div className={`${styles.menulist} scroll`}>
+                                <p className="text_6_400" onClick={() => { createURL({ areaCustomer: '' }); setIsAreaCustomerMenuOpen(false); }}>
+                                    Tất cả khu vực
+                                </p>
+                                {areaCustomers.map((area) => (
+                                    <p key={area._id} className="text_6_400" onClick={() => { createURL({ areaCustomer: area._id }); setIsAreaCustomerMenuOpen(false); }}>
+                                        {area.name} {area.type_area ? `(${area.type_area})` : ''}
+                                    </p>
+                                ))}
+                            </div>
+                        }
+                        menuPosition="bottom"
+                    />
+                </div>
             </div>
 
             {/* Hàng 2 */}
@@ -166,17 +208,39 @@ export default function FilterControls({
                     <Menu
                         isOpen={isSourceMenuOpen}
                         onOpenChange={setIsSourceMenuOpen}
-                        customButton={<div className="input text_6_400">{getSelectedName('source', sources, 'Tất cả nguồn')}</div>}
+                        customButton={<div className="input text_6_400">{getSelectedName('source', [...sources, ...specialSources, ...messageSources], 'Tất cả nguồn')}</div>}
                         menuItems={
-                            <div className={styles.menulist}>
+                            <div className={`${styles.menulist} scroll`}>
                                 <p className="text_6_400" onClick={() => { createURL({ source: '' }); setIsSourceMenuOpen(false); }}>
                                     Tất cả nguồn
                                 </p>
-                                {sources.map((s) => (
-                                    <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
-                                        {s.name}
-                                    </p>
-                                ))}
+                                {sources.length > 0 && (
+                                    <>
+                                        {sources.map((s) => (
+                                            <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
+                                                {s.name}
+                                            </p>
+                                        ))}
+                                    </>
+                                )}
+                                {specialSources.length > 0 && (
+                                    <>
+                                        {specialSources.map((s) => (
+                                            <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
+                                                {s.name}
+                                            </p>
+                                        ))}
+                                    </>
+                                )}
+                                {messageSources.length > 0 && (
+                                    <>
+                                        {messageSources.map((s) => (
+                                            <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
+                                                {s.name}
+                                            </p>
+                                        ))}
+                                    </>
+                                )}
                             </div>
                         }
                         menuPosition="bottom"
@@ -202,6 +266,73 @@ export default function FilterControls({
                                 <p className="text_6_400" onClick={() => { createURL({ tags: 'null' }); setIsTagsMenuOpen(false); }}>
                                     Chưa xác định
                                 </p>
+                            </div>
+                        }
+                        menuPosition="bottom"
+                    />
+                </div>
+
+                {/* Tháng sinh */}
+                <div style={{ flex: 1 }}>
+                    <Menu
+                        isOpen={isBirthMonthMenuOpen}
+                        onOpenChange={(open) => {
+                            setIsBirthMonthMenuOpen(open);
+                            if (open) {
+                                // Log để debug khi mở dropdown
+                                console.log('📊 [FilterControls] filterCustomer data:', filterCustomer);
+                                console.log('📊 [FilterControls] Số lượng mỗi tháng:', {
+                                    month1: filterCustomer?.month1?.length || 0,
+                                    month2: filterCustomer?.month2?.length || 0,
+                                    month3: filterCustomer?.month3?.length || 0,
+                                    month4: filterCustomer?.month4?.length || 0,
+                                    month5: filterCustomer?.month5?.length || 0,
+                                    month6: filterCustomer?.month6?.length || 0,
+                                    month7: filterCustomer?.month7?.length || 0,
+                                    month8: filterCustomer?.month8?.length || 0,
+                                    month9: filterCustomer?.month9?.length || 0,
+                                    month10: filterCustomer?.month10?.length || 0,
+                                    month11: filterCustomer?.month11?.length || 0,
+                                    month12: filterCustomer?.month12?.length || 0,
+                                });
+                            }
+                        }}
+                        customButton={
+                            <div className="input text_6_400">
+                                {(() => {
+                                    const month = searchParams.get('birthMonth');
+                                    if (!month) return 'Tháng sinh';
+                                    const monthNames = [
+                                        'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4',
+                                        'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8',
+                                        'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+                                    ];
+                                    return monthNames[parseInt(month) - 1] || 'Tháng sinh';
+                                })()}
+                            </div>
+                        }
+                        menuItems={
+                            <div className={`${styles.menulist} scroll`}>
+                                <p className="text_6_400" onClick={() => { createURL({ birthMonth: '' }); setIsBirthMonthMenuOpen(false); }}>
+                                    Tất cả tháng
+                                </p>
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((month) => {
+                                    const monthKey = `month${month}`;
+                                    const customerCount = filterCustomer && filterCustomer[monthKey] ? filterCustomer[monthKey].length : 0;
+                                    return (
+                                        <p 
+                                            key={month} 
+                                            className="text_6_400" 
+                                            onClick={() => { 
+                                                console.log(`🖱️ [FilterControls] Click vào Tháng ${month}, số lượng: ${customerCount}`);
+                                                createURL({ birthMonth: String(month) }); 
+                                                setIsBirthMonthMenuOpen(false); 
+                                            }}
+                                        >
+                                            Tháng {month} ({customerCount})
+                                        </p>
+                                    );
+                                })}
                             </div>
                         }
                         menuPosition="bottom"

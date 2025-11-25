@@ -184,6 +184,17 @@ export async function GET() {
                         }
                     }
 
+                    // Cập nhật Fillter_customer nếu có bd
+                    if (newCustomerData.bd) {
+                        const birthDate = new Date(newCustomerData.bd);
+                        if (!isNaN(birthDate.getTime())) {
+                            const { updateFilterCustomer } = await import('@/utils/updateFilterCustomer');
+                            updateFilterCustomer(createdCustomer._id, birthDate, null).catch(err => {
+                                console.error('[API mes] Lỗi khi cập nhật Fillter_customer:', err);
+                            });
+                        }
+                    }
+                    
                     // Gán tĩnh người phụ trách
                     try {
                         await autoAssignForCustomer(createdCustomer._id, { forceStaticAssign: true });

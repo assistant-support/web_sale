@@ -24,7 +24,7 @@ export async function createAreaAction(_previousState, formData) {
     const user = await checkAuthToken();
 
     if (!user || !user.id) return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
-    
+    console.log(user.role);
 
     if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
         return { message: 'Bạn không có quyền thực hiện chức năng này', status: false };
@@ -179,6 +179,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
 
         // TRƯỜNG HỢP 1: KHÁCH HÀNG ĐÃ TỒN TẠI -> CẬP NHẬT
         if (existingCustomer) {
+            const oldBd = existingCustomer.bd;
             if (rawData.name && existingCustomer.name !== rawData.name) existingCustomer.name = rawData.name;
             if (rawData.address && existingCustomer.area !== rawData.address) existingCustomer.area = rawData.address;
             if (rawData.email && existingCustomer.email !== rawData.email) existingCustomer.email = rawData.email;
@@ -193,6 +194,14 @@ export async function addRegistrationToAction(_previousState, inputData) {
             existingCustomer.pipelineStatus[0] = 'duplicate_merged_1';
             existingCustomer.pipelineStatus[1] = 'duplicate_merged_1';
             await existingCustomer.save();
+            
+            // Cập nhật Fillter_customer nếu bd thay đổi
+            if (birthDate && (!oldBd || oldBd.getTime() !== birthDate.getTime())) {
+                const { updateFilterCustomer } = await import('@/utils/updateFilterCustomer');
+                updateFilterCustomer(existingCustomer._id, birthDate, oldBd).catch(err => {
+                    console.error('[addRegistrationToAction] Lỗi khi cập nhật Fillter_customer:', err);
+                });
+            }
             
             try {
                 if (!Array.isArray(existingCustomer.assignees) || existingCustomer.assignees.length === 0) {
@@ -227,6 +236,14 @@ export async function addRegistrationToAction(_previousState, inputData) {
 
         const newCustomer = new Customer(newCustomerData);
         await newCustomer.save();
+        
+        // Cập nhật Fillter_customer nếu có bd
+        if (birthDate) {
+            const { updateFilterCustomer } = await import('@/utils/updateFilterCustomer');
+            updateFilterCustomer(newCustomer._id, birthDate, null).catch(err => {
+                console.error('[addRegistrationToAction] Lỗi khi cập nhật Fillter_customer:', err);
+            });
+        }
         
         try {
             await autoAssignForCustomer(newCustomer._id, { serviceId: rawData.service || null });
@@ -270,6 +287,7 @@ async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
         // Kiểm tra xem đã gửi thông báo cho customer này trong 30s gần đây chưa
         const lastSentTime = notificationSentMap.get(customerId);
         if (lastSentTime && (now - lastSentTime) < DEBOUNCE_TIME) {
+            console.log(`[sendUpdateNotification] ⚠️ Bỏ qua vì đã gửi thông báo cho KH ${customerId} trong ${Math.round((now - lastSentTime) / 1000)}s gần đây`);
             return;
         }
         
@@ -387,7 +405,7 @@ async function findNextAvailableZaloAccount() {
  * Hàm xử lý nền: Tìm UID Zalo và gửi tin nhắn xác nhận.
  */
 async function processFindUidAndSendMessage(newCustomer) {
-    
+   
     const customerId = newCustomer._id;
     const phone = newCustomer.phone;
     let findUidStatus = "thất bại";
@@ -404,7 +422,8 @@ async function processFindUidAndSendMessage(newCustomer) {
             return;
         }
         
-       
+        
+        
         // 2. Format phone number (đảm bảo có +84)
         let formattedPhone = phone.toString().trim();
         if (formattedPhone.startsWith('+84')) {
@@ -445,12 +464,11 @@ async function processFindUidAndSendMessage(newCustomer) {
         
         // Xử lý retry nếu tài khoản Zalo ngừng hoạt động
         if (!findUidResponse.status && findUidResponse.message?.includes('ngừng hoạt động')) {
-            
             const allAccounts = await ZaloAccount.find({ _id: { $ne: selectedZalo._id } }).sort({ _id: -1 }).lean();
             
             for (const retryZalo of allAccounts) {
                 if (retryZalo.rateLimitPerHour > 0 && retryZalo.rateLimitPerDay > 0) {
-                   
+                    
                     selectedZalo = retryZalo;
                     
                     findUidResponse = await actionZalo({
@@ -463,7 +481,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                         // Retry thành công - XÓA LOG ĐẦU TIÊN (thất bại) và chỉ giữ log thành công
                         if (firstLogId) {
                             await Logs.deleteOne({ _id: firstLogId });
-                           
+                            console.log('[processFindUidAndSendMessage] 🗑️ Đã xóa log thất bại đầu tiên (ID: ' + firstLogId + ') vì retry thành công');
                         }
                         
                         // Log retry thành công
@@ -483,7 +501,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                         });
                         
                         findUidStatus = "thành công (retry)";
-                       
+                        
                         break;
                     } else {
                         // Retry thất bại - log lại nhưng không xóa log đầu tiên
@@ -607,7 +625,7 @@ async function processFindUidAndSendMessage(newCustomer) {
                     const finalMessageToSend = await formatMessage(template, doc, selectedZalo);
                     
                     if (finalMessageToSend) {
-                       
+                        console.log('[processFindUidAndSendMessage] Đang gửi tin nhắn xác nhận...');
                         const sendMessageResponse = await actionZalo({
                             uid: selectedZalo.uid,
                             uidPerson: normalizedUid,
@@ -638,7 +656,6 @@ async function processFindUidAndSendMessage(newCustomer) {
                         if (isSuccess) {
                             messageStatus = "thành công";
                            
-                            
                             // Cập nhật care log và pipelineStatus khi thành công
                             await Customer.findByIdAndUpdate(customerId, {
                                 $push: {
@@ -684,10 +701,10 @@ async function processFindUidAndSendMessage(newCustomer) {
                     }
                 } else {
                     messageStatus = "bỏ qua (không có template)";
-                    
+                    console.log('[processFindUidAndSendMessage] ⚠️ Không tìm thấy template tin nhắn xác nhận');
                 }
             } catch (messageError) {
-                
+                console.error('[processFindUidAndSendMessage] Lỗi trong lúc gửi tin nhắn:', messageError.message);
                 messageStatus = "thất bại";
             }
             
@@ -728,11 +745,11 @@ Hành động xác nhận khách hàng mới: ${phone}
         
         try {
             await sendGP(finalMessage);
-            
+            console.log('[processFindUidAndSendMessage] ✅ Gửi thông báo thành công');
         } catch (gpError) {
             console.error('[processFindUidAndSendMessage] ❌ Gửi thông báo thất bại:', gpError.message);
         }
         
-      
+        console.log('[processFindUidAndSendMessage] ====================================');
     }
 }

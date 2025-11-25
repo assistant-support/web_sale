@@ -77,7 +77,7 @@ export default function Call({ customer, user }) {
 
     // ===== INITIALIZATION =====
     const initializeSDK = useCallback(async () => {
-       
+      
         try {
             // Check if we're in a browser environment
             if (typeof window === 'undefined') {
@@ -103,9 +103,11 @@ export default function Call({ customer, user }) {
     // ===== OMI SDK LOAD HANDLER =====
     const handleSDKLoad = useCallback(async () => {
         try {
+           
             
             // Kiểm tra đang khởi tạo
             if (isInitializing) {
+                console.log('[Call] ⚠️ SDK đang được khởi tạo, bỏ qua...');
                 return;
             }
             
@@ -119,12 +121,14 @@ export default function Call({ customer, user }) {
             
             // Kiểm tra SDK đã được khởi tạo chưa
             if (sdkRef.current) {
-               
+                console.log('[Call] ⚠️ SDK đã được khởi tạo, kiểm tra kết nối...');
+                
                 // Kiểm tra trạng thái kết nối từ SDK
                 try {
                     const status = await sdkRef.current.getStatus?.();
                     if (status && status.connected) {
-                       setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
+                       
+                        setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
                         return;
                     }
                 } catch (error) {
@@ -134,6 +138,7 @@ export default function Call({ customer, user }) {
                 // Nếu SDK đã có nhưng chưa kết nối, thử kết nối lại
                 try {
                     await connectToServer();
+                   
                     return;
                 } catch (error) {
                     console.log('[Call] ⚠️ Không thể kết nối lại SDK:', error);
@@ -159,7 +164,8 @@ export default function Call({ customer, user }) {
             // Kết nối tới tổng đài
             await connectToServer();
             
-           
+            
+            
         } catch (error) {
             console.error('[Call] ❌ Lỗi khởi tạo SDK:', error);
             setConnectionStatus({ status: 'disconnected', text: 'Lỗi khởi tạo' });
@@ -173,6 +179,7 @@ export default function Call({ customer, user }) {
     const connectToServer = useCallback(async () => {
         try {
            
+            
             // Kiểm tra SDK có sẵn không
             if (!sdkRef.current) {
                 throw new Error('SDK not available');
@@ -187,10 +194,11 @@ export default function Call({ customer, user }) {
                 sipPassword: 'Ws9nsNEClG' // Password từ OMICall
             });
             
-            
+           
             // Xử lý trường hợp "Already registered"
             if (registerStatus?.status === false && registerStatus?.error === 'Already registered') {
-               setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
+                console.log('[Call] ⚠️ SDK đã được đăng ký trước đó, tiếp tục...');
+                setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
                 setIsInitialized(true);
                 return;
             }
@@ -201,7 +209,8 @@ export default function Call({ customer, user }) {
             
             setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
             setIsInitialized(true);
-           
+          
+            
         } catch (error) {
             console.error('[Call] ❌ Lỗi kết nối:', error);
             setConnectionStatus({ status: 'disconnected', text: 'Kết nối thất bại' });
@@ -215,8 +224,10 @@ export default function Call({ customer, user }) {
         if (!sdk) return;
         
        
+        
         // 1. Sự kiện đăng ký (register status)
         sdk.on('register', (data) => {
+           
             const statusMap = {
                 'connected': { status: 'connected', text: 'Đã kết nối (OMI)' },
                 'connecting': { status: 'connecting', text: 'Đang kết nối...' },
@@ -227,6 +238,7 @@ export default function Call({ customer, user }) {
         
         // 2. Đang kết nối (call started)
         sdk.on('connecting', (callData) => {
+            console.log('[Call] 📞 OMI connecting event:', callData);
             currentCallRef.current = callData;
             setCallStage('connecting');
             setStatusText('Đang kết nối...');
@@ -235,14 +247,16 @@ export default function Call({ customer, user }) {
         
         // 3. Đang đổ chuông (ringing)
         sdk.on('ringing', (callData) => {
-           currentCallRef.current = callData;
+            console.log('[Call] 📞 OMI ringing event:', callData);
+            currentCallRef.current = callData;
             setCallStage('ringing');
             setStatusText('Đang đổ chuông...');
         });
         
         // 4. Cuộc gọi được chấp nhận (accepted)
         sdk.on('accepted', (callData) => {
-             currentCallRef.current = callData;
+            console.log('[Call] ✅ OMI accepted event:', callData);
+            currentCallRef.current = callData;
             setCallStage('in_call');
             setStatusText('Đang trong cuộc gọi');
             setIsRecording(true);
@@ -271,11 +285,13 @@ export default function Call({ customer, user }) {
         
         // 6. Cuộc gọi kết thúc (ended)
         sdk.on('ended', (info) => {
-             onCallEnded(info);
+            console.log('[Call] 📞 OMI ended event:', info);
+            onCallEnded(info);
         });
         
         // 7. Lỗi cuộc gọi
         sdk.on('failed', (error) => {
+            console.log('[Call] ❌ OMI call failed:', error);
             setCallStage('idle');
             setStatusText('Cuộc gọi thất bại');
             setIsCalling(false);
@@ -291,6 +307,7 @@ export default function Call({ customer, user }) {
         try {
             const localStream = callData?.streams?.local;
             const remoteStream = callData?.streams?.remote;
+            
            
             // Lưu trữ audio streams
             localStreamRef.current = localStream;
@@ -312,7 +329,7 @@ export default function Call({ customer, user }) {
                 const playAudio = async () => {
                     try {
                         await remoteAudioRef.current.play();
-                       
+                        console.log('[Call] 🔊 Audio playback started successfully');
                     } catch (err) {
                         console.error('[Call] ❌ Lỗi play audio:', err);
                         // Retry sau 100ms
@@ -332,7 +349,8 @@ export default function Call({ customer, user }) {
 
     // ===== XỬ LÝ KẾT THÚC CUỘC GỌI ====
     const onCallEnded = useCallback((info) => {
-       
+        console.log('[Call] 📞 Cuộc gọi kết thúc:', info);
+        
         // Reset state
         setCallStage('idle');
         setStatusText('Sẵn sàng để gọi');
@@ -363,7 +381,7 @@ export default function Call({ customer, user }) {
     // 1. Cấu hình microphone với chất lượng cao
     const getHighQualityMicrophone = async () => {
         try {
-          
+            console.log('[Call] 🎤 Getting high quality microphone...');
             const stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         // Cấu hình chất lượng cao với âm lượng tối đa
@@ -391,12 +409,13 @@ export default function Call({ customer, user }) {
             const audioTracks = stream.getAudioTracks();
             if (audioTracks.length > 0) {
                 const settings = audioTracks[0].getSettings();
-               
+                console.log('[Call] 🎤 Microphone settings:', settings);
             }
             
             return stream;
         } catch (error) {
-           // Fallback về cấu hình cơ bản
+            console.error('[Call] ❌ High quality microphone failed, fallback to basic:', error);
+            // Fallback về cấu hình cơ bản
             return await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                 video: false
@@ -407,7 +426,8 @@ export default function Call({ customer, user }) {
     // 2. AudioContext với xử lý âm thanh chuyên nghiệp
     const createHighQualityAudioContext = () => {
         try {
-             const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            console.log('[Call] 🎤 Creating high quality AudioContext...');
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)({
                 sampleRate: 48000,        // Tần số lấy mẫu cao
                 latencyHint: 'interactive' // Độ trễ thấp
             });
@@ -427,7 +447,8 @@ export default function Call({ customer, user }) {
     // 3. Mix audio với xử lý âm thanh chuyên nghiệp
     const createHighQualityAudioMix = (audioContext, localStream, remoteStream) => {
         try {
-             const destination = audioContext.createMediaStreamDestination();
+            console.log('[Call] 🎤 Creating high quality audio mix...');
+            const destination = audioContext.createMediaStreamDestination();
             
             // Xử lý local stream (microphone)
             if (localStream) {
@@ -447,7 +468,8 @@ export default function Call({ customer, user }) {
                 localFilter.connect(localGain);
                 localGain.connect(destination);
                 
-               }
+                console.log('[Call] 🎤 Connected local stream with audio processing');
+            }
             
             // Xử lý remote stream (khách hàng)
             if (remoteStream) {
@@ -467,7 +489,8 @@ export default function Call({ customer, user }) {
                 remoteFilter.connect(remoteGain);
                 remoteGain.connect(destination);
                 
-                }
+                console.log('[Call] 🎤 Connected remote stream with audio processing');
+            }
             
             return destination;
         } catch (error) {
@@ -489,7 +512,7 @@ export default function Call({ customer, user }) {
     // 4. MediaRecorder với cấu hình tối ưu
     const createHighQualityRecorder = (stream) => {
         try {
-         
+            console.log('[Call] 🎤 Creating high quality recorder...');
             // Kiểm tra hỗ trợ codec
             const supportedTypes = [
                 'audio/webm;codecs=opus',
@@ -506,6 +529,7 @@ export default function Call({ customer, user }) {
                 }
             }
             
+            console.log('[Call] 🎤 Selected codec:', selectedType);
             
             // Tạo MediaRecorder với cấu hình chất lượng cao
             const recorder = new MediaRecorder(stream, {
@@ -527,6 +551,7 @@ export default function Call({ customer, user }) {
     // 5. Kiểm tra và tối ưu hóa môi trường ghi âm
     const optimizeRecordingEnvironment = async () => {
         try {
+            console.log('[Call] 🔍 Optimizing recording environment...');
             // Kiểm tra hỗ trợ Web Audio API
             if (!window.AudioContext && !window.webkitAudioContext) {
                 throw new Error('Web Audio API not supported');
@@ -544,11 +569,13 @@ export default function Call({ customer, user }) {
                 webm: MediaRecorder.isTypeSupported('audio/webm')
             };
             
+            console.log('[Call] 🔍 Codec support:', codecSupport);
             
             // Kiểm tra microphone chất lượng
             const devices = await navigator.mediaDevices.enumerateDevices();
             const audioInputs = devices.filter(device => device.kind === 'audioinput');
             
+            console.log('[Call] 🔍 Available audio inputs:', audioInputs);
             
             return {
                 audioContextSupported: true,
@@ -565,7 +592,7 @@ export default function Call({ customer, user }) {
 
     // ===== RECORDING FUNCTIONS =====
     const startRecording = async () => {
-        
+        console.log('[Call] 🎤 Starting high quality recording...');
         try {
             // 1. Tối ưu hóa môi trường
             const envCheck = await optimizeRecordingEnvironment();
@@ -577,9 +604,10 @@ export default function Call({ customer, user }) {
             const localStream = localStreamRef.current;
             const remoteStream = remoteStreamRef.current;
             
-         
+           
             
             if (!localStream && !remoteStream) {
+                console.log('[Call] ⚠️ No audio streams available, using high quality microphone fallback');
                 // Fallback: sử dụng microphone chất lượng cao
                 const micStream = await getHighQualityMicrophone();
                 const audioContext = createHighQualityAudioContext();
@@ -594,17 +622,17 @@ export default function Call({ customer, user }) {
                 recorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         recordedChunksRef.current.push(event.data);
-                        
+                        console.log('[Call] 🎤 Microphone chunk:', event.data.size, 'bytes');
                     }
                 };
                 
                 recorder.onstop = async () => {
-                   
+                    console.log('[Call] 🎤 Recording stopped, processing...');
                     await processRecording();
                 };
                 
                 recorder.start(1000);
-              
+                console.log('[Call] 🎤 High quality microphone recording started');
                 return;
             }
             
@@ -627,18 +655,18 @@ export default function Call({ customer, user }) {
             recorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     recordedChunksRef.current.push(event.data);
-                   
+                    console.log('[Call] 🎤 High quality audio chunk:', event.data.size, 'bytes');
                 }
             };
             
             recorder.onstop = async () => {
-               
+                console.log('[Call] 🎤 Recording stopped, processing...');
                 await processRecording();
             };
             
             // 8. Bắt đầu ghi âm
             recorder.start(1000); // Chunk mỗi 1 giây
-          
+            console.log('[Call] 🎤 High quality recording started with mixed audio streams');
             
         } catch (error) {
             console.error('[Call] ❌ High quality recording failed:', error);
@@ -650,7 +678,7 @@ export default function Call({ customer, user }) {
     // Fallback recording khi high quality thất bại
     const startBasicRecording = async () => {
         try {
-           
+            console.log('[Call] 🎤 Starting basic recording (fallback)...');
             const micStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             });
@@ -690,7 +718,7 @@ export default function Call({ customer, user }) {
             };
             
             recorder.start(1000);
-           
+            console.log('[Call] 🎤 Basic recording started (fallback)');
             
         } catch (error) {
             console.error('[Call] ❌ Basic recording also failed:', error);
@@ -699,7 +727,7 @@ export default function Call({ customer, user }) {
     };
 
     const stopRecording = () => {
-       
+        console.log('[Call] 🎤 Stopping recording...');
         try {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -716,7 +744,7 @@ export default function Call({ customer, user }) {
             localStreamRef.current = null;
             remoteStreamRef.current = null;
             
-           
+            console.log('[Call] 🎤 Recording stopped');
         } catch (error) {
             console.error('[Call] ❌ Recording stop failed:', error);
         }
@@ -724,7 +752,8 @@ export default function Call({ customer, user }) {
 
     const processRecording = async () => {
         try {
-           
+            console.log('[Call] 🎤 Processing recording...');
+            
             // Validate customer and user IDs
             if (!customer?._id) {
                 console.error('[Call] ❌ No customer ID');
@@ -741,10 +770,14 @@ export default function Call({ customer, user }) {
                 area: customer.area || 'Không xác định'
             };
             
+            console.log('[Call] 🎤 Using customer as user:', customerAsUser);
             
+            console.log('[Call] 🎤 Customer ID:', customer._id);
+            console.log('[Call] 🎤 Customer as User:', customerAsUser);
             
             const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-           
+            console.log('[Call] 🎤 Audio blob created:', audioBlob.size, 'bytes');
+            
             // Tạo tên file với thông tin khách hàng
             const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
             const fileName = `rec-${customerAsUser.phone}-${timestamp}.webm`;
@@ -766,7 +799,8 @@ export default function Call({ customer, user }) {
             const result = await saveCallAction(null, formData);
             
             if (result.success) {
-               toast.success('Cuộc gọi đã được lưu thành công');
+                console.log('[Call] 🎤 Call saved successfully');
+                toast.success('Cuộc gọi đã được lưu thành công');
                 
                 // Reload call history
                 const history = await call_data({ customerId: customer._id });
@@ -784,27 +818,30 @@ export default function Call({ customer, user }) {
 
     // ===== CALL FUNCTIONS =====
     const makeCall = async () => {
+        console.log('[Call] 📞 makeCall() called');
         
         try {
             if (connectionStatus.status !== 'connected') {
+                console.log('[Call] ❌ Not connected');
                 toast.error('Chưa kết nối tổng đài');
                 return;
             }
 
             if (isCalling) {
-                
+                console.log('[Call] ❌ Already calling');
                 toast.warning('Đang có cuộc gọi khác');
                 return;
             }
 
             const phoneNumber = customer?.phone;
             if (!phoneNumber) {
-               
+                console.log('[Call] ❌ No phone number');
                 toast.error('Thiếu số điện thoại khách hàng');
                 return;
             }
 
-           
+            console.log('[Call] 📞 Making call to:', phoneNumber);
+
             // Request microphone permission
             try {
                 await navigator.mediaDevices.getUserMedia({
@@ -821,7 +858,8 @@ export default function Call({ customer, user }) {
             callCountRef.current += 1;
             const callId = `call_${callCountRef.current}_${Date.now()}`;
             
-           
+            console.log('[Call] 📞 Starting real call...');
+            
             // Set connecting state
             setCallStage('connecting');
             setStatusText('Đang kết nối...');
@@ -830,9 +868,11 @@ export default function Call({ customer, user }) {
             
             // Thực hiện cuộc gọi thực tế
             try {
+                console.log('[Call] 📞 Making real call to:', phoneNumber);
                 
                 // Kiểm tra OMI Call SDK có sẵn không
                 if (sdkRef.current) {
+                    console.log('[Call] 📞 Using OMI Call SDK for real call');
                     
                     // Thực hiện cuộc gọi thật qua OMI Call SDK
                     await sdkRef.current.makeCall(phoneNumber, {
@@ -841,10 +881,12 @@ export default function Call({ customer, user }) {
                         userData: `Gọi từ web app - ${new Date().toLocaleString('vi-VN')}`
                     });
                     
+                    console.log('[Call] ✅ OMI Call initiated successfully');
                     toast.success(`Đang gọi ${phoneNumber} qua OMI Call SDK`);
                     
                 } else {
                     // Fallback: Mở ứng dụng gọi điện thực tế
+                    console.log('[Call] 📞 OMI SDK not available, using tel: protocol');
                     const telUrl = `tel:${phoneNumber}`;
                     const link = document.createElement('a');
                     link.href = telUrl;
@@ -853,6 +895,7 @@ export default function Call({ customer, user }) {
                     link.click();
                     document.body.removeChild(link);
                     
+                    console.log('[Call] 📱 Real call initiated - Phone app opened');
                     toast.success(`Đang gọi ${phoneNumber}. Vui lòng thực hiện cuộc gọi thủ công.`);
                     
                     // Reset state sau khi mở phone app
@@ -887,6 +930,7 @@ export default function Call({ customer, user }) {
 
     const endCall = async () => {
         try {
+            console.log('[Call] 📞 Ending call');
             
             // Debug: Log available methods
             if (currentCallRef.current) {
@@ -898,12 +942,13 @@ export default function Call({ customer, user }) {
             
             // End call using multiple methods to ensure call is terminated
             if (currentCallRef.current) {
+                console.log('[Call] 🔄 Attempting to end call via currentCallRef...');
                 
                 // Method 1: Try end() method
                 if (typeof currentCallRef.current.end === 'function') {
                     try {
                         await currentCallRef.current.end();
-                        
+                        console.log('[Call] ✅ Call ended via currentCallRef.end()');
                     } catch (error) {
                         console.log('[Call] ⚠️ currentCallRef.end() failed:', error);
                     }
@@ -913,7 +958,7 @@ export default function Call({ customer, user }) {
                 if (currentCallRef.current && typeof currentCallRef.current.hangup === 'function') {
                     try {
                         await currentCallRef.current.hangup();
-                       
+                        console.log('[Call] ✅ Call ended via currentCallRef.hangup()');
                     } catch (error) {
                         console.log('[Call] ⚠️ currentCallRef.hangup() failed:', error);
                     }
@@ -923,7 +968,7 @@ export default function Call({ customer, user }) {
                 if (currentCallRef.current && typeof currentCallRef.current.terminate === 'function') {
                     try {
                         await currentCallRef.current.terminate();
-                       
+                        console.log('[Call] ✅ Call ended via currentCallRef.terminate()');
                     } catch (error) {
                         console.log('[Call] ⚠️ currentCallRef.terminate() failed:', error);
                     }
@@ -932,12 +977,13 @@ export default function Call({ customer, user }) {
             
             // Fallback: Try SDK methods
             if (sdkRef.current) {
+                console.log('[Call] 🔄 Attempting to end call via SDK...');
                 
                 // Method 1: Try endCall() method
                 if (typeof sdkRef.current.endCall === 'function') {
                     try {
                         await sdkRef.current.endCall();
-                        
+                        console.log('[Call] ✅ Call ended via sdkRef.endCall()');
                     } catch (error) {
                         console.log('[Call] ⚠️ sdkRef.endCall() failed:', error);
                     }
@@ -947,7 +993,7 @@ export default function Call({ customer, user }) {
                 if (typeof sdkRef.current.hangup === 'function') {
                     try {
                         await sdkRef.current.hangup();
-                      
+                        console.log('[Call] ✅ Call ended via sdkRef.hangup()');
                     } catch (error) {
                         console.log('[Call] ⚠️ sdkRef.hangup() failed:', error);
                     }
@@ -957,7 +1003,7 @@ export default function Call({ customer, user }) {
                 if (typeof sdkRef.current.disconnect === 'function') {
                     try {
                         await sdkRef.current.disconnect();
-                       
+                        console.log('[Call] ✅ Call ended via sdkRef.disconnect()');
                     } catch (error) {
                         console.log('[Call] ⚠️ sdkRef.disconnect() failed:', error);
                     }
@@ -968,14 +1014,14 @@ export default function Call({ customer, user }) {
             if (sdkRef.current && typeof sdkRef.current.disconnectAll === 'function') {
                 try {
                     await sdkRef.current.disconnectAll();
-                   
+                    console.log('[Call] ✅ All calls disconnected via disconnectAll()');
                 } catch (error) {
                     console.log('[Call] ⚠️ disconnectAll() failed:', error);
                 }
             }
             
             // Force reset state regardless of SDK response
-            
+            console.log('[Call] 🔄 Force resetting call state...');
             onCallEnded(null);
             
             toast.success('Đã kết thúc cuộc gọi');
@@ -984,7 +1030,7 @@ export default function Call({ customer, user }) {
             console.error('[Call] ❌ End call error:', error);
             
             // Force reset state even if there's an error
-           
+            console.log('[Call] 🔄 Force resetting call state due to error...');
             onCallEnded(null);
             
             toast.success('Đã kết thúc cuộc gọi');
@@ -1007,7 +1053,7 @@ export default function Call({ customer, user }) {
 
     const forceReloadHistory = async () => {
         try {
-           
+            console.log('[Call] 🔄 Force reloading call history...');
             const history = await call_data({ customerId: customer._id });
             setCallHistory(history || []);
             toast.success('Đã tải lại dữ liệu cuộc gọi');
@@ -1019,13 +1065,13 @@ export default function Call({ customer, user }) {
 
     // ===== EFFECTS =====
     useEffect(() => {
-       
+        console.log('[Call] 🚀 Component mounted, initializing...');
         initializeSDK();
         
         // Check if OMI SDK is available and initialize if needed
         const checkAndInitializeOMI = async () => {
             if (window.OMICallSDK && !sdkRef.current) {
-               
+                console.log('[Call] 🔄 OMI SDK available, initializing...');
                 await handleSDKLoad();
             }
         };
@@ -1034,7 +1080,7 @@ export default function Call({ customer, user }) {
         const timeoutId = setTimeout(checkAndInitializeOMI, 1000);
         
         return () => {
-           
+            console.log('[Call] 🧹 Component unmounting, cleaning up...');
             clearTimeout(timeoutId);
             
             // Clear duration interval
@@ -1057,7 +1103,7 @@ export default function Call({ customer, user }) {
     useEffect(() => {
         const checkOMISDK = () => {
             if (window.OMICallSDK && !sdkRef.current) {
-               
+                console.log('[Call] 🔄 OMI SDK detected, initializing...');
                 handleSDKLoad();
             }
         };
@@ -1079,7 +1125,8 @@ export default function Call({ customer, user }) {
         const loadCallHistory = async () => {
             try {
                 setLoading(true);
-               
+                console.log('[Call] 📚 Loading call history for customer:', customer._id);
+                
                 const history = await call_data({ customerId: customer._id });
                 setCallHistory(history || []);
             } catch (error) {

@@ -34,6 +34,34 @@ const normalizePancakeMessage = (raw, pageId) => {
     // Handle image attachments
     const imageAtts = atts.filter((a) => a?.type === 'photo' && a?.url);
     if (imageAtts.length > 0) {
+        // Kiểm tra xem có text kèm theo không
+        let text =
+            typeof raw.original_message === 'string' && raw.original_message.trim().length > 0
+                ? raw.original_message.trim()
+                : htmlToPlainText(raw.message || '');
+        
+        const hasText = text && text.trim().length > 0;
+        
+        // Nếu có cả ảnh và text, trả về type 'images_with_text'
+        if (hasText) {
+            return {
+                id: raw.id,
+                inserted_at: ts,
+                senderType,
+                status: raw.status || 'sent',
+                content: {
+                    type: 'images_with_text',
+                    images: imageAtts.map((a) => ({
+                        url: a.url,
+                        width: a?.image_data?.width,
+                        height: a?.image_data?.height,
+                    })),
+                    text: text.trim(),
+                },
+            };
+        }
+        
+        // Chỉ có ảnh, không có text
         return {
             id: raw.id,
             inserted_at: ts,

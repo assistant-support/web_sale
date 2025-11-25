@@ -127,10 +127,10 @@ const createAutoCustomer = async (customerName, messageContent, conversationId, 
         const result = await response.json();
         
         if (result.success) {
-           
+            console.log('✅ [Auto Customer] Tạo khách hàng thành công:', result);
             return result;
         } else {
-           
+            console.log('⚠️ [Auto Customer] Không thể tạo khách hàng:', result.message);
             return null;
         }
     } catch (error) {
@@ -258,6 +258,34 @@ const normalizePancakeMessage = (raw, pageId) => {
         })
         .filter((a) => a?.url);
     if (imageAtts.length > 0) {
+        // Kiểm tra xem có text kèm theo không
+        let text =
+            typeof raw.original_message === 'string' && raw.original_message.trim().length > 0
+                ? raw.original_message.trim()
+                : htmlToPlainText(raw.message || '');
+        
+        const hasText = text && text.trim().length > 0;
+        
+        // Nếu có cả ảnh và text, trả về type 'images_with_text'
+        if (hasText) {
+            return {
+                id: raw.id,
+                inserted_at: ts,
+                senderType,
+                status: raw.status || 'sent',
+                content: {
+                    type: 'images_with_text',
+                    images: imageAtts.map((a) => ({
+                        url: a.url,
+                        width: a?.image_data?.width || a?.width,
+                        height: a?.image_data?.height || a?.height,
+                    })),
+                    text: text.trim(),
+                },
+            };
+        }
+        
+        // Chỉ có ảnh, không có text
         return {
             id: raw.id,
             inserted_at: ts,
@@ -422,7 +450,12 @@ const normalizePancakeMessage = (raw, pageId) => {
         // Debug log để kiểm tra dữ liệu
         if (text.includes('[') || text.includes('❤️') || text.includes(']')) {
             console.log('🔍 [Reaction Parse] Original text:', text);
-         
+            console.log('🔍 [Reaction Parse] Raw message:', {
+                id: raw.id,
+                original_message: raw.original_message,
+                message: raw.message,
+                attachments: raw.attachments
+            });
         }
         
         // Tìm tất cả các reaction ở đầu message trong format [emoji] hoặc [emoji ]
@@ -453,7 +486,13 @@ const normalizePancakeMessage = (raw, pageId) => {
                 // Loại bỏ phần reaction ở đầu khỏi text
                 cleanText = text.replace(reactionRegex, '').trim();
                 
-               
+                console.log('✅ [Reaction Parse] Parsed:', {
+                    reactions,
+                    cleanText,
+                    originalText: text,
+                    reactionPart,
+                    reactionMatches: reactionMatches.map(m => m[1])
+                });
             }
         } else {
             // Nếu không match với regex, thử cách khác: tìm pattern [xxx] ở đầu
@@ -464,7 +503,11 @@ const normalizePancakeMessage = (raw, pageId) => {
                 cleanText = simpleMatch[2].trim();
                 if (reactionText && reactionText !== 'REACTION' && reactionText !== 'reaction') {
                     reactions = [reactionText];
-                    
+                    console.log('✅ [Reaction Parse] Simple match:', {
+                        reactions,
+                        cleanText,
+                        originalText: text
+                    });
                 }
             }
         }
@@ -483,14 +526,14 @@ const normalizePancakeMessage = (raw, pageId) => {
     } : { type: 'system', content: '' };
     
     // Debug log để kiểm tra kết quả cuối cùng
-    // if (reactions.length > 0) {
-    //     console.log('📤 [Reaction Parse] Final normalized message:', {
-    //         id: raw.id,
-    //         content: normalizedContent,
-    //         hasReactions: !!normalizedContent.reactions,
-    //         reactionsCount: reactions.length
-    //     });
-    // }
+    if (reactions.length > 0) {
+        console.log('📤 [Reaction Parse] Final normalized message:', {
+            id: raw.id,
+            content: normalizedContent,
+            hasReactions: !!normalizedContent.reactions,
+            reactionsCount: reactions.length
+        });
+    }
     
     return {
         id: raw.id,
@@ -659,7 +702,61 @@ const LabelDropdown = ({
     );
 };
 
-const MessageContent = ({ content, onVideoClick }) => {
+// Helper function để convert URLs trong text thành clickable links
+const renderTextWithLinks = (text, isFromPage = false) => {
+    if (!text || typeof text !== 'string') return text;
+    
+    // Regex để detect URLs (http://, https://, www.)
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = urlRegex.exec(text)) !== null) {
+        // Thêm text trước URL
+        if (match.index > lastIndex) {
+            parts.push(text.substring(lastIndex, match.index));
+        }
+        
+        // Xử lý URL
+        let url = match[0];
+        // Nếu là www. thì thêm https://
+        if (url.startsWith('www.')) {
+            url = 'https://' + url;
+        }
+        
+        // Style khác nhau cho tin nhắn từ page (nền xanh) và từ customer (nền trắng)
+        const linkClassName = isFromPage 
+            ? "text-blue-100 hover:text-white underline break-all font-medium"
+            : "text-blue-600 hover:text-blue-800 underline break-all";
+        
+        // Thêm link
+        parts.push(
+            <a
+                key={match.index}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClassName}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {match[0]}
+            </a>
+        );
+        
+        lastIndex = match.index + match[0].length;
+    }
+    
+    // Thêm phần text còn lại
+    if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+    }
+    
+    // Nếu không có URL nào, trả về text gốc
+    return parts.length > 0 ? parts : text;
+};
+
+const MessageContent = ({ content, onVideoClick, isFromPage = false }) => {
     if (!content)
         return (
             <h5 className="italic text-gray-400" style={{ textAlign: 'end' }}>
@@ -670,8 +767,8 @@ const MessageContent = ({ content, onVideoClick }) => {
     switch (content.type) {
         case 'text':
             return (
-                <h5 className="w" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
-                    {content.content}
+                <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
+                    {renderTextWithLinks(content.content, isFromPage)}
                 </h5>
             );
 
@@ -688,6 +785,31 @@ const MessageContent = ({ content, onVideoClick }) => {
                             />
                         </a>
                     ))}
+                </div>
+            );
+
+        case 'images_with_text':
+            return (
+                <div className="flex flex-col gap-2 mt-1">
+                    {/* Hiển thị text trước */}
+                    {content.text && (
+                        <h5 className="w-full" style={{ color: 'inherit', whiteSpace: 'pre-wrap' }}>
+                            {renderTextWithLinks(content.text, isFromPage)}
+                        </h5>
+                    )}
+                    {/* Hiển thị ảnh sau */}
+                    <div className="flex flex-wrap gap-2">
+                        {content.images.map((img, i) => (
+                            <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                                <img
+                                    src={img.url}
+                                    alt={`Attachment ${i + 1}`}
+                                    className="max-w-[240px] max-h-[240px] rounded-lg object-cover"
+                                    loading="lazy"
+                                />
+                            </a>
+                        ))}
+                    </div>
                 </div>
             );
 
@@ -966,7 +1088,13 @@ export default function ChatClient({
                             const firstCustomer = messagesData.customers[0];
                             // Ưu tiên lấy id (UUID), sau đó mới đến fb_id
                             customerIdFromAPI = firstCustomer.id || firstCustomer.fb_id || '';
-                          
+                            console.log('📋 [handleToggleLabel] Customer data from API:', {
+                                id: firstCustomer.id,
+                                fb_id: firstCustomer.fb_id,
+                                customer_id: firstCustomer.customer_id,
+                                selected: customerIdFromAPI,
+                                fullCustomer: firstCustomer
+                            });
                         } else {
                             console.warn('⚠️ [handleToggleLabel] Không tìm thấy customers array trong response');
                         }
@@ -979,7 +1107,12 @@ export default function ChatClient({
                     customerIdFromAPI = selectedConvo.customers?.[0]?.id || selectedConvo.customers?.[0]?.fb_id || '';
                 }
 
-              
+                console.log('📤 [handleToggleLabel] Calling toggleLabelForCustomer:', {
+                    labelId,
+                    pageId,
+                    conversationId: conversationIdFromAPI,
+                    customerId: customerIdFromAPI
+                });
 
                 // Gọi hàm toggleLabelForCustomer với pageId, conversationId và customerId
                 const res = await toggleLabelForCustomer({ 
@@ -989,7 +1122,8 @@ export default function ChatClient({
                     customerId: customerIdFromAPI
                 });
                 
-               
+                console.log('📥 [handleToggleLabel] Response:', res);
+                
                 if (!res?.success) {
                     toast.error(res?.error || 'Không thể cập nhật nhãn');
                     console.error('❌ [handleToggleLabel] Error:', res?.error);
@@ -1198,7 +1332,15 @@ export default function ChatClient({
                     const platform = pageConfig?.platform || 'facebook';
                     const pageName = pageConfig?.name || 'Page Facebook';
                     
-                  
+                    console.log('🔍 [Auto Customer] Phát hiện số điện thoại trong tin nhắn:', {
+                        customerName,
+                        messageText,
+                        detectedPhones,
+                        conversationId,
+                        platform,
+                        pageName,
+                        rawMsg: msg
+                    });
                     
                     // Gọi API tạo khách hàng tự động (không await để không block UI)
                     createAutoCustomer(customerName, messageText, conversationId, platform, pageName)
@@ -1612,7 +1754,13 @@ export default function ChatClient({
                 }
             }
             
-          
+            console.log('📤 [ChatClient] Loading messages:', {
+                platform: pageConfig?.platform,
+                conversationId: conversation.id,
+                conversationIdForRequest,
+                isZalo,
+                customerId
+            });
             
             // Tải tin nhắn - với Zalo, customerId có thể là null
             s.emit(
@@ -1635,7 +1783,7 @@ export default function ChatClient({
                         const normalized = sortAscByTime(
                             res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
                         );
-                       
+                        console.log('✅ [ChatClient] Normalized messages:', normalized.length);
                         setMessages(normalized);
                         // Set hasMore dựa trên số lượng tin nhắn (nếu có tin nhắn thì có thể còn tin nhắn cũ hơn)
                         setHasMore(res.items.length > 0);
@@ -1689,7 +1837,11 @@ export default function ChatClient({
         const trySelect = (convo, context = {}) => {
             if (!convo) return false;
             const convoName = convo?.customers?.[0]?.name || convo?.from?.name || 'Unknown';
-          
+            console.log('✅ [Preselect Match] Selecting conversation:', {
+                id: convo.id,
+                name: convoName,
+                ...context,
+            });
             handleSelectConvo(convo);
             return true;
         };
@@ -1788,8 +1940,14 @@ export default function ChatClient({
             }
         }
 
-      
-       console.log('🔍 [Preselect Match] Best match:', best ? {
+        console.log('🔍 [Preselect Match] Looking for:', {
+            customerName: preselect.name,
+            normalized: preNameNormalized,
+            phone: prePhone,
+            nameParts: preNameParts
+        });
+        console.log('🔍 [Preselect Match] Scored conversations:', scored.sort((a, b) => b.score - a.score).slice(0, 5));
+        console.log('🔍 [Preselect Match] Best match:', best ? {
             id: best.id,
             name: best?.customers?.[0]?.name || best?.from?.name || 'Unknown',
             score: bestScore
@@ -1941,10 +2099,47 @@ export default function ChatClient({
         setPendingImages((prev) => prev.filter((x) => x.localId !== localId));
     }, []);
 
+    // Upload video qua API route để tránh CORS và xử lý tốt hơn
+    const uploadVideoDirectly = useCallback(async (file, pageId, accessToken) => {
+        try {
+            const form = new FormData();
+            form.append('file', file);
+            form.append('pageId', pageId);
+            form.append('accessToken', accessToken);
+
+            const response = await fetch('/api/pancake/upload-video', {
+                method: 'POST',
+                body: form,
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Upload thất bại với mã lỗi ${response.status}`);
+            }
+
+            const data = await response.json().catch(() => null);
+
+            if (!data?.success || !data?.contentId || !data?.attachmentId || !data?.url) {
+                throw new Error(data?.error || 'Phản hồi từ server không hợp lệ');
+            }
+
+            return data;
+        } catch (error) {
+            console.error('[uploadVideoDirectly] error:', error);
+            return {
+                success: false,
+                error: error?.message || 'UPLOAD_FAILED'
+            };
+        }
+    }, []);
+
     const onPickVideo = useCallback(async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
         setIsUploadingVideo(true);
+
+        // Giới hạn kích thước video: 50MB
+        const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
 
         try {
             for (const f of files) {
@@ -1952,6 +2147,14 @@ export default function ChatClient({
                     toast.error('Vui lòng chọn tệp video hợp lệ');
                     continue;
                 }
+                
+                // Kiểm tra kích thước file trước khi upload
+                if (f.size > MAX_VIDEO_SIZE) {
+                    const sizeInMB = (f.size / 1024 / 1024).toFixed(2);
+                    toast.error(`Video nặng ${sizeInMB} MB, không thể tải lên qua hệ thống. Vui lòng chọn video nhỏ hơn 50MB.`);
+                    continue; // Bỏ qua file này, không upload
+                }
+
                 const localId = `local-video-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 const objectUrl = URL.createObjectURL(f);
                 setPendingVideos((prev) => [
@@ -1974,12 +2177,13 @@ export default function ChatClient({
                 ]);
 
                 try {
-                    const res = await uploadVideoToPancakeAction(f, {
-                        pageId: pageConfig.id,
-                        accessToken: token,
-                    });
+                    // Upload qua API route
+                    const res = await uploadVideoDirectly(f, pageConfig.id, token);
                     if (!res?.success) {
                         toast.error(`Tải video thất bại: ${res?.error || ''}`);
+                        // Xóa video pending nếu upload thất bại
+                        setPendingVideos((prev) => prev.filter((it) => it.localId !== localId));
+                        URL.revokeObjectURL(objectUrl);
                         continue;
                     }
                     setPendingVideos((prev) =>
@@ -2002,15 +2206,19 @@ export default function ChatClient({
                                 : it
                         )
                     );
+                    toast.success(`Đã tải video "${f.name}" thành công`);
                 } catch (err) {
                     toast.error(`Tải video thất bại: ${err?.message || ''}`);
+                    // Xóa video pending nếu upload thất bại
+                    setPendingVideos((prev) => prev.filter((it) => it.localId !== localId));
+                    URL.revokeObjectURL(objectUrl);
                 }
             }
             if (videoInputRef.current) videoInputRef.current.value = '';
         } finally {
             setIsUploadingVideo(false);
         }
-    }, [pageConfig.id, token]);
+    }, [pageConfig.id, token, uploadVideoDirectly]);
 
     const removePendingVideo = useCallback((localId) => {
         setPendingVideos((prev) => {
@@ -2023,9 +2231,14 @@ export default function ChatClient({
     }, []);
 
     const handleSendMessage = async (formData) => {
-      
+        console.log('=== SENDING MESSAGE ===');
+        console.log('FormData:', formData);
+        console.log('Selected conversation:', selectedConvo);
+        console.log('PageConfig:', pageConfig);
+        
         if (!selectedConvo) {
-             return;
+            console.log('❌ No selected conversation');
+            return;
         }
         
         const text = (formData.get('message') || '').trim();
@@ -2033,6 +2246,11 @@ export default function ChatClient({
         const hasVideos = pendingVideos.length > 0;
         const hasUnreadyImages = pendingImages.some((img) => !img?.contentId || !img?.remoteUrl);
         const hasUnreadyVideos = pendingVideos.some((v) => !v?.contentId || !v?.remoteUrl);
+        console.log('Message text:', text);
+        console.log('Has images:', hasImages);
+        console.log('Has videos:', hasVideos);
+        console.log('Has unready images:', hasUnreadyImages);
+        console.log('Has unready videos:', hasUnreadyVideos);
         
         if (hasUnreadyImages || hasUnreadyVideos) {
             toast.error('Tệp đang được tải lên, vui lòng chờ hoàn tất trước khi gửi.');
@@ -2040,7 +2258,8 @@ export default function ChatClient({
         }
 
         if (!text && !hasImages && !hasVideos) {
-             return;
+            console.log('❌ No text or media to send');
+            return;
         }
 
         // Optimistic UI - chỉ hiển thị loading state, không tạo tin nhắn tạm
@@ -2095,11 +2314,13 @@ export default function ChatClient({
         }
 
         // Gửi thật
+        console.log('🚀 Sending message to server...');
         let overallOk = true;
         let lastError = null;
         let remainingText = text;
         try {
             if (hasImages) {
+                console.log('📷 Sending image message...');
                 for (let i = 0; i < pendingImages.length; i++) {
                     const it = pendingImages[i];
                     const messageToSend = i === 0 ? remainingText : '';
@@ -2121,6 +2342,7 @@ export default function ChatClient({
                         },
                         messageToSend
                     );
+                    console.log(`📷 Image ${i} send result:`, res);
                     if (!res?.success) {
                         overallOk = false;
                         lastError = res?.error || 'SEND_IMAGE_FAILED';
@@ -2131,38 +2353,47 @@ export default function ChatClient({
             }
 
             if (hasVideos) {
-                 for (let i = 0; i < pendingVideos.length; i++) {
-                    const it = pendingVideos[i];
-                    const messageToSend = !hasImages && i === 0 ? remainingText : '';
-                    const res = await sendVideoAction(
-                        pageConfig.id,
-                        pageConfig.accessToken,
-                        selectedConvo.id,
-                        {
-                            contentId: it.contentId,
-                            attachmentId: it.attachmentId,
-                            url: it.remoteUrl || it.url,
-                            previewUrl: it.previewUrl || it.remoteUrl || it.url,
-                            thumbnailUrl: it.thumbnailUrl,
-                            mimeType: it.mime,
-                            name: it.name,
-                        },
-                        messageToSend
-                    );
-                    if (!res?.success) {
-                        overallOk = false;
-                        lastError = res?.error || 'SEND_VIDEO_FAILED';
-                        console.warn('🎬 Video send failure payload:', {
-                            request: it,
-                            response: res,
-                        });
-                    } else if (!hasImages && i === 0 && messageToSend) {
-                        remainingText = '';
+                console.log('🎬 Sending video message...');
+                setIsUploadingVideo(true); // Vô hiệu hóa input khi đang gửi video
+                try {
+                    for (let i = 0; i < pendingVideos.length; i++) {
+                        const it = pendingVideos[i];
+                        console.log('🎬 [Debug] video payload ready?', it);
+                        const messageToSend = !hasImages && i === 0 ? remainingText : '';
+                        const res = await sendVideoAction(
+                            pageConfig.id,
+                            pageConfig.accessToken,
+                            selectedConvo.id,
+                            {
+                                contentId: it.contentId,
+                                attachmentId: it.attachmentId,
+                                url: it.remoteUrl || it.url,
+                                previewUrl: it.previewUrl || it.remoteUrl || it.url,
+                                thumbnailUrl: it.thumbnailUrl,
+                                mimeType: it.mime,
+                                name: it.name,
+                            },
+                            messageToSend
+                        );
+                        console.log(`🎬 Video ${i} send result:`, res);
+                        if (!res?.success) {
+                            overallOk = false;
+                            lastError = res?.error || 'SEND_VIDEO_FAILED';
+                            console.warn('🎬 Video send failure payload:', {
+                                request: it,
+                                response: res,
+                            });
+                        } else if (!hasImages && i === 0 && messageToSend) {
+                            remainingText = '';
+                        }
                     }
+                } finally {
+                    setIsUploadingVideo(false); // Bật lại input sau khi gửi xong
                 }
             }
 
             if (!hasImages && !hasVideos && remainingText) {
+                console.log('💬 Sending text message...');
                 const r = await sendMessageAction(
                     pageConfig.id,
                     pageConfig.accessToken,
@@ -2256,26 +2487,40 @@ export default function ChatClient({
 
     // Load conversations từ label filter
     useEffect(() => {
-       
+        console.log('🔄 [useEffect] Label filter triggered:', {
+            selectedFilterLabelIds,
+            pageId: pageConfig.id,
+            token: token ? 'exists' : 'missing'
+        });
+
         const loadLabelFilterConversations = async () => {
             if (selectedFilterLabelIds.length === 0) {
-               setLabelFilterConversations([]);
+                console.log('⚠️ [loadLabelFilterConversations] No labels selected, clearing filter');
+                setLabelFilterConversations([]);
                 return;
             }
 
+            console.log('🚀 [loadLabelFilterConversations] Starting to load conversations for labels:', selectedFilterLabelIds);
             setIsLoadingLabelFilter(true);
             
             try {
                 // Lấy conversation_ids và conversationCustomerMap từ database
+                console.log('📞 [loadLabelFilterConversations] Calling getConversationIdsByLabelsAndPage...');
                 const result = await getConversationIdsByLabelsAndPage({
                     labelIds: selectedFilterLabelIds,
                     pageId: pageConfig.id
                 });
 
-               
+                console.log('📥 [loadLabelFilterConversations] Response from getConversationIdsByLabelsAndPage:', result);
+
                 const { conversationIds, conversationCustomerMap } = result;
 
-              
+                console.log('🔍 [loadLabelFilterConversations] Data from database:', {
+                    conversationIdsCount: conversationIds?.length || 0,
+                    conversationIds: conversationIds,
+                    conversationCustomerMap,
+                    pageId: pageConfig.id
+                });
 
                 if (!conversationIds || conversationIds.length === 0) {
                     console.warn('⚠️ [loadLabelFilterConversations] No conversations found in database');
@@ -2285,6 +2530,7 @@ export default function ChatClient({
                 }
 
                 // Gọi API để lấy thông tin conversations, truyền conversationCustomerMap để sử dụng customer_id từ database
+                console.log('📞 [loadLabelFilterConversations] Calling getConversationsFromIds...');
                 const conversationsFromIds = await getConversationsFromIds(
                     pageConfig.id,
                     conversationIds,
@@ -2292,7 +2538,10 @@ export default function ChatClient({
                     conversationCustomerMap
                 );
 
-                
+                console.log('✅ [loadLabelFilterConversations] Loaded conversations:', {
+                    count: conversationsFromIds.length,
+                    conversations: conversationsFromIds
+                });
                 setLabelFilterConversations(conversationsFromIds);
             } catch (error) {
                 console.error('❌ [loadLabelFilterConversations] Error loading label filter conversations:', error);
@@ -2672,7 +2921,7 @@ export default function ChatClient({
                                                         : 'bg-white text-gray-800'
                                                         }`}
                                                 >
-                                                <MessageContent content={msg.content} onVideoClick={setVideoPreview} />
+                                                <MessageContent content={msg.content} onVideoClick={setVideoPreview} isFromPage={msg.senderType === 'page'} />
                                                     <div
                                                         className={`text-xs mt-1 ${msg.senderType === 'page'
                                                             ? 'text-right text-blue-100/80'
@@ -2690,17 +2939,17 @@ export default function ChatClient({
                                                                         msg.content.reactions.length > 0;
                                                     
                                                     // Debug log để kiểm tra
-                                                    // if (msg.content?.type === 'text') {
-                                                    //     console.log('🎨 [Render] Message check:', {
-                                                    //         id: msg.id,
-                                                    //         content: msg.content.content,
-                                                    //         hasReactions,
-                                                    //         reactions: msg.content?.reactions,
-                                                    //         reactionsType: typeof msg.content?.reactions,
-                                                    //         reactionsIsArray: Array.isArray(msg.content?.reactions),
-                                                    //         fullContent: msg.content
-                                                    //     });
-                                                    // }
+                                                    if (msg.content?.type === 'text') {
+                                                        console.log('🎨 [Render] Message check:', {
+                                                            id: msg.id,
+                                                            content: msg.content.content,
+                                                            hasReactions,
+                                                            reactions: msg.content?.reactions,
+                                                            reactionsType: typeof msg.content?.reactions,
+                                                            reactionsIsArray: Array.isArray(msg.content?.reactions),
+                                                            fullContent: msg.content
+                                                        });
+                                                    }
                                                     
                                                     return hasReactions ? (
                                                         <div 
@@ -2819,13 +3068,13 @@ export default function ChatClient({
                                     <input
                                         name="message"
                                         placeholder={
-                                            isUploadingImage || isUploadingVideo
-                                                ? 'Đang tải tệp...'
+                                            isUploadingImage || isUploadingVideo || pendingVideos.length > 0
+                                                ? pendingVideos.length > 0 ? 'Upload video hãy nhấn nút gửi để gửi...' : 'Đang tải tệp...'
                                                 : 'Nhập tin nhắn...'
                                         }
                                         className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
                                         autoComplete="off"
-                                        disabled={isUploadingImage || isUploadingVideo}
+                                        disabled={isUploadingImage || isUploadingVideo || pendingVideos.length > 0}
                                     />
 
                                     <button

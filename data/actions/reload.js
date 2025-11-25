@@ -58,6 +58,12 @@ export async function reloadLabel() {
     revalidateTag('labels')
 }
 
+// Cập nhập dữ liệu khu vực khách hàng (tag: area_customers/area_customer:{_id})
+export async function reloadAreaCustomer(_id) {
+    if (_id) { revalidateTag(`area_customer:${_id}`) }
+    revalidateTag('area_customers')
+}
+
 export async function reloadRunningSchedules() {
     revalidateTag('running-schedules')
 }
