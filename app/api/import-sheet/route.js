@@ -1,5 +1,7 @@
 // app/api/import-sheet/route.js
 
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import mongoose from 'mongoose'; // Vẫn cần mongoose để dùng mongoose.Types.ObjectId

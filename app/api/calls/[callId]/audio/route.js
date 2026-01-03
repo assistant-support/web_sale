@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import connectDB from '@/config/connectDB';
 import checkAuthToken from '@/utils/checktoken';
 import getDriveClient from '@/function/drive/index';

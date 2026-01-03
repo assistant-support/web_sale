@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import ZaloAccount from "@/models/zalo.model";
 import Setting from "@/models/setting.model";
 import connectDB from "@/config/connectDB";

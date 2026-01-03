@@ -1,5 +1,7 @@
 // File: /api/roleuser/[id]/route.js (Tạo file này nếu chưa có)
 
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
 import PostUser from '@/models/users';

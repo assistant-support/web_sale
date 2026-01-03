@@ -1,5 +1,7 @@
 // File: /api/register/route.js
 
+export const runtime = 'nodejs';
+
 import bcrypt from 'bcryptjs';
 import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';

@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
 import Customer from '@/models/customer.model';

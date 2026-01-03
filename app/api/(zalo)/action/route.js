@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import ScheduledJob from "@/models/schedule";
 import ZaloAccount from "@/models/zalo.model";

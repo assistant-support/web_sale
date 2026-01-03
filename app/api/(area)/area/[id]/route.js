@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import connectDB from '@/config/connectDB'
 import Area from '@/models/area'
 import authenticate from '@/utils/authenticate'

@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { revalidateData } from '@/app/actions/customer.actions';
 

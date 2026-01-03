@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
