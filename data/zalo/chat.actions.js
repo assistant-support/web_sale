@@ -253,13 +253,25 @@ export async function sendUserMessage({ accountKey, userId, text = '', attachmen
     const api = await ensureZaloApi(accountKey);
 
     const payload = { msg: text || '', attachments: Array.isArray(attachments) ? attachments : [] };
-    const ack = await api.sendMessage(payload, String(userId));
-    return { ok: true, ack };
+    const { ThreadType } = await import('zca-js');
+    const ack = await api.sendMessage(payload, String(userId), ThreadType.User);
+    
+    // Kiểm tra kết quả
+    const success = (ack?.message !== null && ack?.message?.msgId !== undefined) ||
+                   (Array.isArray(ack?.attachment) && ack?.attachment.length > 0);
+    
+    return { 
+        ok: success, 
+        ack,
+        msgId: ack?.message?.msgId,
+        message: success ? 'Gửi tin nhắn thành công' : 'Gửi tin nhắn thất bại'
+    };
 }
 
 /**
  * changeFriendAlias({ accountKey, userId, alias })
  * - Đổi tên gợi nhớ cho bạn bè
+ * - API: api.changeFriendAlias(alias, friendId)
  */
 export async function changeFriendAlias({ accountKey, userId, alias }) {
     if (!accountKey) throw new Error('accountKey is required');
@@ -267,8 +279,72 @@ export async function changeFriendAlias({ accountKey, userId, alias }) {
     if (typeof alias !== 'string') throw new Error('alias must be string');
 
     const api = await ensureZaloApi(accountKey);
-    const res = await api.changeFriendAlias(userId, alias);
+    // Lưu ý: API zca-js yêu cầu thứ tự: alias trước, friendId (userId) sau
+    const res = await api.changeFriendAlias(alias, userId);
     return { ok: true, result: res };
+}
+
+/**
+ * getFriendRequestStatus({ accountKey, friendId })
+ * - Lấy thông tin trạng thái kết bạn với một người dùng
+ * - API: api.getFriendRequestStatus(friendId)
+ * - Return: { is_friend: number, is_requested: number, is_requesting: number, ... }
+ */
+export async function getFriendRequestStatus({ accountKey, friendId }) {
+    if (!accountKey) return { ok: false, code: 'bad_request', message: 'accountKey is required' };
+    if (!friendId) return { ok: false, code: 'bad_request', message: 'friendId is required' };
+
+    try {
+        const api = await ensureZaloApi(accountKey);
+        const result = await api.getFriendRequestStatus(String(friendId));
+        
+        return {
+            ok: true,
+            is_friend: result?.is_friend ?? 0,
+            is_requested: result?.is_requested ?? 0,
+            is_requesting: result?.is_requesting ?? 0,
+            isSeenFriendReq: result?.isSeenFriendReq ?? false,
+            addFriendPrivacy: result?.addFriendPrivacy ?? 0,
+            raw: result
+        };
+    } catch (err) {
+        return { 
+            ok: false, 
+            code: 'api_error', 
+            message: err?.message || 'Không thể lấy trạng thái bạn bè.',
+            is_friend: 0,
+            is_requested: 0,
+            is_requesting: 0
+        };
+    }
+}
+
+/**
+ * sendFriendRequest({ accountKey, userId, msg })
+ * - Gửi lời mời kết bạn đến một người dùng
+ * - API: api.sendFriendRequest(msg, userId)
+ * - Return: { ok: boolean, result: SendFriendRequestResponse }
+ */
+export async function sendFriendRequest({ accountKey, userId, msg = '' }) {
+    if (!accountKey) return { ok: false, code: 'bad_request', message: 'accountKey is required' };
+    if (!userId) return { ok: false, code: 'bad_request', message: 'userId is required' };
+
+    try {
+        const api = await ensureZaloApi(accountKey);
+        const result = await api.sendFriendRequest(msg || 'Xin chào, hãy kết bạn với tôi!', String(userId));
+        
+        return {
+            ok: true,
+            result: result,
+            message: 'Gửi lời mời kết bạn thành công'
+        };
+    } catch (err) {
+        return { 
+            ok: false, 
+            code: 'api_error', 
+            message: err?.message || 'Không thể gửi lời mời kết bạn.'
+        };
+    }
 }
 
 /**

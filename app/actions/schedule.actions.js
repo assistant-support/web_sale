@@ -2,6 +2,7 @@
 import connectToDatabase from "@/config/connectDB";
 import "@/models/users";
 import ZaloAccount from "@/models/zalo.model";
+import { ZaloAccount as ZaloAccountNew } from "@/models/zalo-account.model";
 import ScheduledJob from "@/models/schedule";
 import checkAuthToken from "@/utils/checktoken";
 import { user_data } from '@/data/actions/get';
@@ -113,7 +114,8 @@ export async function createScheduleAction(prevState, formData) {
     try {
         const user = await checkAuthToken();
         if (!user || !user.id) throw new Error("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.");
-        if (!user.role?.includes('Admin') && !user.role?.includes('Sale')) throw new Error("Bạn không có quyền thực hiện chức năng này.");
+        // Cho phép mọi tài khoản đều có quyền sử dụng các chức năng trong Hành động
+        // if (!user.role?.includes('Admin') && !user.role?.includes('Sale')) throw new Error("Bạn không có quyền thực hiện chức năng này.");
 
         await connectToDatabase();
 
@@ -121,31 +123,106 @@ export async function createScheduleAction(prevState, formData) {
         const tasksToSchedule = JSON.parse(selectedCustomersJSON);
 
         if (!tasksToSchedule || tasksToSchedule.length === 0) throw new Error("Không có khách hàng nào được chọn.");
+        
+        // Debug: Log dữ liệu khách hàng để kiểm tra
+        console.log('[createScheduleAction] Số lượng khách hàng:', tasksToSchedule.length);
+        console.log('[createScheduleAction] Mẫu dữ liệu khách hàng đầu tiên:', JSON.stringify(tasksToSchedule[0], null, 2));
 
         let dbUser = await user_data({ _id: user.id });
         dbUser = dbUser[0] || {};
         if (!dbUser?.zalo?._id) throw new Error("Chưa chọn tài khoản Zalo hoạt động.");
 
         const zaloAccountId = dbUser.zalo._id;
-        const account = await ZaloAccount.findById(zaloAccountId);
-        if (!account) throw new Error("Không tìm thấy tài khoản Zalo.");
+        
+        // Tìm tài khoản từ ZaloAccount mới (Zalo Hệ Thống) trước
+        let zaloAccountNew = await ZaloAccountNew.findById(zaloAccountId).lean();
+        let isNewAccount = true;
+        let account = null;
+        
+        // Nếu không tìm thấy trong ZaloAccount mới, thử tìm trong model cũ (tương thích ngược)
+        if (!zaloAccountNew) {
+            const zaloAccountOld = await ZaloAccount.findById(zaloAccountId).lean();
+            if (zaloAccountOld) {
+                account = zaloAccountOld;
+                isNewAccount = false;
+            }
+        } else {
+            // Format ZaloAccount mới để tương thích với schedulePersonsSmart
+            account = {
+                _id: zaloAccountNew._id,
+                uid: zaloAccountNew.accountKey,
+                name: zaloAccountNew.profile?.displayName || 'Zalo Account',
+                rateLimitPerHour: 999, // ZaloAccount mới không có rate limit, đặt giá trị cao
+                rateLimitPerDay: 9999,
+                rateLimitHourStart: new Date(),
+                rateLimitDayStart: new Date(),
+                actionsUsedThisHour: 0,
+                actionsUsedThisDay: 0
+            };
+        }
+        
+        if (!account) throw new Error("Không tìm thấy tài khoản Zalo trong Zalo Hệ Thống. Vui lòng chọn lại tài khoản trong Cấu hình.");
+        
+        // Lấy accountKey từ ZaloAccount mới hoặc uid từ model cũ
+        const accountKey = isNewAccount ? zaloAccountNew.accountKey : account.uid;
 
-        // --- THÊM MỚI: LỌC KHÁCH HÀNG KHÔNG HỢP LỆ ---
+        // --- LỌC KHÁCH HÀNG: CHỈ CẦN CÓ UID LÀ ĐƯỢC ---
         let validTasks = tasksToSchedule;
         let removedCount = 0;
 
         // Chỉ lọc nếu hành động không phải là 'findUid'
         if (actionType !== 'findUid') {
             const originalCount = validTasks.length;
-            validTasks = validTasks.filter(task =>
-                task.uid && Array.isArray(task.uid) && task.uid.some(
-                    u => u.zalo?.toString() === zaloAccountId.toString() && u.uid
-                )
-            );
+            // Chỉ cần có UID là được, không cần kiểm tra UID thuộc về tài khoản Zalo nào
+            validTasks = validTasks.filter(task => {
+                // Debug: Log để kiểm tra
+                console.log('[createScheduleAction] Kiểm tra task:', {
+                    _id: task._id,
+                    name: task.name,
+                    hasUid: !!task.uid,
+                    uidType: typeof task.uid,
+                    isArray: Array.isArray(task.uid),
+                    uidLength: task.uid?.length,
+                    uidValue: task.uid
+                });
+                
+                // Kiểm tra xem có UID không (bất kỳ UID nào)
+                if (!task.uid) {
+                    console.log('[createScheduleAction] ❌ Task không có field uid');
+                    return false;
+                }
+                
+                if (!Array.isArray(task.uid)) {
+                    console.log('[createScheduleAction] ❌ Task.uid không phải là array:', typeof task.uid);
+                    return false;
+                }
+                
+                if (task.uid.length === 0) {
+                    console.log('[createScheduleAction] ❌ Task.uid là array rỗng');
+                    return false;
+                }
+                
+                // Kiểm tra xem có ít nhất một UID hợp lệ không
+                const hasValidUid = task.uid.some(u => {
+                    const isValid = u && u.uid && String(u.uid).trim().length > 0;
+                    if (!isValid) {
+                        console.log('[createScheduleAction] ❌ UID entry không hợp lệ:', u);
+                    }
+                    return isValid;
+                });
+                
+                if (hasValidUid) {
+                    console.log('[createScheduleAction] ✅ Task có UID hợp lệ');
+                } else {
+                    console.log('[createScheduleAction] ❌ Task không có UID hợp lệ');
+                }
+                
+                return hasValidUid;
+            });
             removedCount = originalCount - validTasks.length;
 
             if (validTasks.length === 0) {
-                return { success: true, message: `Tất cả ${originalCount} người đã bị loại bỏ do không có UID hợp lệ cho tài khoản Zalo này.` };
+                return { success: true, message: `Tất cả ${originalCount} người đã bị loại bỏ do không có UID.` };
             }
         }
         // Từ đây, tất cả logic sẽ sử dụng `validTasks` thay vì `tasksToSchedule`
@@ -175,7 +252,10 @@ export async function createScheduleAction(prevState, formData) {
                     $inc: { 'statistics.total': uniqueTasksToSchedule.length },
                     $set: { estimatedCompletionTime: estimatedCompletion }
                 });
-                await ZaloAccount.updateOne({ _id: zaloAccountId }, { $set: finalCounters });
+                // Chỉ update rate limit nếu là model cũ (ZaloAccount mới không có rate limit)
+                if (!isNewAccount) {
+                    await ZaloAccount.updateOne({ _id: zaloAccountId }, { $set: finalCounters });
+                }
 
                 let message = `Đã có lịch tìm UID đang chạy. Đã thêm ${uniqueTasksToSchedule.length} người mới vào cuối lịch trình.`;
                 if (duplicateCount > 0) message += ` Đã bỏ qua ${duplicateCount} người do bị trùng.`;
@@ -185,7 +265,11 @@ export async function createScheduleAction(prevState, formData) {
         }
 
         const { scheduledTasks, estimatedCompletion, finalCounters } = schedulePersonsSmart(validTasks, account, finalActionsPerHour, actionType);
-        await ZaloAccount.updateOne({ _id: zaloAccountId }, { $set: finalCounters });
+        
+        // Chỉ update rate limit nếu là model cũ (ZaloAccount mới không có rate limit)
+        if (!isNewAccount) {
+            await ZaloAccount.updateOne({ _id: zaloAccountId }, { $set: finalCounters });
+        }
 
         const newJob = await ScheduledJob.create({
             jobName: jobName || `Lịch trình ngày ${new Date().toLocaleDateString("vi-VN")}`,
@@ -204,9 +288,14 @@ export async function createScheduleAction(prevState, formData) {
             },
             createdBy: user.id,
             estimatedCompletionTime: estimatedCompletion,
+            // Đánh dấu đây là job từ "Hành động" (Bulk Actions) - không tự động trigger workflow
+            isManualAction: true,
         });
 
-        await ZaloAccount.findByIdAndUpdate(zaloAccountId, { $push: { action: newJob._id } });
+        // Chỉ update action nếu là model cũ (ZaloAccount mới không có field action)
+        if (!isNewAccount) {
+            await ZaloAccount.findByIdAndUpdate(zaloAccountId, { $push: { action: newJob._id } });
+        }
 
         const duration = estimatedCompletion.getTime() - new Date().getTime();
         const hours = Math.floor(duration / 3600000);
@@ -229,7 +318,8 @@ export async function cancelScheduleAction(prevState, formData) {
     try {
         const user = await checkAuthToken();
         if (!user || !user.id) throw new Error("Phiên đăng nhập không hợp lệ.");
-        if (!user.role?.includes('Admin') && !user.role?.includes('Sale')) throw new Error("Bạn không có quyền thực hiện chức năng này.");
+        // Cho phép mọi tài khoản đều có quyền sử dụng các chức năng trong Hành động
+        // if (!user.role?.includes('Admin') && !user.role?.includes('Sale')) throw new Error("Bạn không có quyền thực hiện chức năng này.");
         await connectToDatabase();
         const jobId = formData.get('jobId');
         if (!jobId) throw new Error("Thiếu ID của lịch trình.");

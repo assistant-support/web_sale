@@ -18,6 +18,9 @@ export default function FilterControls({
     filterCustomer = {},
 }) {
     const services = servicesProp.length ? servicesProp : service;
+    
+    // Đảm bảo auth luôn có giá trị hợp lệ, tránh lỗi khi auth là null hoặc undefined
+    const safeAuth = auth || { role: [] };
 
     const searchParams = useSearchParams();
     const pathname = usePathname();
@@ -155,7 +158,7 @@ export default function FilterControls({
                 </div>
 
                 {/* Người phụ trách */}
-                {!auth.role?.includes?.('Sale') && (
+                {!safeAuth.role?.includes?.('Sale') && (
                     <div style={{ flex: 1 }}>
                         <Menu
                             isOpen={isAssigneeMenuOpen}

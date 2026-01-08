@@ -52,6 +52,11 @@ const ScheduledJobSchema = new Schema(
             ref: "user",
             required: true,
         },
+        // Flag để đánh dấu job từ "Hành động" (Bulk Actions) - không tự động trigger workflow
+        isManualAction: {
+            type: Boolean,
+            default: true, // Mặc định là true vì hầu hết job từ "Hành động"
+        },
     },
     {
         timestamps: true,

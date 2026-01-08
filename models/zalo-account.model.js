@@ -134,6 +134,7 @@ const ZaloAccountSchema = new Schema(
   {
     timestamps: true, // createdAt, updatedAt
     strict: true,
+    collection: 'zaloaccounts', // Chỉ định tên collection trong MongoDB
   }
 );
 

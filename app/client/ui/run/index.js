@@ -157,13 +157,10 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
 
     const totalCustomers = selectedCustomers.size;
 
+    // Cho phép mọi tài khoản đều có quyền sử dụng các chức năng trong Hành động
     const canManageAssignments = useMemo(() => {
-        if (!auth?.role) return false;
-        const allowedRoles = ['Sale', 'Admin Sale', 'Manager', 'Admin'];
-        const roleList = Array.isArray(auth.role) ? auth.role : [auth.role];
-        return roleList.some((role) =>
-            allowedRoles.some((allowed) => typeof role === 'string' && role.includes(allowed))
-        );
+        // Luôn trả về true để mọi tài khoản đều có quyền
+        return true;
     }, [auth]);
 
     const actionOptions = useMemo(() => {
@@ -191,7 +188,33 @@ function ActionForm({ auth, onSubmitAction, selectedCustomers, onClose, currentT
 
     // Tạo mảng customers từ Map
     const customersArray = useMemo(
-        () => Array.from(selectedCustomers.values()).map((c) => ({ _id: c._id, name: c.name, phone: c.phone, uid: c.uid, assignees: c.assignees })),
+        () => {
+            const values = Array.from(selectedCustomers.values());
+            const arr = values.map((c) => {
+                // Đảm bảo lấy đầy đủ dữ liệu khách hàng, bao gồm cả uid
+                const customerData = {
+                    _id: c._id,
+                    name: c.name,
+                    phone: c.phone,
+                    uid: c.uid, // Giữ nguyên uid từ customer object
+                    assignees: c.assignees
+                };
+                return customerData;
+            });
+            // Debug: Log để kiểm tra uid (chỉ log lần đầu khi có dữ liệu)
+            if (arr.length > 0) {
+                console.log('[BulkActions] customersArray mẫu:', {
+                    _id: arr[0]._id,
+                    name: arr[0].name,
+                    hasUid: !!arr[0].uid,
+                    uidType: typeof arr[0].uid,
+                    isArray: Array.isArray(arr[0].uid),
+                    uidLength: arr[0].uid?.length,
+                    uidValue: arr[0].uid
+                });
+            }
+            return arr;
+        },
         [selectedCustomers]
     );
 

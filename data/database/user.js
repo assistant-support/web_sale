@@ -1,4 +1,5 @@
 import User from '@/models/users'
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model'
 import connectDB from '@/config/connectDB'
 import { cacheData } from '@/lib/cache'
 
@@ -8,23 +9,34 @@ async function dataUser(_id) {
         let query = _id ? { _id } : {}
         let data = {}
         if (_id) {
-            data = await User.find(query).populate({
-                path: 'zalo',
-                select: 'name _id phone avt action',
-                populate: {
-                    path: 'action',
-                    populate: [
-                        {
-                            path: 'zaloAccount',
-                            select: 'name _id phone avt',
-                        },
-                        {
-                            path: 'createdBy',
-                            select: 'name _id phone avt',
-                        },
-                    ],
+            // Lấy user với populate zalo từ ZaloAccount mới
+            const users = await User.find(query).lean();
+            
+            // Populate zalo từ ZaloAccount mới thay vì model cũ
+            data = await Promise.all(users.map(async (user) => {
+                if (user.zalo) {
+                    // Tìm trong ZaloAccount mới
+                    const zaloAccount = await ZaloAccountNew.findById(user.zalo).lean();
+                    if (zaloAccount) {
+                        // Format để tương thích với code cũ
+                        return {
+                            ...user,
+                            zalo: {
+                                _id: zaloAccount._id.toString(),
+                                name: zaloAccount.profile?.displayName || 'Zalo Account',
+                                phone: zaloAccount.profile?.phoneMasked || '',
+                                avt: zaloAccount.profile?.avatar || '',
+                                uid: zaloAccount.accountKey,
+                                accountKey: zaloAccount.accountKey,
+                                status: zaloAccount.status,
+                                // Giữ action rỗng vì không còn trong ZaloAccount mới
+                                action: []
+                            }
+                        };
+                    }
                 }
-            }).lean();
+                return user;
+            }));
         } else {
             data = await User.find({
                 ...query,

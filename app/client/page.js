@@ -37,7 +37,7 @@ export default async function Page({ searchParams }) {
         filter_customer_data()
     ]);
     const reversedLabel = [...label].reverse();
-    if (userAuth[0].role.includes('Sale')) {
+    if (userAuth && userAuth[0] && userAuth[0].role && userAuth[0].role.includes('Sale')) {
         const filteredData = initialResult.data.filter(item => {
             if (Array.isArray(item.assignees) && item.assignees.length > 0) {
                 return item.assignees.some(
@@ -54,22 +54,22 @@ export default async function Page({ searchParams }) {
         initialResult.data = filteredData;
         initialResult.total = filteredData.length;
     }
-    console.log(initialResult);
-    console.log('📊 [Page] filterCustomer data:', filterCustomer);
-    console.log('📊 [Page] Số lượng mỗi tháng:', {
-        month1: filterCustomer?.month1?.length || 0,
-        month2: filterCustomer?.month2?.length || 0,
-        month3: filterCustomer?.month3?.length || 0,
-        month4: filterCustomer?.month4?.length || 0,
-        month5: filterCustomer?.month5?.length || 0,
-        month6: filterCustomer?.month6?.length || 0,
-        month7: filterCustomer?.month7?.length || 0,
-        month8: filterCustomer?.month8?.length || 0,
-        month9: filterCustomer?.month9?.length || 0,
-        month10: filterCustomer?.month10?.length || 0,
-        month11: filterCustomer?.month11?.length || 0,
-        month12: filterCustomer?.month12?.length || 0,
-    });
+    // console.log(initialResult);
+    // console.log('📊 [Page] filterCustomer data:', filterCustomer);
+    // console.log('📊 [Page] Số lượng mỗi tháng:', {
+    //     month1: filterCustomer?.month1?.length || 0,
+    //     month2: filterCustomer?.month2?.length || 0,
+    //     month3: filterCustomer?.month3?.length || 0,
+    //     month4: filterCustomer?.month4?.length || 0,
+    //     month5: filterCustomer?.month5?.length || 0,
+    //     month6: filterCustomer?.month6?.length || 0,
+    //     month7: filterCustomer?.month7?.length || 0,
+    //     month8: filterCustomer?.month8?.length || 0,
+    //     month9: filterCustomer?.month9?.length || 0,
+    //     month10: filterCustomer?.month10?.length || 0,
+    //     month11: filterCustomer?.month11?.length || 0,
+    //     month12: filterCustomer?.month12?.length || 0,
+    // });
     
     return (
         <Suspense fallback={<PageSkeleton />}>

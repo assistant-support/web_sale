@@ -6,12 +6,24 @@ import Customer from '@/models/customer.model';
 import Service from '@/models/services.model';
 import Logs from '@/models/log.model';
 import Zalo from '@/models/zalo.model';
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
 import { uploadFileToDrive } from '@/function/drive/image';
-import { actionZalo } from '@/function/drive/appscript';
+import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
+
+// Helper function để đảm bảo kết nối MongoDB
+async function ensureMongo() {
+    try {
+        await connectDB();
+    } catch (err) {
+        console.error('[ensureMongo] MongoDB connection error:', err?.message);
+        throw err;
+    }
+}
 import { getCustomersAll } from '@/data/customers/handledata.db';
 import { revalidateData } from '@/app/actions/customer.actions';
+import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 
 /* ============================================================
  * Helpers
@@ -58,31 +70,56 @@ async function loadPreSurgeryMessageTemplate(serviceId, courseName) {
 }
 
 async function pickZaloAccountForCustomer(customerData, session) {
+    // Sử dụng ZaloAccountNew (Zalo Hệ Thống) thay vì model Zalo cũ
     const uidEntries = Array.isArray(customerData?.uid) ? customerData.uid : [];
     for (const entry of uidEntries) {
         const zaloId = toStringId(entry?.zalo);
         if (!zaloId) continue;
-        const zaloAccount = await Zalo.findById(zaloId).lean();
-        if (zaloAccount) {
-            return {
-                zalo: zaloAccount,
-                existingUid: entry?.uid ? String(entry.uid).trim() : null,
-                entry,
+        
+        // Thử tìm trong ZaloAccountNew trước
+        try {
+            const zaloAccount = await ZaloAccountNew.findById(zaloId)
+                .select('accountKey status profile')
+                .lean();
+            if (zaloAccount && zaloAccount.status === 'active') {
+                return {
+                    zalo: {
+                        _id: zaloAccount._id,
+                        uid: zaloAccount.accountKey,
+                        accountKey: zaloAccount.accountKey,
+                        profile: zaloAccount.profile
+                    },
+                    existingUid: entry?.uid ? String(entry.uid).trim() : null,
+                    entry,
+                };
+            }
+        } catch (err) {
+            // Có thể là model Zalo cũ, bỏ qua
+        }
+    }
+
+    // Fallback: Lấy account active đầu tiên từ ZaloAccountNew
+    try {
+        const fallbackAccount = await ZaloAccountNew.findOne({ 
+            status: 'active' 
+        }).sort({ updatedAt: 1 })
+        .select('accountKey _id status profile')
+        .lean();
+        
+        if (fallbackAccount) {
+            return { 
+                zalo: {
+                    _id: fallbackAccount._id,
+                    uid: fallbackAccount.accountKey,
+                    accountKey: fallbackAccount.accountKey,
+                    profile: fallbackAccount.profile
+                }, 
+                existingUid: null, 
+                entry: null 
             };
         }
-    }
-
-    const sessionZaloId = toStringId(session?.zalo);
-    if (sessionZaloId) {
-        const zaloAccount = await Zalo.findById(sessionZaloId).lean();
-        if (zaloAccount) {
-            return { zalo: zaloAccount, existingUid: null, entry: null };
-        }
-    }
-
-    const fallback = await Zalo.findOne().sort({ updatedAt: -1 }).lean();
-    if (fallback) {
-        return { zalo: fallback, existingUid: null, entry: null };
+    } catch (err) {
+        console.error('[pickZaloAccountForCustomer] Lỗi khi tìm fallback account:', err);
     }
 
     return null;
@@ -110,25 +147,98 @@ async function resolveCustomerUidForZalo(customerData, zaloInfo, phone) {
         return { uid: String(existingEntry.uid).trim(), findUidResult: null };
     }
 
-    const findUidResult = await actionZalo({
-        phone,
-        uid: zaloInfo.zalo.uid,
-        actionType: 'findUid',
-    });
+    // Lấy accountKey từ ZaloAccount mới - đơn giản hóa: lấy account active đầu tiên
+    let accountKey = null;
+    try {
+        await ensureMongo();
+        
+        // Ưu tiên 1: Sử dụng accountKey từ zaloInfo nếu có (đã được lấy từ pickZaloAccountForCustomer)
+        if (zaloInfo.zalo?.accountKey) {
+            accountKey = zaloInfo.zalo.accountKey;
+            console.log('[resolveCustomerUidForZalo] ✅ Sử dụng accountKey từ zaloInfo:', accountKey);
+        } else if (zaloInfo.zalo?._id) {
+            // Ưu tiên 2: Tìm bằng _id nếu có
+            const zaloAccount = await ZaloAccountNew.findById(zaloInfo.zalo._id)
+                .select('accountKey status')
+                .lean();
+            
+            if (zaloAccount?.status === 'active' && zaloAccount?.accountKey) {
+                accountKey = zaloAccount.accountKey;
+                console.log('[resolveCustomerUidForZalo] ✅ Tìm thấy accountKey từ _id:', accountKey);
+            }
+        }
+        
+            // Ưu tiên 3: Nếu vẫn không tìm thấy, lấy account đầu tiên có status active (cũ nhất)
+            if (!accountKey) {
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                    status: 'active' 
+                }).sort({ updatedAt: 1 }).lean(); // 1 = ascending (cũ nhất trước)
+            
+            if (fallbackAccount?.accountKey) {
+                accountKey = fallbackAccount.accountKey;
+                console.warn('[resolveCustomerUidForZalo] Không tìm thấy ZaloAccount tương ứng, sử dụng fallback account:', accountKey);
+            }
+        }
+    } catch (err) {
+        console.error('[resolveCustomerUidForZalo] Lỗi khi tìm accountKey:', err);
+        return { error: `Lỗi khi tìm tài khoản Zalo: ${err?.message || 'Unknown error'}` };
+    }
 
-    if (!findUidResult?.status) {
-        const errorMessage =
-            findUidResult?.content?.error_message ||
-            findUidResult?.message ||
-            'Không tìm thấy UID Zalo của khách hàng.';
+    if (!accountKey) {
+        console.error('[resolveCustomerUidForZalo] ❌ Không tìm thấy accountKey hợp lệ');
+        return { error: 'Không tìm thấy tài khoản Zalo hợp lệ trong hệ thống mới. Vui lòng đăng nhập QR trước.' };
+    }
+    
+    console.log('[resolveCustomerUidForZalo] ✅ Sử dụng accountKey:', accountKey, 'để tìm UID cho số điện thoại:', phone);
+
+    // Sử dụng findUserUid từ zca-js thay vì appscripts
+    console.log('[resolveCustomerUidForZalo] 🔍 Đang tìm UID với accountKey:', accountKey, 'phone:', phone);
+    
+    let findUidResult;
+    try {
+        findUidResult = await findUserUid({
+            accountKey: accountKey,
+            phoneOrUid: phone
+        });
+        
+        console.log('[resolveCustomerUidForZalo] 📥 Kết quả findUserUid:', {
+            ok: findUidResult?.ok,
+            uid: findUidResult?.uid,
+            message: findUidResult?.message,
+            code: findUidResult?.code
+        });
+    } catch (err) {
+        console.error('[resolveCustomerUidForZalo] ❌ Lỗi khi gọi findUserUid:', err);
+        return { error: `Lỗi khi tìm UID: ${err?.message || 'Unknown error'}`, findUidResult: null };
+    }
+
+    if (!findUidResult?.ok || !findUidResult?.uid) {
+        const errorMessage = findUidResult?.message || 'Không tìm thấy UID Zalo của khách hàng.';
+        console.error('[resolveCustomerUidForZalo] ❌ Tìm UID thất bại:', errorMessage);
         return { error: errorMessage, findUidResult };
     }
+    
+    console.log('[resolveCustomerUidForZalo] ✅ Tìm UID thành công:', findUidResult.uid);
 
-    const rawUid = findUidResult?.content?.data?.uid;
-    const normalizedUid = typeof rawUid === 'string' ? rawUid.trim() : '';
+    const normalizedUid = String(findUidResult.uid).trim();
     if (!normalizedUid) {
-        return { error: 'UID trả về từ AppScript bị trống.', findUidResult };
+        return { error: 'UID trả về từ zca-js bị trống.', findUidResult };
     }
+
+    // Format findUidResult để tương thích với code cũ
+    const formattedResult = {
+        status: true,
+        content: {
+            error_code: 0,
+            error_message: '',
+            data: {
+                uid: normalizedUid,
+                avatar: findUidResult.avatar || '',
+                zalo_name: findUidResult.displayName || '',
+                display_name: findUidResult.displayName || ''
+            }
+        }
+    };
 
     if (existingEntry) {
         await Customer.updateOne(
@@ -138,8 +248,8 @@ async function resolveCustomerUidForZalo(customerData, zaloInfo, phone) {
                     'uid.$.uid': normalizedUid,
                     'uid.$.isFriend': 0,
                     'uid.$.isReques': 0,
-                    zaloavt: findUidResult?.content?.data?.avatar || customerData.zaloavt || null,
-                    zaloname: findUidResult?.content?.data?.zalo_name || customerData.zaloname || null,
+                    zaloavt: findUidResult.avatar || customerData.zaloavt || null,
+                    zaloname: findUidResult.displayName || customerData.zaloname || null,
                 },
             }
         );
@@ -156,38 +266,51 @@ async function resolveCustomerUidForZalo(customerData, zaloInfo, phone) {
                     },
                 },
                 $set: {
-                    zaloavt: findUidResult?.content?.data?.avatar || customerData.zaloavt || null,
-                    zaloname: findUidResult?.content?.data?.zalo_name || customerData.zaloname || null,
+                    zaloavt: findUidResult.avatar || customerData.zaloavt || null,
+                    zaloname: findUidResult.displayName || customerData.zaloname || null,
                 },
             }
         );
     }
 
-    return { uid: normalizedUid, findUidResult };
+    return { uid: normalizedUid, findUidResult: formattedResult };
 }
 
 export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session }) {
+    console.log('[sendPreSurgeryMessageIfNeeded] 🚀 Bắt đầu xử lý gửi tin nhắn trước phẫu thuật');
+    
     const customerData = customer?.toObject ? customer.toObject() : customer;
     if (!customerData?._id || !detail) {
+        console.error('[sendPreSurgeryMessageIfNeeded] ❌ Thiếu dữ liệu khách hàng hoặc đơn dịch vụ. customerData._id:', customerData?._id, 'detail:', !!detail);
         return { skipped: 'Thiếu dữ liệu khách hàng hoặc đơn dịch vụ.' };
     }
+
+    console.log(`[sendPreSurgeryMessageIfNeeded] 📋 Customer ID: ${customerData._id}, Customer name: ${customerData.name || 'N/A'}`);
 
     const selectedServiceId = detail?.selectedService?._id
         ? detail.selectedService._id
         : detail?.selectedService;
     const courseName = detail?.selectedCourse?.name || '';
 
+    console.log(`[sendPreSurgeryMessageIfNeeded] 📋 selectedServiceId: ${selectedServiceId}, courseName: ${courseName}`);
+
     if (!selectedServiceId || !courseName) {
+        console.error('[sendPreSurgeryMessageIfNeeded] ❌ Đơn không có thông tin dịch vụ hoặc liệu trình');
         return { skipped: 'Đơn không có thông tin dịch vụ hoặc liệu trình.' };
     }
 
+    console.log(`[sendPreSurgeryMessageIfNeeded] 🔍 Đang tìm template tin nhắn cho serviceId: ${selectedServiceId}, courseName: ${courseName}`);
     const template = await loadPreSurgeryMessageTemplate(selectedServiceId, courseName);
     if (!template) {
+        console.error(`[sendPreSurgeryMessageIfNeeded] ❌ Không tìm thấy template tin nhắn cho serviceId: ${selectedServiceId}, courseName: ${courseName}`);
         return { skipped: 'Không tìm thấy nội dung tin nhắn trước phẫu thuật phù hợp.' };
     }
 
+    console.log(`[sendPreSurgeryMessageIfNeeded] ✅ Tìm thấy template. serviceName: ${template.serviceName}, courseName: ${template.courseName}, content length: ${template.content?.length || 0}`);
+
     const phone = String(customerData.phone || '').trim();
     if (!phone) {
+        console.error(`[sendPreSurgeryMessageIfNeeded] ❌ Thiếu số điện thoại khách hàng. Customer ID: ${customerData._id}`);
         await pushCareLog(
             customerData._id,
             `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''} vì thiếu số điện thoại.`,
@@ -196,8 +319,12 @@ export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session 
         return { error: 'Thiếu số điện thoại khách hàng.' };
     }
 
+    console.log(`[sendPreSurgeryMessageIfNeeded] 📞 Số điện thoại khách hàng: ${phone}`);
+
+    console.log(`[sendPreSurgeryMessageIfNeeded] 🔍 Đang tìm tài khoản Zalo cho khách hàng...`);
     const zaloInfo = await pickZaloAccountForCustomer(customerData, session);
     if (!zaloInfo?.zalo) {
+        console.error(`[sendPreSurgeryMessageIfNeeded] ❌ Không tìm thấy tài khoản Zalo khả dụng cho customerId: ${customerData._id}`);
         await pushCareLog(
             customerData._id,
             `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''} vì không có tài khoản Zalo khả dụng.`,
@@ -206,10 +333,14 @@ export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session 
         return { error: 'Không tìm thấy tài khoản Zalo khả dụng.' };
     }
 
+    console.log(`[sendPreSurgeryMessageIfNeeded] ✅ Tìm thấy tài khoản Zalo. Zalo ID: ${zaloInfo.zalo._id}, accountKey: ${zaloInfo.zalo.accountKey || 'N/A'}, existingUid: ${zaloInfo.existingUid || 'N/A'}`);
+
     let uidPerson = zaloInfo.existingUid;
     if (!uidPerson) {
+        console.log(`[sendPreSurgeryMessageIfNeeded] 🔍 Không có UID sẵn có, đang tìm UID từ số điện thoại...`);
         const uidResult = await resolveCustomerUidForZalo(customerData, zaloInfo, phone);
         if (uidResult?.error) {
+            console.error(`[sendPreSurgeryMessageIfNeeded] ❌ Lỗi khi tìm UID: ${uidResult.error}`);
             await pushCareLog(
                 customerData._id,
                 `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${uidResult.error}`,
@@ -218,10 +349,14 @@ export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session 
             return { error: uidResult.error };
         }
         uidPerson = uidResult.uid;
+        console.log(`[sendPreSurgeryMessageIfNeeded] ✅ Tìm thấy UID: ${uidPerson}`);
+    } else {
+        console.log(`[sendPreSurgeryMessageIfNeeded] ✅ Sử dụng UID sẵn có: ${uidPerson}`);
     }
 
     if (!uidPerson) {
         const msg = 'Không có UID Zalo của khách hàng.';
+        console.error(`[sendPreSurgeryMessageIfNeeded] ❌ ${msg}`);
         await pushCareLog(
             customerData._id,
             `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${msg}`,
@@ -231,19 +366,112 @@ export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session 
     }
 
     const messageContent = template.content;
-    const sendResult = await actionZalo({
-        phone,
-        uidPerson,
-        actionType: 'sendMessage',
-        message: messageContent,
-        uid: zaloInfo.zalo.uid,
-    });
+    
+    // Lấy accountKey từ ZaloAccountNew (Zalo Hệ Thống)
+    let accountKey = null;
+    try {
+        await ensureMongo(); // Đảm bảo kết nối DB
+        
+        // Ưu tiên: Sử dụng accountKey từ zaloInfo (đã được lấy từ pickZaloAccountForCustomer)
+        if (zaloInfo.zalo?.accountKey) {
+            accountKey = zaloInfo.zalo.accountKey;
+            console.log('[sendPreSurgeryMessageIfNeeded] ✅ Sử dụng accountKey từ zaloInfo:', accountKey);
+        } else if (zaloInfo.zalo?._id) {
+            // Nếu có _id nhưng chưa có accountKey, tìm lại
+            const zaloAccount = await ZaloAccountNew.findById(zaloInfo.zalo._id)
+                .select('accountKey status')
+                .lean();
+            
+            if (zaloAccount?.status === 'active' && zaloAccount?.accountKey) {
+                accountKey = zaloAccount.accountKey;
+                console.log('[sendPreSurgeryMessageIfNeeded] ✅ Tìm thấy accountKey từ _id:', accountKey);
+            }
+        }
+        
+        // Fallback: Lấy account active đầu tiên nếu không tìm thấy
+        if (!accountKey) {
+            const fallbackAccount = await ZaloAccountNew.findOne({ 
+                status: 'active' 
+            }).sort({ updatedAt: 1 })
+            .select('accountKey _id status')
+            .lean();
+            
+            if (fallbackAccount?.accountKey) {
+                accountKey = fallbackAccount.accountKey;
+                console.log('[sendPreSurgeryMessageIfNeeded] ✅ Sử dụng account active đầu tiên:', accountKey);
+            } else {
+                // Kiểm tra xem có account nào trong hệ thống không
+                const totalAccounts = await ZaloAccountNew.countDocuments({});
+                const activeAccounts = await ZaloAccountNew.countDocuments({ status: 'active' });
+                console.error('[sendPreSurgeryMessageIfNeeded] ❌ Không tìm thấy account active. Tổng số account:', totalAccounts, 'Active:', activeAccounts);
+            }
+        }
+    } catch (err) {
+        console.error('[sendPreSurgeryMessageIfNeeded] Lỗi khi tìm accountKey:', err);
+    }
+    
+    if (!accountKey) {
+        const msg = 'Không tìm thấy tài khoản Zalo hợp lệ. Vui lòng đăng nhập QR trong Zalo Hệ Thống.';
+        await pushCareLog(
+            customerData._id,
+            `[Auto] Không thể gửi tin nhắn trước phẫu thuật cho dịch vụ ${template.serviceName}${courseName ? ` (${courseName})` : ''}: ${msg}`,
+            session?.id
+        );
+        return { error: msg };
+    }
+    
+    // Gửi tin nhắn bằng zca-js
+    console.log(`[sendPreSurgeryMessageIfNeeded] 📤 Đang gửi tin nhắn. accountKey: ${accountKey}, userId: ${uidPerson}, message length: ${messageContent.length}`);
+    let sendResult;
+    try {
+        const result = await sendUserMessage({
+            accountKey: accountKey,
+            userId: uidPerson,
+            text: messageContent,
+            attachments: []
+        });
+        
+        console.log(`[sendPreSurgeryMessageIfNeeded] 📥 Kết quả từ sendUserMessage:`, {
+            ok: result.ok,
+            message: result.message,
+            msgId: result.msgId,
+            hasAck: !!result.ack
+        });
+        
+        // Format result để tương thích với code cũ
+        sendResult = {
+            status: result.ok || false,
+            content: {
+                error_code: result.ok ? 0 : -1,
+                error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                data: result.ack || {}
+            }
+        };
+        
+        if (sendResult.status) {
+            console.log(`[sendPreSurgeryMessageIfNeeded] ✅ Gửi tin nhắn THÀNH CÔNG! msgId: ${result.msgId || 'N/A'}`);
+        } else {
+            console.error(`[sendPreSurgeryMessageIfNeeded] ❌ Gửi tin nhắn THẤT BẠI! Lỗi: ${sendResult.content.error_message}`);
+        }
+    } catch (err) {
+        console.error('[sendPreSurgeryMessageIfNeeded] ❌ Lỗi khi gửi tin nhắn:', err);
+        console.error('[sendPreSurgeryMessageIfNeeded] ❌ Error stack:', err?.stack);
+        sendResult = {
+            status: false,
+            content: {
+                error_code: -1,
+                error_message: err?.message || 'Lỗi không xác định',
+                data: {}
+            }
+        };
+    }
 
+    // Lấy createBy từ session hoặc detail, không còn dùng zaloInfo.zalo.roles (model Zalo cũ)
     const logCreateBy =
         session?.id ||
         detail?.approvedBy ||
         detail?.closedBy ||
-        (Array.isArray(zaloInfo.zalo.roles) && zaloInfo.zalo.roles.length > 0 ? zaloInfo.zalo.roles[0] : null);
+        null;
 
     if (logCreateBy) {
         await Logs.create({
@@ -254,7 +482,7 @@ export async function sendPreSurgeryMessageIfNeeded({ customer, detail, session 
                     error_code: sendResult?.content?.error_code || null,
                     error_message:
                         sendResult?.content?.error_message ||
-                        (sendResult?.status ? '' : sendResult?.message || 'Invalid response from AppScript'),
+                        (sendResult?.status ? '' : sendResult?.message || 'Gửi tin nhắn thất bại'),
                 },
             },
             type: 'sendMessage',
@@ -456,8 +684,12 @@ export async function closeServiceAction(prevState, formData) {
         // 7. Cập nhật pipeline
         const newPipelineStatus = pipelineFromServiceStatus(status);
         if (newPipelineStatus) {
-            customerDoc.pipelineStatus = customerDoc.pipelineStatus || [];
-            customerDoc.pipelineStatus[6] = newPipelineStatus; // Giả sử step 6
+            // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+            const validatedStatus = validatePipelineStatusUpdate(customerDoc, newPipelineStatus);
+            if (validatedStatus) {
+                customerDoc.pipelineStatus = customerDoc.pipelineStatus || [];
+                customerDoc.pipelineStatus[6] = validatedStatus; // Giả sử step 6
+            }
         }
 
         // 8. Ghi care log
@@ -467,6 +699,45 @@ export async function closeServiceAction(prevState, formData) {
 
         // 9. Lưu vào DB
         await customerDoc.save();
+
+        // 10. Schedule gửi tin nhắn trước phẫu thuật (chỉ khi status !== 'rejected' và có selectedService + selectedCourse)
+        if (status !== 'rejected' && selectedServiceId && selectedCourseName) {
+            try {
+                console.log(`[closeServiceAction] 🚀 Bắt đầu schedule tin nhắn trước phẫu thuật cho customerId: ${customerId}, selectedServiceId: ${selectedServiceId}, selectedCourseName: ${selectedCourseName}`);
+                
+                // Lấy _id của serviceDetail vừa tạo
+                const savedCustomer = await Customer.findById(customerId);
+                if (!savedCustomer || !savedCustomer.serviceDetails || savedCustomer.serviceDetails.length === 0) {
+                    console.error('[closeServiceAction] ❌ Không tìm thấy serviceDetail vừa tạo');
+                    return { success: true, message: 'Chốt dịch vụ thành công! Đơn đang chờ duyệt.' };
+                }
+                
+                const newDetail = savedCustomer.serviceDetails[savedCustomer.serviceDetails.length - 1];
+                const serviceDetailId = newDetail._id;
+                console.log(`[closeServiceAction] ✅ Tìm thấy serviceDetailId: ${serviceDetailId}`);
+
+                const { default: initAgenda } = await import('@/config/agenda');
+                const agenda = await initAgenda();
+                const sendAt = new Date(Date.now() + 60 * 60 * 1000); // 1 giờ sau khi tạo đơn
+                // const sendAt = new Date(Date.now() + 60 * 1000); // 1 phút sau khi tạo đơn
+                
+                console.log(`[closeServiceAction] 📅 Schedule job 'servicePreSurgeryMessage' vào lúc: ${sendAt.toISOString()} (${sendAt.toLocaleString('vi-VN')})`);
+                
+                const scheduledJob = await agenda.schedule(sendAt, 'servicePreSurgeryMessage', {
+                    customerId,
+                    serviceDetailId: serviceDetailId.toString(),
+                    triggeredBy: session.id,
+                });
+                
+                console.log(`[closeServiceAction] ✅ Đã schedule thành công! Job ID: ${scheduledJob._id}, serviceDetailId: ${serviceDetailId}, sẽ chạy vào: ${sendAt.toISOString()}`);
+            } catch (scheduleError) {
+                console.error('[closeServiceAction] ❌ Lỗi khi schedule gửi tin nhắn trước phẫu thuật:', scheduleError);
+                console.error('[closeServiceAction] ❌ Error stack:', scheduleError?.stack);
+                // Không throw error để không ảnh hưởng đến việc tạo đơn
+            }
+        } else {
+            console.log(`[closeServiceAction] ⏭️ Bỏ qua schedule tin nhắn trước phẫu thuật. status: ${status}, selectedServiceId: ${selectedServiceId}, selectedCourseName: ${selectedCourseName}`);
+        }
 
         revalidateData(); // Hàm revalidate của bạn
         return { success: true, message: 'Chốt dịch vụ thành công! Đơn đang chờ duyệt.' };
@@ -519,13 +790,23 @@ export async function saveCallResultAction(prevState, formData) {
             step: 4,
         };
 
-        await Customer.findByIdAndUpdate(customerId, {
-            $set: {
-                'pipelineStatus.0': newStatus,
-                'pipelineStatus.3': newStatus,
-            },
-            $push: { care: careNote },
-        });
+        // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+        const customer = await Customer.findById(customerId).lean();
+        const validatedStatus = validatePipelineStatusUpdate(customer, newStatus);
+        if (validatedStatus) {
+            await Customer.findByIdAndUpdate(customerId, {
+                $set: {
+                    'pipelineStatus.0': validatedStatus,
+                    'pipelineStatus.3': validatedStatus,
+                },
+                $push: { care: careNote },
+            });
+        } else {
+            // Vẫn push care note dù không cập nhật pipelineStatus
+            await Customer.findByIdAndUpdate(customerId, {
+                $push: { care: careNote },
+            });
+        }
 
         revalidateData();
         return {
@@ -740,15 +1021,21 @@ export async function updateServiceDetailAction(prevState, formData) {
         // Cập nhật pipeline theo status hiện tại của detail
         const finalStatus = detail.status;
         const newPipeline = pipelineFromServiceStatus(finalStatus);
-        await Customer.updateOne(
-            { _id: customerId },
-            {
-                $set: {
-                    'pipelineStatus.0': newPipeline,
-                    'pipelineStatus.6': newPipeline,
-                },
-            }
-        );
+        // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+        // Convert customer document sang plain object để validate
+        const customerPlain = customer.toObject ? customer.toObject() : customer;
+        const validatedPipeline = validatePipelineStatusUpdate(customerPlain, newPipeline);
+        if (validatedPipeline) {
+            await Customer.updateOne(
+                { _id: customerId },
+                {
+                    $set: {
+                        'pipelineStatus.0': validatedPipeline,
+                        'pipelineStatus.6': validatedPipeline,
+                    },
+                }
+            );
+        }
 
         await pushCareLog(
             customerId,
@@ -935,15 +1222,21 @@ export async function approveServiceDealAction(prevState, formData) {
         await customer.save();
 
         const newPipeline = pipelineFromServiceStatus(detail.status);
-        customer.pipelineStatus = customer.pipelineStatus || [];
-        customer.pipelineStatus[0] = newPipeline;
-        customer.pipelineStatus[6] = newPipeline;
-        await customer.save();
+        // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+        const validatedPipeline = validatePipelineStatusUpdate(customer, newPipeline);
+        if (validatedPipeline) {
+            customer.pipelineStatus = customer.pipelineStatus || [];
+            customer.pipelineStatus[0] = validatedPipeline;
+            customer.pipelineStatus[6] = validatedPipeline;
+            await customer.save();
+        }
 
         try {
             const { default: initAgenda } = await import('@/config/agenda');
             const agenda = await initAgenda();
             const sendAt = new Date(Date.now() + 60 * 60 * 1000); // đổi thời gian gửi tin nhắn trước phẫu thuật thành 1 giờ sau khi duyệt đơn
+            // const sendAt = new Date(Date.now() + 60 * 1000); // 1 phút sau khi duyệt đơn// đổi thời gian gửi tin nhắn trước phẫu thuật thành  khi duyệt đơn
+            
             await agenda.schedule(sendAt, 'servicePreSurgeryMessage', {
                 customerId,
                 serviceDetailId,
@@ -992,20 +1285,30 @@ export async function rejectServiceDealAction(prevState, formData) {
         // Hành vi reject theo yêu cầu mới:
         // - Không có trạng thái "rejected" trong approvalStatus
         // - Ta coi reject là HỦY đơn pending (xóa item) + cập nhật pipeline rejected
+        const customer = await Customer.findById(customerId).lean();
+        const newRejectedStatus = 'rejected_after_consult_6';
+        const validatedRejectedStatus = validatePipelineStatusUpdate(customer, newRejectedStatus);
+        
+        const updateData = {
+            $pull: {
+                serviceDetails: {
+                    _id: new mongoose.Types.ObjectId(serviceDetailId),
+                    approvalStatus: 'pending',
+                },
+            },
+        };
+        
+        // Chỉ cập nhật pipelineStatus nếu step mới > step hiện tại
+        if (validatedRejectedStatus) {
+            updateData.$set = {
+                'pipelineStatus.0': validatedRejectedStatus,
+                'pipelineStatus.6': validatedRejectedStatus,
+            };
+        }
+        
         const res = await Customer.updateOne(
             { _id: customerId },
-            {
-                $pull: {
-                    serviceDetails: {
-                        _id: new mongoose.Types.ObjectId(serviceDetailId),
-                        approvalStatus: 'pending',
-                    },
-                },
-                $set: {
-                    'pipelineStatus.0': 'rejected_after_consult_6',
-                    'pipelineStatus.6': 'rejected_after_consult_6',
-                },
-            }
+            updateData
         );
 
         if (res.modifiedCount === 0) {

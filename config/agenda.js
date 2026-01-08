@@ -11,11 +11,15 @@ import Form from '@/models/formclient';
 import Variant from '@/models/variant.model';
 import Service from '@/models/services.model';
 import User from '@/models/users';
-import { actionZalo, sendGP } from '@/function/drive/appscript';
+import { sendGP } from '@/function/drive/appscript';
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
+import { sendUserMessage, findUserUid, changeFriendAlias, getFriendRequestStatus, sendFriendRequest } from '@/data/zalo/chat.actions';
+import dbConnect from '@/config/connectDB';
 import { sendPreSurgeryMessageIfNeeded } from '@/data/customers/wraperdata.db';
 import Appointment from '@/models/appointment.model';
 import { processMessageConversation } from '@/utils/autoMessageCustomer';
 import { getPagesFromAPI } from '@/lib/pancake-api';
+import { validatePipelineStatusUpdate, getCurrentPipelineStatus } from '@/utils/pipelineStatus';
 let agendaInstance = null;
 
 // =============================================================
@@ -135,15 +139,250 @@ async function genericJobProcessor(job) {
             if (!selection.account) throw new Error(selection.reason);
             selectedZalo = selection.account;
         } else {
-            if (customer.uid?.[0]?.zalo) selectedZalo = await Zalo.findById(customer.uid[0].zalo);
-            if (!selectedZalo) selectedZalo = await Zalo.findOne();
+            // Ưu tiên tìm từ ZaloAccount mới (Zalo Hệ Thống)
+            if (customer.uid?.[0]?.zalo) {
+                // Thử tìm trong ZaloAccount mới trước
+                const zaloAccountNew = await ZaloAccountNew.findById(customer.uid[0].zalo).lean();
+                if (zaloAccountNew) {
+                    // Format để tương thích với code cũ
+                    selectedZalo = {
+                        _id: zaloAccountNew._id,
+                        uid: zaloAccountNew.accountKey,
+                        name: zaloAccountNew.profile?.displayName || 'Zalo Account'
+                    };
+                } else {
+                    // Fallback: tìm trong model cũ
+                    selectedZalo = await Zalo.findById(customer.uid[0].zalo);
+                }
+            }
+            
+            // Nếu vẫn chưa có, lấy account active đầu tiên từ ZaloAccount mới
+            if (!selectedZalo) {
+                const fallbackNew = await ZaloAccountNew.findOne({ status: 'active' }).sort({ updatedAt: 1 }).lean();
+                if (fallbackNew) {
+                    selectedZalo = {
+                        _id: fallbackNew._id,
+                        uid: fallbackNew.accountKey,
+                        name: fallbackNew.profile?.displayName || 'Zalo Account'
+                    };
+                }
+            }
+            
+            // Fallback cuối cùng: model cũ
+            if (!selectedZalo) {
+                selectedZalo = await Zalo.findOne();
+            }
+            
             if (!selectedZalo) throw new Error('No Zalo account available for this action');
         }
 
         const uid = selectedZalo.uid;
         const zaloId = selectedZalo._id;
         const actionType = actionMap[jobName];
-        const response = await actionZalo({ phone: customer.phone, uidPerson: customer.uid?.[0]?.uid || '', actionType, message: processedMessage, uid });
+        
+        // Xử lý sendMessage bằng zca-js, các actionType khác vẫn dùng actionZalo
+        let response;
+        if (actionType === 'sendMessage') {
+            // Lấy accountKey từ ZaloAccount mới
+            let accountKey = null;
+            try {
+                const zaloAccount = await ZaloAccountNew.findOne({
+                    $or: [
+                        { 'profile.zaloId': String(uid).trim() },
+                        { accountKey: String(uid).trim() }
+                    ],
+                    status: 'active'
+                }).sort({ updatedAt: 1 }).lean();
+                
+                if (zaloAccount?.accountKey) {
+                    accountKey = zaloAccount.accountKey;
+                } else {
+                    const fallbackAccount = await ZaloAccountNew.findOne({ 
+                        status: 'active' 
+                    }).sort({ updatedAt: 1 }).lean();
+                    if (fallbackAccount?.accountKey) {
+                        accountKey = fallbackAccount.accountKey;
+                    }
+                }
+            } catch (err) {
+                console.error('[agenda workflow] Lỗi khi tìm accountKey:', err);
+            }
+            
+            if (!accountKey) {
+                response = { status: false, message: 'Không tìm thấy tài khoản Zalo hợp lệ', content: { error_code: -1, error_message: 'Không tìm thấy tài khoản Zalo hợp lệ', data: {} } };
+            } else {
+                try {
+                    const result = await sendUserMessage({
+                        accountKey: accountKey,
+                        userId: customer.uid?.[0]?.uid || '',
+                        text: processedMessage,
+                        attachments: []
+                    });
+                    
+                    response = {
+                        status: result.ok || false,
+                        message: result.ok ? 'Gửi tin nhắn thành công' : (result.message || 'Gửi tin nhắn thất bại'),
+                        content: {
+                            error_code: result.ok ? 0 : -1,
+                            error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                            data: result.ack || {}
+                        }
+                    };
+                } catch (err) {
+                    console.error('[agenda workflow] Lỗi khi gửi tin nhắn:', err);
+                    response = { status: false, message: err?.message || 'Lỗi không xác định', content: { error_code: -1, error_message: err?.message || 'Lỗi không xác định', data: {} } };
+                }
+            }
+        } else {
+            // Tất cả actionType đều dùng zca-js
+            let accountKey = null;
+            
+            // Lấy accountKey từ selectedZalo
+            if (selectedZalo.accountKey) {
+                accountKey = selectedZalo.accountKey;
+            } else if (selectedZalo.uid) {
+                // Nếu là model cũ, tìm trong ZaloAccountNew
+                const zaloAccount = await ZaloAccountNew.findOne({
+                    $or: [
+                        { 'profile.zaloId': String(selectedZalo.uid).trim() },
+                        { accountKey: String(selectedZalo.uid).trim() }
+                    ],
+                    status: 'active'
+                }).sort({ updatedAt: 1 }).lean();
+                
+                if (zaloAccount?.accountKey) {
+                    accountKey = zaloAccount.accountKey;
+                } else {
+                    // Fallback: lấy account đầu tiên có status active
+                    const fallbackAccount = await ZaloAccountNew.findOne({ 
+                        status: 'active' 
+                    }).sort({ updatedAt: 1 }).lean();
+                    if (fallbackAccount?.accountKey) {
+                        accountKey = fallbackAccount.accountKey;
+                    }
+                }
+            }
+            
+            if (!accountKey) {
+                response = { status: false, message: 'Không tìm thấy tài khoản Zalo hợp lệ', content: { error_code: -1, error_message: 'Không tìm thấy tài khoản Zalo hợp lệ', data: {} } };
+            } else {
+                try {
+                    if (actionType === 'findUid') {
+                        // Sử dụng findUserUid từ zca-js
+                        const phone = customer.phone || '';
+                        const findResult = await findUserUid({
+                            accountKey: accountKey,
+                            phoneOrUid: phone
+                        });
+                        
+                        if (findResult.ok) {
+                            response = {
+                                status: true,
+                                message: 'Tìm UID thành công',
+                                content: {
+                                    error_code: 0,
+                                    error_message: '',
+                                    data: {
+                                        uid: findResult.uid,
+                                        zalo_name: findResult.displayName,
+                                        avatar: findResult.avatar
+                                    }
+                                }
+                            };
+                        } else {
+                            response = {
+                                status: false,
+                                message: findResult.message || 'Tìm UID thất bại',
+                                content: {
+                                    error_code: -1,
+                                    error_message: findResult.message || 'Tìm UID thất bại',
+                                    data: {}
+                                }
+                            };
+                        }
+                    } else if (actionType === 'tag') {
+                        // Sử dụng changeFriendAlias từ zca-js
+                        const uidPerson = customer.uid?.[0]?.uid || '';
+                        if (!uidPerson) {
+                            response = { status: false, message: 'Không tìm thấy UID của khách hàng', content: { error_code: -1, error_message: 'Không tìm thấy UID của khách hàng', data: {} } };
+                        } else {
+                            const alias = processedMessage || customer.zaloname || '';
+                            const result = await changeFriendAlias({
+                                accountKey: accountKey,
+                                userId: uidPerson,
+                                alias: alias
+                            });
+                            
+                            response = {
+                                status: result.status,
+                                message: result.message || (result.status ? 'Đổi tên gợi nhớ thành công' : 'Đổi tên gợi nhớ thất bại'),
+                                content: {
+                                    error_code: result.error_code || (result.status ? 0 : -1),
+                                    error_message: result.error_message || '',
+                                    data: result.content?.data || {}
+                                }
+                            };
+                        }
+                    } else if (actionType === 'checkFriend') {
+                        // Sử dụng getFriendRequestStatus từ zca-js
+                        const uidPerson = customer.uid?.[0]?.uid || '';
+                        if (!uidPerson) {
+                            response = { status: false, message: 'Không tìm thấy UID của khách hàng', content: { error_code: -1, error_message: 'Không tìm thấy UID của khách hàng', data: {} } };
+                        } else {
+                            const result = await getFriendRequestStatus({
+                                accountKey: accountKey,
+                                friendId: uidPerson
+                            });
+                            
+                            // Format response để tương thích với code cũ
+                            // is_friend: 1 = bạn bè, 0 = không phải bạn bè
+                            const isFriend = result.ok && result.is_friend === 1 ? 1 : 0;
+                            
+                            response = {
+                                status: result.ok,
+                                message: result.ok ? 'Kiểm tra bạn bè thành công' : (result.message || 'Kiểm tra bạn bè thất bại'),
+                                content: {
+                                    error_code: result.ok ? 0 : -1,
+                                    error_message: result.ok ? String(isFriend) : (result.message || 'Kiểm tra bạn bè thất bại'),
+                                    data: { isFriend },
+                                    isFriend
+                                }
+                            };
+                        }
+                    } else if (actionType === 'addFriend') {
+                        // Sử dụng sendFriendRequest từ zca-js
+                        const uidPerson = customer.uid?.[0]?.uid || '';
+                        if (!uidPerson) {
+                            response = { status: false, message: 'Không tìm thấy UID của khách hàng', content: { error_code: -1, error_message: 'Không tìm thấy UID của khách hàng', data: {} } };
+                        } else {
+                            const result = await sendFriendRequest({
+                                accountKey: accountKey,
+                                userId: uidPerson,
+                                msg: processedMessage || 'Xin chào, hãy kết bạn với tôi!'
+                            });
+                            
+                            // Format response để tương thích với code cũ
+                            response = {
+                                status: result.ok,
+                                message: result.ok ? 'Gửi lời mời kết bạn thành công' : (result.message || 'Gửi lời mời kết bạn thất bại'),
+                                content: {
+                                    error_code: result.ok ? 0 : -1,
+                                    error_message: result.ok ? '' : (result.message || 'Gửi lời mời kết bạn thất bại'),
+                                    data: result.result || {}
+                                }
+                            };
+                        }
+                    } else {
+                        // Các actionType khác vẫn dùng actionZalo (nếu còn)
+                        const { actionZalo } = await import('@/function/drive/appscript');
+                        response = await actionZalo({ phone: customer.phone, uidPerson: customer.uid?.[0]?.uid || '', actionType, message: processedMessage, uid });
+                    }
+                } catch (err) {
+                    console.error(`[agenda workflow] Lỗi khi thực hiện ${actionType}:`, err);
+                    response = { status: false, message: err?.message || 'Lỗi không xác định', content: { error_code: -1, error_message: err?.message || 'Lỗi không xác định', data: {} } };
+                }
+            }
+        }
 
         await Logs.create({
             status: { status: response?.status || false, message: processedMessage, data: { error_code: response?.content?.error_code || null, error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from AppScript') } },
@@ -163,7 +402,9 @@ async function genericJobProcessor(job) {
                 break;
             case 'checkFriend':
                 if (customer.uid.length > 0) {
-                    customer.uid[0].isFriend = response.content?.isFriend ? 1 : 0;
+                    // Lấy isFriend từ response.content.isFriend hoặc response.content.data.isFriend
+                    const isFriendValue = response.content?.isFriend ?? response.content?.data?.isFriend ?? 0;
+                    customer.uid[0].isFriend = isFriendValue === 1 ? 1 : 0;
                     await customer.save();
                     triggerRevalidation();
                 }
@@ -177,28 +418,52 @@ async function genericJobProcessor(job) {
                 break;
             case 'message':
                 const newStatus = response?.status ? 'msg_success_2' : 'msg_error_2';
-                await Customer.updateOne({ _id: customerId }, {
-                    $set: {
-                        'pipelineStatus.0': newStatus,
-                        'pipelineStatus.2': newStatus
-                    }
-                });
-                triggerRevalidation();
+                // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+                const validatedStatus = validatePipelineStatusUpdate(customer, newStatus);
+                if (validatedStatus) {
+                    await Customer.updateOne({ _id: customerId }, {
+                        $set: {
+                            'pipelineStatus.0': validatedStatus,
+                            'pipelineStatus.2': validatedStatus
+                        }
+                    });
+                    triggerRevalidation();
+                }
                 break;
             case 'findUid':
-                await Zalo.updateOne({ _id: zaloId }, { $inc: { rateLimitPerHour: -1, rateLimitPerDay: -1 } });
+                // Không cần update rate limit cho ZaloAccountNew vì không có rate limit
                 const foundUid = response.content?.data?.uid;
+                const newValidStatus = 'valid_1';
+                // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+                const validatedValidStatus = validatePipelineStatusUpdate(customer, newValidStatus);
+                
                 if (foundUid) {
-                    customer.uid = [{ zalo: zaloId, uid: normalizeUid(foundUid), isFriend: 0, isReques: 0 }];
+                    // Tìm zaloId từ accountKey
+                    let finalZaloId = zaloId;
+                    if (selectedZalo.accountKey) {
+                        const zaloAccountDoc = await ZaloAccountNew.findOne({ accountKey: selectedZalo.accountKey }).lean();
+                        if (zaloAccountDoc) {
+                            finalZaloId = zaloAccountDoc._id;
+                        }
+                    }
+                    
+                    customer.uid = [{ zalo: finalZaloId, uid: normalizeUid(foundUid), isFriend: 0, isReques: 0 }];
                     customer.zaloavt = response.content?.data?.avatar || null;
                     customer.zaloname = response.content?.data?.zalo_name || null;
-                    customer.pipelineStatus[0] = 'valid_1';
-                    customer.pipelineStatus[1] = 'valid_1';
+                    
+                    // Chỉ cập nhật pipelineStatus nếu step mới > step hiện tại
+                    if (validatedValidStatus) {
+                        customer.pipelineStatus[0] = validatedValidStatus;
+                        customer.pipelineStatus[1] = validatedValidStatus;
+                    }
                     await customer.save();
                     triggerRevalidation();
                 } else {
-                    customer.pipelineStatus[0] = 'valid_1';
-                    customer.pipelineStatus[1] = 'valid_1';
+                    // Chỉ cập nhật pipelineStatus nếu step mới > step hiện tại
+                    if (validatedValidStatus) {
+                        customer.pipelineStatus[0] = validatedValidStatus;
+                        customer.pipelineStatus[1] = validatedValidStatus;
+                    }
                     await customer.save();
                     triggerRevalidation();
                 }
@@ -400,24 +665,39 @@ async function updateStepStatus(cwId, action, status, customerId) {
 }
 
 /**
- * Tìm tài khoản Zalo tiếp theo có sẵn để thực hiện hành động, theo cơ chế round-robin.
+ * Tìm tài khoản Zalo tiếp theo có sẵn để thực hiện hành động, sử dụng ZaloAccountNew (Zalo Hệ Thống).
  * @returns {Promise<{account: object|null, reason: string|null}>} Tài khoản Zalo hoặc lý do không có.
  */
 async function findNextAvailableZaloAccount() {
-    const ZALO_ROTATION_KEY = "lastUsedZaloIndex";
-    const allAccounts = await Zalo.find({}).sort({ _id: 1 }).lean();
-    if (allAccounts.length === 0) return { account: null, reason: 'no_accounts' };
-    const lastIndexSetting = await Setting.findOne({ key: ZALO_ROTATION_KEY });
-    let lastIndex = lastIndexSetting ? Number(lastIndexSetting.value) : -1;
-    for (let i = 0; i < allAccounts.length; i++) {
-        lastIndex = (lastIndex + 1) % allAccounts.length;
-        const selectedAccount = allAccounts[lastIndex];
-        if (selectedAccount.rateLimitPerHour > 0 && selectedAccount.rateLimitPerDay > 0) {
-            await Setting.updateOne({ key: ZALO_ROTATION_KEY }, { $set: { value: lastIndex } }, { upsert: true });
-            return { account: selectedAccount, reason: null };
+    try {
+        await dbConnect();
+        
+        // Tìm tài khoản active đầu tiên từ ZaloAccountNew (Zalo Hệ Thống)
+        // Sắp xếp theo updatedAt tăng dần (cũ nhất trước) để ưu tiên tài khoản ít được sử dụng nhất
+        const zaloAccount = await ZaloAccountNew.findOne({ 
+            status: 'active' 
+        }).sort({ updatedAt: 1 }).lean();
+        
+        if (zaloAccount) {
+            // Format để tương thích với code cũ
+            return {
+                account: {
+                    _id: zaloAccount._id,
+                    uid: zaloAccount.accountKey,
+                    accountKey: zaloAccount.accountKey,
+                    name: zaloAccount.profile?.displayName || 'Zalo Account',
+                    rateLimitPerHour: 999, // Không giới hạn trong hệ thống mới
+                    rateLimitPerDay: 9999
+                },
+                reason: null
+            };
         }
+        
+        return { account: null, reason: 'no_accounts' };
+    } catch (err) {
+        console.error('[findNextAvailableZaloAccount] Lỗi:', err);
+        return { account: null, reason: 'no_accounts' };
     }
-    return { account: null, reason: allAccounts.some(acc => acc.rateLimitPerDay > 0) ? 'hourly' : 'daily' };
 }
 
 /**
@@ -622,17 +902,78 @@ async function appointmentReminderProcessor(job) {
             `- Thời gian: ${timeStr}\n` +
             `- Ghi chú: ${noteStr}`;
 
-        // 4) Gửi tin nhắn Zalo tới KH (logic gửi giữ nguyên)
-        let selectedZalo = appointment.customer.uid?.[0]?.zalo ? await Zalo.findById(appointment.customer.uid[0].zalo) : await Zalo.findOne();
-        if (!selectedZalo) throw new Error('Không có tài khoản Zalo để gửi tin');
-
-        const response = await actionZalo({
-            phone: appointment.customer.phone,
-            uidPerson: appointment.customer.uid?.[0]?.uid || '',
-            actionType: 'sendMessage',
-            message: reminderMessage,
-            uid: selectedZalo.uid
-        });
+        // 4) Gửi tin nhắn Zalo tới KH - Sử dụng ZaloAccountNew (Zalo Hệ Thống)
+        let accountKey = null;
+        let zaloAccountId = null;
+        
+        try {
+            await dbConnect(); // Đảm bảo kết nối DB
+            
+            // Ưu tiên 1: Tìm account từ customer.uid[0].zalo (nếu có và là ZaloAccountNew)
+            if (appointment.customer.uid?.[0]?.zalo) {
+                try {
+                    const zaloAccount = await ZaloAccountNew.findById(appointment.customer.uid[0].zalo)
+                        .select('accountKey status')
+                        .lean();
+                    
+                    if (zaloAccount?.status === 'active' && zaloAccount?.accountKey) {
+                        accountKey = zaloAccount.accountKey;
+                        zaloAccountId = zaloAccount._id;
+                        console.log('[agenda appointmentReminder] ✅ Tìm thấy account từ customer.uid:', accountKey);
+                    }
+                } catch (err) {
+                    // Có thể là model Zalo cũ, bỏ qua và tìm account active
+                    console.log('[agenda appointmentReminder] customer.uid[0].zalo không phải ZaloAccountNew, tìm account active');
+                }
+            }
+            
+            // Ưu tiên 2: Lấy account active đầu tiên từ ZaloAccountNew (Zalo Hệ Thống)
+            if (!accountKey) {
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                    status: 'active' 
+                }).sort({ updatedAt: 1 }).select('accountKey _id status').lean();
+                
+                if (fallbackAccount?.accountKey) {
+                    accountKey = fallbackAccount.accountKey;
+                    zaloAccountId = fallbackAccount._id;
+                    console.log('[agenda appointmentReminder] ✅ Sử dụng account active đầu tiên:', accountKey);
+                } else {
+                    // Kiểm tra xem có account nào trong hệ thống không
+                    const totalAccounts = await ZaloAccountNew.countDocuments({});
+                    const activeAccounts = await ZaloAccountNew.countDocuments({ status: 'active' });
+                    console.error('[agenda appointmentReminder] ❌ Không tìm thấy account active. Tổng số account:', totalAccounts, 'Active:', activeAccounts);
+                }
+            }
+        } catch (err) {
+            console.error('[agenda appointmentReminder] Lỗi khi tìm accountKey:', err);
+        }
+        
+        if (!accountKey) {
+            throw new Error('Không có tài khoản Zalo để gửi tin. Vui lòng đăng nhập QR trong Zalo Hệ Thống.');
+        }
+        
+        let response;
+        try {
+            const result = await sendUserMessage({
+                accountKey: accountKey,
+                userId: appointment.customer.uid?.[0]?.uid || '',
+                text: reminderMessage,
+                attachments: []
+            });
+            
+            response = {
+                status: result.ok || false,
+                message: result.ok ? 'Gửi tin nhắn thành công' : (result.message || 'Gửi tin nhắn thất bại'),
+                content: {
+                    error_code: result.ok ? 0 : -1,
+                    error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                    data: result.ack || {}
+                }
+            };
+        } catch (err) {
+            console.error('[agenda appointmentReminder] Lỗi khi gửi tin nhắn:', err);
+            response = { status: false, message: err?.message || 'Lỗi không xác định', content: { error_code: -1, error_message: err?.message || 'Lỗi không xác định', data: {} } };
+        }
 
         await Logs.create({
             status: {
@@ -643,10 +984,10 @@ async function appointmentReminderProcessor(job) {
                     error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from AppScript')
                 }
             },
-            type: 'sendMessage', // <-- Trường bị thiếu
-            createBy: SYSTEM_USER_ID, // <-- Trường bị thiếu
+            type: 'sendMessage',
+            createBy: SYSTEM_USER_ID,
             customer: customerId,
-            zalo: selectedZalo._id, // <-- Trường bị thiếu
+            zalo: zaloAccountId || null, // Sử dụng zaloAccountId từ ZaloAccountNew
         });
         if (!response?.status) throw new Error(response?.message || 'Gửi tin nhắn nhắc hẹn qua Zalo thất bại');
 
@@ -714,20 +1055,78 @@ async function preSurgeryReminderProcessor(job) {
         // 3. Xử lý và gửi tin nhắn qua Zalo
         const messageContent = await processMessage(preSurgeryMsgTemplate.content, appointment.customer);
 
-        // SỬA ĐỔI: Sử dụng 'appointment.customer' thay vì 'customer'
-        let selectedZalo = appointment.customer.uid?.[0]?.zalo
-            ? await Zalo.findById(appointment.customer.uid[0].zalo)
-            : await Zalo.findOne();
-
-        if (!selectedZalo) throw new Error('Không có tài khoản Zalo để gửi tin');
-
-        const response = await actionZalo({
-            phone: appointment.customer.phone,
-            uidPerson: appointment.customer.uid?.[0]?.uid || '',
-            actionType: 'sendMessage',
-            message: messageContent,
-            uid: selectedZalo.uid
-        });
+        // Sử dụng ZaloAccountNew (Zalo Hệ Thống) thay vì model Zalo cũ
+        let accountKey = null;
+        let zaloAccountId = null;
+        
+        try {
+            await dbConnect(); // Đảm bảo kết nối DB
+            
+            // Ưu tiên 1: Tìm account từ customer.uid[0].zalo (nếu có và là ZaloAccountNew)
+            if (appointment.customer.uid?.[0]?.zalo) {
+                try {
+                    const zaloAccount = await ZaloAccountNew.findById(appointment.customer.uid[0].zalo)
+                        .select('accountKey status')
+                        .lean();
+                    
+                    if (zaloAccount?.status === 'active' && zaloAccount?.accountKey) {
+                        accountKey = zaloAccount.accountKey;
+                        zaloAccountId = zaloAccount._id;
+                        console.log('[agenda preSurgeryReminder] ✅ Tìm thấy account từ customer.uid:', accountKey);
+                    }
+                } catch (err) {
+                    // Có thể là model Zalo cũ, bỏ qua và tìm account active
+                    console.log('[agenda preSurgeryReminder] customer.uid[0].zalo không phải ZaloAccountNew, tìm account active');
+                }
+            }
+            
+            // Ưu tiên 2: Lấy account active đầu tiên từ ZaloAccountNew (Zalo Hệ Thống)
+            if (!accountKey) {
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                    status: 'active' 
+                }).sort({ updatedAt: 1 }).select('accountKey _id status').lean();
+                
+                if (fallbackAccount?.accountKey) {
+                    accountKey = fallbackAccount.accountKey;
+                    zaloAccountId = fallbackAccount._id;
+                    console.log('[agenda preSurgeryReminder] ✅ Sử dụng account active đầu tiên:', accountKey);
+                } else {
+                    // Kiểm tra xem có account nào trong hệ thống không
+                    const totalAccounts = await ZaloAccountNew.countDocuments({});
+                    const activeAccounts = await ZaloAccountNew.countDocuments({ status: 'active' });
+                    console.error('[agenda preSurgeryReminder] ❌ Không tìm thấy account active. Tổng số account:', totalAccounts, 'Active:', activeAccounts);
+                }
+            }
+        } catch (err) {
+            console.error('[agenda preSurgeryReminder] Lỗi khi tìm accountKey:', err);
+        }
+        
+        if (!accountKey) {
+            throw new Error('Không có tài khoản Zalo để gửi tin. Vui lòng đăng nhập QR trong Zalo Hệ Thống.');
+        }
+        
+        let response;
+        try {
+            const result = await sendUserMessage({
+                accountKey: accountKey,
+                userId: appointment.customer.uid?.[0]?.uid || '',
+                text: messageContent,
+                attachments: []
+            });
+            
+            response = {
+                status: result.ok || false,
+                message: result.ok ? 'Gửi tin nhắn thành công' : (result.message || 'Gửi tin nhắn thất bại'),
+                content: {
+                    error_code: result.ok ? 0 : -1,
+                    error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                    data: result.ack || {}
+                }
+            };
+        } catch (err) {
+            console.error('[agenda preSurgeryReminder] Lỗi khi gửi tin nhắn:', err);
+            response = { status: false, message: err?.message || 'Lỗi không xác định', content: { error_code: -1, error_message: err?.message || 'Lỗi không xác định', data: {} } };
+        }
 
         // 4. Ghi log và lịch sử chăm sóc
         await Logs.create({
@@ -736,13 +1135,13 @@ async function preSurgeryReminderProcessor(job) {
                 message: messageContent,
                 data: {
                     error_code: response?.content?.error_code || null,
-                    error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from AppScript')
+                    error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from zca-js')
                 }
             },
             type: 'sendMessage',
             createBy: SYSTEM_USER_ID,
             customer: customerId,
-            zalo: selectedZalo._id,
+            zalo: zaloAccountId || null, // Sử dụng zaloAccountId từ ZaloAccountNew
         });
 
         if (!response?.status) throw new Error(response?.message || 'Gửi tin nhắn dặn dò qua Zalo thất bại');
@@ -773,26 +1172,94 @@ async function postSurgeryMessageProcessor(job) {
         // Xử lý message (thay thế placeholder)
         const processedMessage = await processMessage(messageContent, customer);
 
-        // Chọn tài khoản Zalo để gửi
-        let selectedZalo = customer.uid?.[0]?.zalo ? await Zalo.findById(customer.uid[0].zalo) : await Zalo.findOne();
-        if (!selectedZalo) throw new Error('Không có tài khoản Zalo để gửi tin');
-
-        // Gửi tin nhắn
-        const response = await actionZalo({
-            phone: customer.phone,
-            uidPerson: customer.uid?.[0]?.uid || '',
-            actionType: 'sendMessage',
-            message: processedMessage,
-            uid: selectedZalo.uid
-        });
+        // Chọn tài khoản Zalo để gửi - Sử dụng ZaloAccountNew (Zalo Hệ Thống)
+        let accountKey = null;
+        let zaloAccountId = null;
+        
+        try {
+            await dbConnect(); // Đảm bảo kết nối DB
+            
+            // Ưu tiên 1: Tìm account từ customer.uid[0].zalo (nếu có và là ZaloAccountNew)
+            if (customer.uid?.[0]?.zalo) {
+                try {
+                    const zaloAccount = await ZaloAccountNew.findById(customer.uid[0].zalo)
+                        .select('accountKey status')
+                        .lean();
+                    
+                    if (zaloAccount?.status === 'active' && zaloAccount?.accountKey) {
+                        accountKey = zaloAccount.accountKey;
+                        zaloAccountId = zaloAccount._id;
+                        console.log('[agenda postSurgeryMessage] ✅ Tìm thấy account từ customer.uid:', accountKey);
+                    }
+                } catch (err) {
+                    // Có thể là model Zalo cũ, bỏ qua và tìm account active
+                    console.log('[agenda postSurgeryMessage] customer.uid[0].zalo không phải ZaloAccountNew, tìm account active');
+                }
+            }
+            
+            // Ưu tiên 2: Lấy account active đầu tiên từ ZaloAccountNew (Zalo Hệ Thống)
+            if (!accountKey) {
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                    status: 'active' 
+                }).sort({ updatedAt: 1 }).select('accountKey _id status').lean();
+                
+                if (fallbackAccount?.accountKey) {
+                    accountKey = fallbackAccount.accountKey;
+                    zaloAccountId = fallbackAccount._id;
+                    console.log('[agenda postSurgeryMessage] ✅ Sử dụng account active đầu tiên:', accountKey);
+                } else {
+                    // Kiểm tra xem có account nào trong hệ thống không
+                    const totalAccounts = await ZaloAccountNew.countDocuments({});
+                    const activeAccounts = await ZaloAccountNew.countDocuments({ status: 'active' });
+                    console.error('[agenda postSurgeryMessage] ❌ Không tìm thấy account active. Tổng số account:', totalAccounts, 'Active:', activeAccounts);
+                }
+            }
+        } catch (err) {
+            console.error('[agenda postSurgeryMessage] Lỗi khi tìm accountKey:', err);
+        }
+        
+        if (!accountKey) {
+            throw new Error('Không có tài khoản Zalo để gửi tin. Vui lòng đăng nhập QR trong Zalo Hệ Thống.');
+        }
+        
+        // Gửi tin nhắn bằng zca-js
+        let response;
+        try {
+            const result = await sendUserMessage({
+                accountKey: accountKey,
+                userId: customer.uid?.[0]?.uid || '',
+                text: processedMessage,
+                attachments: []
+            });
+            
+            response = {
+                status: result.ok || false,
+                message: result.ok ? 'Gửi tin nhắn thành công' : (result.message || 'Gửi tin nhắn thất bại'),
+                content: {
+                    error_code: result.ok ? 0 : -1,
+                    error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                    data: result.ack || {}
+                }
+            };
+        } catch (err) {
+            console.error('[agenda postSurgeryMessage] Lỗi khi gửi tin nhắn:', err);
+            response = { status: false, message: err?.message || 'Lỗi không xác định', content: { error_code: -1, error_message: err?.message || 'Lỗi không xác định', data: {} } };
+        }
 
         // Ghi log
         await Logs.create({
-            status: { status: response?.status || false, message: processedMessage, data: { /* ... */ } },
+            status: { 
+                status: response?.status || false, 
+                message: processedMessage, 
+                data: {
+                    error_code: response?.content?.error_code || null,
+                    error_message: response?.content?.error_message || (response?.status ? '' : 'Invalid response from zca-js')
+                }
+            },
             type: 'sendMessage',
             createBy: SYSTEM_USER_ID,
             customer: customerId,
-            zalo: selectedZalo._id,
+            zalo: zaloAccountId || null, // Sử dụng zaloAccountId từ ZaloAccountNew
         });
 
         if (!response?.status) throw new Error(response?.message || 'Gửi tin nhắn sau phẫu thuật thất bại');
@@ -812,59 +1279,91 @@ async function postSurgeryMessageProcessor(job) {
 async function servicePreSurgeryMessageProcessor(job) {
     const { customerId, serviceDetailId, triggeredBy } = job.attrs.data || {};
     const jobName = 'servicePreSurgeryMessage';
+    const jobId = job.attrs._id;
+
+    console.log(`[Job ${jobName}] 🚀 Bắt đầu xử lý job. Job ID: ${jobId}, customerId: ${customerId}, serviceDetailId: ${serviceDetailId}, triggeredBy: ${triggeredBy}`);
 
     if (!customerId || !serviceDetailId) {
-        console.error(`[Job ${jobName}] Thiếu customerId hoặc serviceDetailId.`);
+        console.error(`[Job ${jobName}] ❌ Thiếu customerId hoặc serviceDetailId. customerId: ${customerId}, serviceDetailId: ${serviceDetailId}`);
+        await logCareHistory(customerId, jobName, 'failed', `Thiếu customerId hoặc serviceDetailId.`);
         return;
     }
 
     try {
-        const customer = await Customer.findById(customerId);
+        console.log(`[Job ${jobName}] 📋 Đang tìm customer và populate selectedService...`);
+        
+        // Populate selectedService để có đầy đủ thông tin
+        const customer = await Customer.findById(customerId)
+            .populate('serviceDetails.selectedService', 'name preSurgeryMessages')
+            .lean();
+        
         if (!customer) {
+            console.error(`[Job ${jobName}] ❌ Không tìm thấy khách hàng ${customerId}`);
             await logCareHistory(customerId, jobName, 'failed', `Không tìm thấy khách hàng ${customerId}.`);
             return;
         }
 
+        console.log(`[Job ${jobName}] ✅ Tìm thấy khách hàng: ${customer.name || customerId}`);
+
         let detail = null;
-        if (customer.serviceDetails?.id) {
-            detail = customer.serviceDetails.id(serviceDetailId);
-        }
-        if (!detail && Array.isArray(customer.serviceDetails)) {
+        if (Array.isArray(customer.serviceDetails)) {
             detail = customer.serviceDetails.find((d) => String(d?._id) === String(serviceDetailId));
         }
 
         if (!detail) {
+            console.error(`[Job ${jobName}] ❌ Không tìm thấy đơn chốt ${serviceDetailId} trong ${customer.serviceDetails?.length || 0} đơn`);
             await logCareHistory(customerId, jobName, 'failed', `Không tìm thấy đơn chốt ${serviceDetailId}.`);
             return;
         }
 
-        if (detail.approvalStatus !== 'approved') {
-            await logCareHistory(customerId, jobName, 'success', `Đơn ${serviceDetailId} không còn ở trạng thái approved. Bỏ qua gửi tin nhắn.`);
+        console.log(`[Job ${jobName}] ✅ Tìm thấy đơn chốt. approvalStatus: ${detail.approvalStatus}, selectedService: ${detail.selectedService ? (typeof detail.selectedService === 'object' ? detail.selectedService._id : detail.selectedService) : 'null'}, selectedCourse: ${detail.selectedCourse?.name || 'null'}`);
+
+        // Cho phép gửi tin nhắn trước phẫu thuật ngay khi tạo đơn (không cần đợi duyệt)
+        // Chỉ bỏ qua nếu đơn bị reject hoặc đã bị xóa
+        if (detail.approvalStatus === 'rejected' || !detail.selectedService || !detail.selectedCourse) {
+            console.log(`[Job ${jobName}] ⏭️ Đơn không đủ điều kiện. approvalStatus: ${detail.approvalStatus}, hasSelectedService: ${!!detail.selectedService}, hasSelectedCourse: ${!!detail.selectedCourse}`);
+            await logCareHistory(customerId, jobName, 'success', `Đơn ${serviceDetailId} không đủ điều kiện để gửi tin nhắn trước phẫu thuật.`);
             return;
         }
 
-        const detailSnapshot = detail.toObject ? detail.toObject() : JSON.parse(JSON.stringify(detail));
+        // detail đã là plain object từ .lean(), không cần toObject()
+        const detailSnapshot = detail;
         const sessionStub = triggeredBy ? { id: triggeredBy } : { id: SYSTEM_USER_ID };
+        
+        // Tạo customer object để truyền vào hàm (cần là Mongoose document hoặc plain object)
+        const customerForFunction = await Customer.findById(customerId);
+        console.log(`[Job ${jobName}] 📤 Đang gọi sendPreSurgeryMessageIfNeeded...`);
 
         const result = await sendPreSurgeryMessageIfNeeded({
-            customer,
+            customer: customerForFunction,
             detail: detailSnapshot,
             session: sessionStub,
-        }).catch((error) => ({ error: error?.message || 'Unhandled error trong servicePreSurgeryMessageProcessor.' }));
+        }).catch((error) => {
+            console.error(`[Job ${jobName}] ❌ Lỗi khi gọi sendPreSurgeryMessageIfNeeded:`, error);
+            console.error(`[Job ${jobName}] ❌ Error stack:`, error?.stack);
+            return { error: error?.message || 'Unhandled error trong servicePreSurgeryMessageProcessor.' };
+        });
+        
+        console.log(`[Job ${jobName}] 📥 Kết quả từ sendPreSurgeryMessageIfNeeded:`, JSON.stringify(result, null, 2));
 
         if (result?.success) {
-            await logCareHistory(customerId, jobName, 'success', 'Đã gửi tin nhắn trước phẫu thuật sau duyệt đơn.');
+            console.log(`[Job ${jobName}] ✅ Gửi tin nhắn trước phẫu thuật THÀNH CÔNG cho customerId: ${customerId}, serviceDetailId: ${serviceDetailId}`);
+            await logCareHistory(customerId, jobName, 'success', 'Đã gửi tin nhắn trước phẫu thuật sau khi tạo đơn.');
             return;
         }
 
         if (result?.skipped) {
+            console.log(`[Job ${jobName}] ⏭️ Bỏ qua gửi tin nhắn: ${result.skipped}`);
             await logCareHistory(customerId, jobName, 'success', result.skipped);
             return;
         }
 
-        await logCareHistory(customerId, jobName, 'failed', result?.error || 'Không thể gửi tin nhắn trước phẫu thuật.');
+        const errorMsg = result?.error || 'Không thể gửi tin nhắn trước phẫu thuật.';
+        console.error(`[Job ${jobName}] ❌ Gửi tin nhắn trước phẫu thuật THẤT BẠI cho customerId: ${customerId}, serviceDetailId: ${serviceDetailId}. Lỗi: ${errorMsg}`);
+        await logCareHistory(customerId, jobName, 'failed', errorMsg);
     } catch (error) {
-        console.error(`[Job ${jobName}] Xảy ra lỗi: "${error.message}"`);
+        console.error(`[Job ${jobName}] ❌ Xảy ra lỗi không mong đợi: "${error.message}"`);
+        console.error(`[Job ${jobName}] ❌ Error stack:`, error?.stack);
         await logCareHistory(customerId, jobName, 'failed', error.message);
     }
 }

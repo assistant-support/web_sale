@@ -4,6 +4,7 @@ import Service from '@/models/services.model';
 import User from '@/models/users';
 import Setting from '@/models/setting.model';
 import { revalidateData } from '@/app/actions/customer.actions';
+import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 
 async function pickNextUserByGroup(group) {
     console.log(`[AutoAssign] Looking for users in group: ${group}`);
@@ -247,8 +248,12 @@ export async function autoAssignForCustomer(customerId, options = {}) {
     });
 
     const newStatus = assignedUser.group === 'noi_khoa' ? 'noikhoa_3' : (assignedUser.group === 'ngoai_khoa' ? 'ngoaikhoa_3' : 'undetermined_3');
-    customer.pipelineStatus[0] = newStatus;
-    customer.pipelineStatus[3] = newStatus;
+    // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+    const validatedStatus = validatePipelineStatusUpdate(customer, newStatus);
+    if (validatedStatus) {
+        customer.pipelineStatus[0] = validatedStatus;
+        customer.pipelineStatus[3] = validatedStatus;
+    }
 
     customer.care.push({
         content: `Hệ thống tự động gán Sale phụ trách ${assignedUser.name} theo dịch vụ ${service.name}.`,

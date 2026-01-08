@@ -4,6 +4,7 @@
 import { google } from 'googleapis';
 import connectDB from '@/config/connectDB';
 import ZaloAccount from '@/models/zalo.model';
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
 import checkAuthToken from '@/utils/checktoken';
 import { reloadUser, reloadZalo } from '@/data/actions/reload';
 import User from '@/models/users';
@@ -106,19 +107,21 @@ export async function selectZaloAccountAction(previousState, formData) {
             return { status: true, message: 'Đã hủy chọn tài khoản Zalo.' };
         }
 
-        // Trường hợp 2: Chọn tài khoản mới (ID hợp lệ)
+        // Trường hợp 2: Chọn tài khoản mới từ ZaloAccount mới (Zalo Hệ Thống)
         if (zaloAccountId.length !== 24) {
             return { status: false, message: 'ID tài khoản Zalo không hợp lệ.' };
         }
 
-        const accountToSelect = await ZaloAccount.findById(zaloAccountId);
+        // Tìm tài khoản trong ZaloAccount mới (Zalo Hệ Thống)
+        const accountToSelect = await ZaloAccountNew.findById(zaloAccountId).lean();
         if (!accountToSelect) {
-            return { status: false, message: 'Không tìm thấy tài khoản Zalo này.' };
+            return { status: false, message: 'Không tìm thấy tài khoản Zalo này trong Zalo Hệ Thống.' };
         }
 
+        // Lưu _id của ZaloAccount mới vào user.zalo
         await User.findByIdAndUpdate(user.id, { $set: { zalo: zaloAccountId } });
         reloadUser(user.id);
-        return { status: true, message: `Đã chọn tài khoản ${accountToSelect.name}.` };
+        return { status: true, message: `Đã chọn tài khoản ${accountToSelect.profile?.displayName || 'Zalo Account'}.` };
 
     } catch (error) {
         console.error('Select Zalo Account Error:', error);

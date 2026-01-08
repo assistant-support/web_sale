@@ -154,10 +154,10 @@ export default function SettingZaloRoles({ data, allUsers = [] }) {
     const handleCloseNoti = () => setNotification(p => ({ ...p, open: false }));
     return (
         <>
-            <button className='btn_s' onClick={() => setIsListOpen(true)}>
+            {/* <button className='btn_s' onClick={() => setIsListOpen(true)}>
                 <Svg_Mode w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
                 <h5 className='text_w_400'>Quản lý Zalo</h5>
-            </button>
+            </button> */}
             <FlexiblePopup open={isListOpen} onClose={() => setIsListOpen(false)} title="Danh sách tài khoản Zalo" width={'500px'}
                 renderItemList={() => (
                     <div className={`${styles.popupContentWrapper} scroll`}>

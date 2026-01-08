@@ -6,7 +6,9 @@ import Setting from "@/models/setting.model";
 import Form from "@/models/formclient";
 import Variant from "@/models/variant.model";
 import Logs from "@/models/log.model";
-import { actionZalo, sendGP } from "@/function/drive/appscript";
+import { sendGP } from "@/function/drive/appscript";
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
+import { changeFriendAlias } from '@/data/zalo/chat.actions';
 import { formatMessage } from "@/app/api/(zalo)/action/route";
 import { revalidateData } from "@/app/actions/customer.actions";
 import autoAssignForCustomer from "@/utils/autoAssign";
@@ -241,9 +243,70 @@ export async function POST(req) {
             const form = await Form.findById(doc.source).select('name').lean();
             const srcName = form ? form.name : String(doc.source || 'Unknown');
             const newZaloName = `${doc.name}_${srcName}`;
-            const renameResponse = await actionZalo({
-              uid: selectedZalo.uid, uidPerson: normalizedUid, actionType: 'tag', message: newZaloName, phone: phone
-            });
+            // Lấy accountKey từ ZaloAccount mới để đổi tên gợi nhớ bằng zca-js
+            let tagAccountKey = null;
+            try {
+              const zaloAccount = await ZaloAccountNew.findOne({
+                $or: [
+                  { 'profile.zaloId': String(selectedZalo.uid).trim() },
+                  { accountKey: String(selectedZalo.uid).trim() }
+                ],
+                status: 'active'
+              }).sort({ updatedAt: 1 }).lean();
+              
+              if (zaloAccount?.accountKey) {
+                tagAccountKey = zaloAccount.accountKey;
+              } else {
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                  status: 'active' 
+                }).sort({ updatedAt: 1 }).lean();
+                if (fallbackAccount?.accountKey) {
+                  tagAccountKey = fallbackAccount.accountKey;
+                }
+              }
+            } catch (err) {
+              console.error('[client/route] Lỗi khi tìm accountKey cho tag:', err);
+            }
+            
+            let renameResponse;
+            if (!tagAccountKey) {
+              renameResponse = {
+                status: false,
+                content: {
+                  error_code: -1,
+                  error_message: 'Không tìm thấy tài khoản Zalo hợp lệ. Vui lòng đăng nhập QR trước.',
+                  data: {}
+                }
+              };
+            } else {
+              try {
+                const result = await changeFriendAlias({
+                  accountKey: tagAccountKey,
+                  userId: normalizedUid,
+                  alias: newZaloName
+                });
+                
+                // Format result để tương thích với code cũ
+                renameResponse = {
+                  status: result.ok || false,
+                  content: {
+                    error_code: result.ok ? 0 : -1,
+                    error_message: result.ok ? '' : (result.message || 'Đổi tên gợi nhớ thất bại'),
+                    data: result.result || {}
+                  }
+                };
+              } catch (err) {
+                console.error('[client/route] Lỗi khi đổi tên gợi nhớ:', err);
+                renameResponse = {
+                  status: false,
+                  content: {
+                    error_code: -1,
+                    error_message: err?.message || 'Lỗi không xác định',
+                    data: {}
+                  }
+                };
+              }
+            }
             console.log(renameResponse, 'Gợi nhớ ', newZaloName);
 
             // --- Log cho hành động tag --- (Lưu ý: type 'tag' không có trong enum, có thể cần cập nhật model)
@@ -278,25 +341,77 @@ export async function POST(req) {
               }
               const finalMessageToSend = await formatMessage(template, doc, selectedZalo);
               if (finalMessageToSend) {
-                const sendMessageResponse = await actionZalo({
-                  uid: selectedZalo.uid, uidPerson: normalizedUid, actionType: "sendMessage", message: finalMessageToSend, phone: phone
-                });
-                // --- Log cho hành động sendMessage ---
-                await Logs.create({
-                  status: {
-                    status: sendMessageResponse.status,
-                    message: finalMessageToSend || 'Không có tin nhắn gửi đi',
-                    data: {
-                      error_code: sendMessageResponse.content?.error_code,
-                      error_message: sendMessageResponse.content?.error_message,
-                    },
-                  },
-                  type: "sendMessage",
-                  createBy: '68b0af5cf58b8340827174e0',
-                  customer: customerId,
-                  zalo: selectedZalo._id,
-                });
-                if (sendMessageResponse.status == true) messageStatus = "thành công";
+                // Lấy accountKey từ ZaloAccount mới
+                const { ZaloAccount: ZaloAccountNew } = await import('@/models/zalo-account.model');
+                const { sendUserMessage } = await import('@/data/zalo/chat.actions');
+                
+                let accountKey = null;
+                try {
+                  const zaloAccount = await ZaloAccountNew.findOne({
+                    $or: [
+                      { 'profile.zaloId': String(selectedZalo.uid).trim() },
+                      { accountKey: String(selectedZalo.uid).trim() }
+                    ],
+                    status: 'active'
+                  }).sort({ updatedAt: 1 }).lean();
+                  
+                  if (zaloAccount?.accountKey) {
+                    accountKey = zaloAccount.accountKey;
+                  } else {
+                    // Fallback: lấy account đầu tiên có status active
+                    const fallbackAccount = await ZaloAccountNew.findOne({ 
+                      status: 'active' 
+                    }).sort({ updatedAt: 1 }).lean();
+                    if (fallbackAccount?.accountKey) {
+                      accountKey = fallbackAccount.accountKey;
+                    }
+                  }
+                } catch (err) {
+                  console.error('[client/route] Lỗi khi tìm accountKey:', err);
+                }
+                
+                if (!accountKey) {
+                  messageStatus = "thất bại (không tìm thấy tài khoản Zalo)";
+                } else {
+                  try {
+                    const result = await sendUserMessage({
+                      accountKey: accountKey,
+                      userId: normalizedUid,
+                      text: finalMessageToSend,
+                      attachments: []
+                    });
+                    
+                    // Format result để tương thích với code cũ
+                    const sendMessageResponse = {
+                      status: result.ok || false,
+                      content: {
+                        error_code: result.ok ? 0 : -1,
+                        error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                        data: result.ack || {}
+                      }
+                    };
+                    
+                    // --- Log cho hành động sendMessage ---
+                    await Logs.create({
+                      status: {
+                        status: sendMessageResponse.status,
+                        message: finalMessageToSend || 'Không có tin nhắn gửi đi',
+                        data: {
+                          error_code: sendMessageResponse.content?.error_code,
+                          error_message: sendMessageResponse.content?.error_message,
+                        },
+                      },
+                      type: "sendMessage",
+                      createBy: '68b0af5cf58b8340827174e0',
+                      customer: customerId,
+                      zalo: selectedZalo._id,
+                    });
+                    if (sendMessageResponse.status == true) messageStatus = "thành công";
+                  } catch (err) {
+                    console.error('[client/route] Lỗi khi gửi tin nhắn:', err);
+                    messageStatus = "thất bại";
+                  }
+                }
               } else {
                 messageStatus = "bỏ qua (template rỗng)";
               }

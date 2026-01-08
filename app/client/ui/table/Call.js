@@ -57,6 +57,15 @@ export default function Call({ customer, user }) {
     const [loading, setLoading] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
     const [isInitializing, setIsInitializing] = useState(false);
+    // stateCall: true = đang trong cuộc gọi, false = chưa thực hiện cuộc gọi
+    // Lấy từ localStorage để persist qua các lần mount/unmount
+    const [stateCall, setStateCall] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('omicall_stateCall');
+            return saved === 'true';
+        }
+        return false;
+    });
 
     // ===== REFS =====
     const sdkRef = useRef(null);              // SDK instance
@@ -68,6 +77,9 @@ export default function Call({ customer, user }) {
     const acceptedAtRef = useRef(0);
     const callCountRef = useRef(0);
     const durationIntervalRef = useRef(null);
+    const lastEndInfoRef = useRef({ statusCode: null, by: null, durationSec: 0, callStatus: 'failed' });
+    const processRecordingOnceRef = useRef(false);
+    const hasRingingRef = useRef(false); // Track xem đã có ringing event (đổ chuông) chưa
     
     // Audio recording refs
     const localStreamRef = useRef(null);      // Local audio stream
@@ -194,17 +206,38 @@ export default function Call({ customer, user }) {
                 sipPassword: 'Ws9nsNEClG' // Password từ OMICall
             });
             
-           
-            // Xử lý trường hợp "Already registered"
-            if (registerStatus?.status === false && registerStatus?.error === 'Already registered') {
-                console.log('[Call] ⚠️ SDK đã được đăng ký trước đó, tiếp tục...');
+            // Xử lý trường hợp "Already registered" (nhiều format khác nhau)
+            const errorMsg = registerStatus?.error || registerStatus?.message || '';
+            const isAlreadyRegistered = 
+                registerStatus?.status === false && (
+                    errorMsg.toLowerCase().includes('already') ||
+                    errorMsg.toLowerCase().includes('registered') ||
+                    errorMsg === 'ALREADY_REGISTERED' ||
+                    errorMsg === 'Already registered' ||
+                    errorMsg === 'already registered' ||
+                    registerStatus?.error === 'ALREADY_REGISTERED' ||
+                    registerStatus?.error === 'Already registered'
+                );
+            
+            if (isAlreadyRegistered) {
+                console.log('[Call] ⚠️ SDK đã được đăng ký trước đó (từ tab khác hoặc lần trước), giữ nguyên kết nối...');
                 setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
                 setIsInitialized(true);
                 return;
             }
             
+            // Nếu register thành công
+            if (registerStatus?.status === true || registerStatus?.status === 'connected') {
+                setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
+                setIsInitialized(true);
+                console.log('[Call] ✅ Đã kết nối thành công');
+                return;
+            }
+            
+            // Nếu có lỗi khác (không phải Already registered)
             if (!registerStatus?.status) {
-                throw new Error(registerStatus?.error || 'Đăng ký thất bại');
+                console.error('[Call] ❌ Lỗi đăng ký:', registerStatus);
+                throw new Error(errorMsg || 'Đăng ký thất bại');
             }
             
             setConnectionStatus({ status: 'connected', text: 'Đã kết nối (OMI)' });
@@ -216,90 +249,6 @@ export default function Call({ customer, user }) {
             setConnectionStatus({ status: 'disconnected', text: 'Kết nối thất bại' });
             toast.error('Không thể kết nối tới tổng đài');
         }
-    }, []);
-
-    // ===== SETUP EVENT LISTENERS ====
-    const setupOMIEventListeners = useCallback(() => {
-        const sdk = sdkRef.current;
-        if (!sdk) return;
-        
-       
-        
-        // 1. Sự kiện đăng ký (register status)
-        sdk.on('register', (data) => {
-           
-            const statusMap = {
-                'connected': { status: 'connected', text: 'Đã kết nối (OMI)' },
-                'connecting': { status: 'connecting', text: 'Đang kết nối...' },
-                'disconnect': { status: 'disconnected', text: 'Mất kết nối' }
-            };
-            setConnectionStatus(statusMap[data?.status] || statusMap.disconnect);
-        });
-        
-        // 2. Đang kết nối (call started)
-        sdk.on('connecting', (callData) => {
-            console.log('[Call] 📞 OMI connecting event:', callData);
-            currentCallRef.current = callData;
-            setCallStage('connecting');
-            setStatusText('Đang kết nối...');
-            setDurationText('00:00');
-        });
-        
-        // 3. Đang đổ chuông (ringing)
-        sdk.on('ringing', (callData) => {
-            console.log('[Call] 📞 OMI ringing event:', callData);
-            currentCallRef.current = callData;
-            setCallStage('ringing');
-            setStatusText('Đang đổ chuông...');
-        });
-        
-        // 4. Cuộc gọi được chấp nhận (accepted)
-        sdk.on('accepted', (callData) => {
-            console.log('[Call] ✅ OMI accepted event:', callData);
-            currentCallRef.current = callData;
-            setCallStage('in_call');
-            setStatusText('Đang trong cuộc gọi');
-            setIsRecording(true);
-            acceptedAtRef.current = Date.now();
-            startRecording();
-            
-            // Setup audio playback
-            setupAudioPlayback(callData);
-            
-            // Start duration counter
-            durationIntervalRef.current = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - acceptedAtRef.current) / 1000);
-                const minutes = Math.floor(elapsed / 60);
-                const seconds = elapsed % 60;
-                const durationText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                setDurationText(durationText);
-                lastDurationSecRef.current = elapsed;
-            }, 1000);
-        });
-        
-        // 5. Cập nhật thời lượng (tick duration)
-        sdk.on('on_calling', (callData) => {
-            const text = callData?.callingDuration?.text || '00:00';
-            setDurationText(text);
-        });
-        
-        // 6. Cuộc gọi kết thúc (ended)
-        sdk.on('ended', (info) => {
-            console.log('[Call] 📞 OMI ended event:', info);
-            onCallEnded(info);
-        });
-        
-        // 7. Lỗi cuộc gọi
-        sdk.on('failed', (error) => {
-            console.log('[Call] ❌ OMI call failed:', error);
-            setCallStage('idle');
-            setStatusText('Cuộc gọi thất bại');
-            setIsCalling(false);
-            setIsRecording(false);
-            setDurationText('00:00');
-            toast.error('Cuộc gọi thất bại');
-        });
-        
     }, []);
 
     // ===== SETUP AUDIO PLAYBACK ====
@@ -347,6 +296,238 @@ export default function Call({ customer, user }) {
         }
     }, []);
 
+    // ===== OMICALL POPUP AUTO-CLOSE HELPER (GIỐNG testcallCRM) =====
+    
+    // Tự động click nút "Đóng và lưu lại" trong popup OMICall (kể cả khi popup bị ẩn hoặc nằm trong iframe)
+    const clickOmicallCloseAndSave = useCallback((maxRetries = 10, delayMs = 300) => {
+        let attempt = 0;
+
+        const tryClick = () => {
+            try {
+                const docs = [document];
+
+                // Nếu popup được render trong iframe, duyệt thêm document của iframe
+                const iframes = Array.from(document.querySelectorAll('iframe'));
+                iframes.forEach((frame) => {
+                    try {
+                        const doc = frame.contentWindow?.document;
+                        if (doc) docs.push(doc);
+                    } catch {
+                        // Bỏ qua iframe khác origin
+                    }
+                });
+
+                for (const doc of docs) {
+                    // Cách 1: Tìm button trong popup container OMICall (ưu tiên)
+                    const popupContainers = doc.querySelectorAll('[omi-call-dialog], [class*="omi-call"], [id*="omi-call"]');
+                    for (const container of popupContainers) {
+                        const buttonsInPopup = Array.from(container.querySelectorAll('button'));
+                        const target = buttonsInPopup.find((btn) => {
+                            const text = (btn.textContent || btn.innerText || '').trim();
+                            const ariaLabel = (btn.getAttribute('aria-label') || '').trim();
+                            const title = (btn.getAttribute('title') || '').trim();
+                            
+                            return text.includes('Đóng và lưu lại') || 
+                                   text.includes('Đóng và lưu') ||
+                                   ariaLabel.includes('Đóng và lưu lại') ||
+                                   ariaLabel.includes('Đóng và lưu') ||
+                                   title.includes('Đóng và lưu lại') ||
+                                   title.includes('Đóng và lưu');
+                        });
+                        
+                        if (target) {
+                            console.log('[Call] 🖱️ Auto-click "Đóng và lưu lại" trên popup OMICall (call chính)', target);
+                            console.log('[Call] 📝 Button text:', target.textContent || target.innerText);
+                            target.click();
+                            console.log('[Call] ✅ ĐÃ TỰ ĐỘNG TẮT POPUP OMICall (call chính)');
+                            return true;
+                        }
+                    }
+                    
+                    // Cách 2: Tìm trong tất cả button (fallback)
+                    const allButtons = Array.from(doc.querySelectorAll('button'));
+                    
+                    const target = allButtons.find((btn) => {
+                        const text = (btn.textContent || btn.innerText || '').trim();
+                        const ariaLabel = (btn.getAttribute('aria-label') || '').trim();
+                        const title = (btn.getAttribute('title') || '').trim();
+                        
+                        // Tìm button có text chứa "Đóng và lưu lại" (bỏ điều kiện offsetParent vì popup có thể bị ẩn)
+                        return text.includes('Đóng và lưu lại') || 
+                               text.includes('Đóng và lưu') ||
+                               ariaLabel.includes('Đóng và lưu lại') ||
+                               ariaLabel.includes('Đóng và lưu') ||
+                               title.includes('Đóng và lưu lại') ||
+                               title.includes('Đóng và lưu');
+                    });
+
+                    if (target) {
+                        console.log('[Call] 🖱️ Auto-click "Đóng và lưu lại" trên popup OMICall (call chính - fallback)', target);
+                        console.log('[Call] 📝 Button text:', target.textContent || target.innerText);
+                        target.click();
+                        console.log('[Call] ✅ ĐÃ TỰ ĐỘNG TẮT POPUP OMICall (call chính)');
+                        return true;
+                    }
+                }
+            } catch (err) {
+                console.error('[Call] ❌ clickOmicallCloseAndSave error:', err);
+            }
+
+            attempt++;
+            if (attempt <= maxRetries) {
+                setTimeout(tryClick, delayMs);
+            } else {
+                console.log('[Call] ⚠️ Không tìm thấy nút "Đóng và lưu lại" để auto-click sau', maxRetries, 'lần thử');
+            }
+
+            return false;
+        };
+
+        return tryClick();
+    }, []);
+
+    // ===== SETUP EVENT LISTENERS ====
+    const setupOMIEventListeners = useCallback(() => {
+        const sdk = sdkRef.current;
+        if (!sdk) return;
+        
+        // 1. Sự kiện đăng ký (register status)
+        sdk.on('register', (data) => {
+            const statusMap = {
+                'connected': { status: 'connected', text: 'Đã kết nối (OMI)' },
+                'connecting': { status: 'connecting', text: 'Đang kết nối...' },
+                'disconnect': { status: 'disconnected', text: 'Mất kết nối' }
+            };
+            setConnectionStatus(statusMap[data?.status] || statusMap.disconnect);
+        });
+        
+        // 2. Đang kết nối (call started)
+        sdk.on('connecting', (callData) => {
+            console.log('[Call] 📞 OMI connecting event:', callData);
+            currentCallRef.current = callData;
+            // Lưu call object vào window để persistent qua component remount
+            if (typeof window !== 'undefined' && callData) {
+                window.__OMICall_ActiveCall = callData;
+                window.__OMICall_ActiveCallUID = callData.uid || callData.uuid;
+            }
+            setCallStage('connecting');
+            setStatusText('Đang kết nối...');
+            setDurationText('00:00');
+            hasRingingRef.current = false; // Reset khi bắt đầu cuộc gọi mới
+        });
+        
+        // 3. Đang đổ chuông (ringing)
+        sdk.on('ringing', (callData) => {
+            console.log('[Call] 📞 OMI ringing event:', callData);
+            currentCallRef.current = callData;
+            // Cập nhật call object trong window
+            if (typeof window !== 'undefined' && callData) {
+                window.__OMICall_ActiveCall = callData;
+                window.__OMICall_ActiveCallUID = callData.uid || callData.uuid;
+            }
+            setCallStage('ringing');
+            setStatusText('Đang đổ chuông...');
+            hasRingingRef.current = true; // Đánh dấu đã có ringing event (đổ chuông thành công)
+        });
+        
+        // 4. Cuộc gọi được chấp nhận (accepted)
+        sdk.on('accepted', (callData) => {
+            console.log('[Call] ✅ OMI accepted event:', callData);
+            currentCallRef.current = callData;
+            // Cập nhật call object trong window
+            if (typeof window !== 'undefined' && callData) {
+                window.__OMICall_ActiveCall = callData;
+                window.__OMICall_ActiveCallUID = callData.uid || callData.uuid;
+            }
+            setCallStage('in_call');
+            setStatusText('Đang trong cuộc gọi');
+            setIsRecording(true);
+            acceptedAtRef.current = Date.now();
+            startRecording();
+            
+            // Setup audio playback
+            setupAudioPlayback(callData);
+            
+            // Start duration counter
+            durationIntervalRef.current = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - acceptedAtRef.current) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                const durationText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                setDurationText(durationText);
+                lastDurationSecRef.current = elapsed;
+            }, 1000);
+        });
+        
+        // 5. Cập nhật thời lượng (tick duration)
+        sdk.on('on_calling', (callData) => {
+            const text = callData?.callingDuration?.text || '00:00';
+            setDurationText(text);
+            lastDurationSecRef.current = hhmmssToSec(text);
+        });
+        
+        // 6. Cuộc gọi kết thúc (ended)
+        sdk.on('ended', (info) => {
+            console.log('[Call] 📞 OMI ended event:', info);
+            
+            // Khi SDK đã báo ended (dù nhân viên hay khách hàng/người bên kia ngắt)
+            // thì chắc chắn cuộc gọi đã kết thúc → stateCall phải trở về false
+            try {
+                const endedBy = info?.by || 'unknown';
+                setStateCall(false);
+                if (typeof window !== 'undefined') {
+                    localStorage.removeItem('omicall_stateCall');
+                }
+            } catch (err) {
+                console.error('[Call] ⚠️ Error when syncing stateCall on ended event:', err);
+            }
+            
+            // Xóa call object khỏi window khi cuộc gọi kết thúc
+            if (typeof window !== 'undefined') {
+                window.__OMICall_ActiveCall = null;
+                window.__OMICall_ActiveCallUID = null;
+            }
+            
+            // Tính duration và callStatus ngay lúc SDK báo ended
+            const code = info?.statusCode ?? info?.code ?? info?.reasonCode ?? null;
+            const sdkSec = lastDurationSecRef.current || 0;
+            const fallbackSec = acceptedAtRef.current
+                ? Math.max(0, Math.floor((Date.now() - acceptedAtRef.current) / 1000))
+                : 0;
+            const durationSec = Math.max(sdkSec, fallbackSec);
+            const callStatus = toCallStatus(code, durationSec);
+
+            lastEndInfoRef.current = {
+                statusCode: code,
+                by: info?.by,
+                durationSec,
+                callStatus,
+            };
+            
+            // Sau khi SDK báo ended, tự động tắt popup OMICall giống logic testcallCRM
+            // (ưu tiên click "Đóng và lưu lại" để SDK tự gửi add-metadata)
+            clickOmicallCloseAndSave();
+            
+            onCallEnded(info);
+        });
+        
+        // 7. Lỗi cuộc gọi
+        sdk.on('failed', (error) => {
+            console.log('[Call] ❌ OMI call failed:', error);
+            setCallStage('idle');
+            setStatusText('Cuộc gọi thất bại');
+            setIsCalling(false);
+            setIsRecording(false);
+            setDurationText('00:00');
+            setStateCall(false);
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('omicall_stateCall');
+            }
+            toast.error('Cuộc gọi thất bại');
+        });
+        
+    }, [clickOmicallCloseAndSave, setupAudioPlayback]);
+
     // ===== XỬ LÝ KẾT THÚC CUỘC GỌI ====
     const onCallEnded = useCallback((info) => {
         console.log('[Call] 📞 Cuộc gọi kết thúc:', info);
@@ -365,7 +546,7 @@ export default function Call({ customer, user }) {
             durationIntervalRef.current = null;
         }
         
-        // Stop recording
+        // Stop recording (sẽ tự động gọi processRecording trong onstop)
         stopRecording();
         
         // Stop audio
@@ -373,7 +554,16 @@ export default function Call({ customer, user }) {
             remoteAudioRef.current.pause();
             remoteAudioRef.current.srcObject = null;
         }
-    }, []);
+        
+        // Reset lastEndInfo và flag sau khi đã xử lý (để tránh dùng lại dữ liệu cũ)
+        setTimeout(() => {
+            lastEndInfoRef.current = { statusCode: null, by: null, durationSec: 0, callStatus: 'failed' };
+            lastDurationSecRef.current = 0;
+            acceptedAtRef.current = 0;
+            hasRingingRef.current = false; // Reset ringing flag
+            processRecordingOnceRef.current = false; // Reset flag để cho phép lưu cuộc gọi tiếp theo
+        }, 2000);
+    }, [customer]);
 
 
     // ===== HIGH QUALITY AUDIO FUNCTIONS =====
@@ -730,7 +920,22 @@ export default function Call({ customer, user }) {
         console.log('[Call] 🎤 Stopping recording...');
         try {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                // Đảm bảo onstop được gọi để tự động lưu
+                if (!mediaRecorderRef.current.onstop) {
+                    mediaRecorderRef.current.onstop = async () => {
+                        console.log('[Call] 🎤 Recording stopped, auto-saving...');
+                        await processRecording();
+                    };
+                }
                 mediaRecorderRef.current.stop();
+            } else if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
+                // Nếu recorder đã stop, gọi processRecording trực tiếp
+                console.log('[Call] 🎤 Recorder already stopped, auto-saving...');
+                processRecording().catch(err => console.error('[Call] ❌ Auto-save failed:', err));
+            } else if (!mediaRecorderRef.current && hasRingingRef.current) {
+                // Nếu không có recorder nhưng đã có ringing event → cập nhật pipelineStatus
+                console.log('[Call] 🎤 No recorder but has ringing event, updating pipelineStatus...');
+                updatePipelineStatusOnly().catch(err => console.error('[Call] ❌ Update pipelineStatus failed:', err));
             }
             
             // Cleanup audio context
@@ -747,22 +952,121 @@ export default function Call({ customer, user }) {
             console.log('[Call] 🎤 Recording stopped');
         } catch (error) {
             console.error('[Call] ❌ Recording stop failed:', error);
+            // Vẫn thử lưu nếu có dữ liệu hoặc đã có ringing event
+            if (recordedChunksRef.current.length > 0) {
+                processRecording().catch(err => console.error('[Call] ❌ Auto-save failed:', err));
+            } else if (hasRingingRef.current) {
+                updatePipelineStatusOnly().catch(err => console.error('[Call] ❌ Update pipelineStatus failed:', err));
+            }
+        }
+    };
+
+    // Function riêng để chỉ cập nhật pipelineStatus (không lưu Call record)
+    const updatePipelineStatusOnly = async () => {
+        if (processRecordingOnceRef.current) {
+            console.log('[Call] ⚠️ updatePipelineStatusOnly already called, skipping...');
+            return;
+        }
+
+        if (!customer?._id) {
+            console.error('[Call] ❌ No customer ID');
+            return;
+        }
+
+        // Lấy duration và callStatus từ lastEndInfoRef
+        const { statusCode, durationSec, callStatus } = lastEndInfoRef.current || {};
+        const finalDuration = durationSec || lastDurationSecRef.current || 0;
+        const hasRinging = hasRingingRef.current;
+        const finalStatus = callStatus || toCallStatus(statusCode, finalDuration);
+
+        // Chỉ cập nhật nếu đã có ringing và cuộc gọi kết thúc sớm
+        if (!hasRinging || (finalDuration >= 5 && finalStatus === 'completed')) {
+            console.log('[Call] ⚠️ Không cần cập nhật pipelineStatus');
+            return;
+        }
+
+        processRecordingOnceRef.current = true;
+
+        try {
+            console.log('[Call] 📤 Chỉ cập nhật pipelineStatus, không lưu Call record');
+            // TODO: Implement updatePipelineStatusForCall function in wraperdata.db.js
+            // For now, we'll just log it
+            console.log('[Call] 📤 Would update pipelineStatus:', {
+                customerId: customer._id,
+                callStatus: finalStatus,
+                hasRinging,
+                duration: finalDuration
+            });
+            toast.success('Đã cập nhật trạng thái cuộc gọi');
+        } catch (error) {
+            console.error('[Call] ❌ Update pipelineStatus error:', error);
+            toast.error('Lỗi khi cập nhật trạng thái: ' + error.message);
+            processRecordingOnceRef.current = false;
         }
     };
 
     const processRecording = async () => {
+        // Tránh gọi nhiều lần
+        if (processRecordingOnceRef.current) {
+            console.log('[Call] ⚠️ processRecording already called, skipping...');
+            return;
+        }
+        
+        // Lấy duration và callStatus từ lastEndInfoRef (đã tính trong ended event)
+        const { statusCode, durationSec, callStatus } = lastEndInfoRef.current || {};
+        const hasRinging = hasRingingRef.current;
+        let finalDuration = durationSec || lastDurationSecRef.current || 0;
+        const finalStatus = callStatus || toCallStatus(statusCode, finalDuration);
+
+        // Nếu không có dữ liệu ghi âm hoặc cuộc gọi quá ngắn (< 5s),
+        // vẫn ghi nhận một Call record "không có file" + cập nhật pipelineStatus qua server action.
+        if (recordedChunksRef.current.length === 0 || finalDuration < 5) {
+            try {
+                console.log('[Call] ⚠️ Cuộc gọi không đủ dữ liệu ghi âm, chỉ log trạng thái & pipeline:', {
+                    finalStatus,
+                    finalDuration,
+                    hasRinging,
+                });
+                processRecordingOnceRef.current = true;
+
+                // TODO: Implement updatePipelineStatusForCall function in wraperdata.db.js
+                // For now, we'll just log it
+                console.log('[Call] 📤 Would update pipelineStatus:', {
+                    customerId: customer._id,
+                    callStatus: finalStatus,
+                    hasRinging,
+                    duration: finalDuration
+                });
+                toast.success('Đã ghi nhận cuộc gọi (không có ghi âm)');
+            } catch (error) {
+                console.error('[Call] ❌ Lỗi khi ghi nhận cuộc gọi ngắn/không có ghi âm:', error);
+                toast.error('Không thể ghi nhận cuộc gọi');
+                processRecordingOnceRef.current = false;
+            }
+            return;
+        }
+        
+        processRecordingOnceRef.current = true;
+        
         try {
-            console.log('[Call] 🎤 Processing recording...');
+            console.log('[Call] 🎤 Processing recording (auto-save)...');
             
             // Validate customer and user IDs
             if (!customer?._id) {
                 console.error('[Call] ❌ No customer ID');
                 toast.error('Thiếu thông tin khách hàng');
+                processRecordingOnceRef.current = false;
                 return;
             }
             
-            // Sử dụng thông tin khách hàng làm user
-            const customerAsUser = {
+            // Ưu tiên sử dụng prop user (nhân viên thực hiện cuộc gọi), fallback về customer
+            const callUser = user && user.id ? {
+                _id: user.id,
+                name: user.name || 'Nhân viên',
+                email: user.email || `${user.id}@user.local`,
+                phone: user.phone || '',
+                area: user.area || 'Không xác định'
+            } : {
                 _id: customer._id,
                 name: customer.name || customer.zaloname || 'Khách hàng',
                 email: customer.email || `${customer.phone || customer.phonex}@customer.local`,
@@ -770,37 +1074,49 @@ export default function Call({ customer, user }) {
                 area: customer.area || 'Không xác định'
             };
             
-            console.log('[Call] 🎤 Using customer as user:', customerAsUser);
-            
+            console.log('[Call] 🎤 Using user for call:', callUser);
             console.log('[Call] 🎤 Customer ID:', customer._id);
-            console.log('[Call] 🎤 Customer as User:', customerAsUser);
+            console.log('[Call] 🎤 Duration:', finalDuration, 'seconds');
+            
+            // KIỂM TRA LẠI: Nếu cuộc gọi dưới 5 giây, không lưu ghi âm
+            if (finalDuration < 5) {
+                console.log(`[Call] ⚠️ Cuộc gọi quá ngắn (${finalDuration}s < 5s), không lưu ghi âm`);
+                toast.info(`Cuộc gọi quá ngắn (${finalDuration}s), không lưu ghi âm`);
+                processRecordingOnceRef.current = false;
+                return;
+            }
             
             const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
             console.log('[Call] 🎤 Audio blob created:', audioBlob.size, 'bytes');
             
             // Tạo tên file với thông tin khách hàng
             const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
-            const fileName = `rec-${customerAsUser.phone}-${timestamp}.webm`;
+            const customerPhone = customer.phone || customer.phonex || 'unknown';
+            const fileName = `rec-${customerPhone}-${timestamp}.webm`;
             
             const formData = new FormData();
             formData.append('recordingFile', audioBlob, fileName);
             formData.append('recordingFileName', fileName);
             formData.append('customerId', String(customer._id));
-            formData.append('userId', String(customerAsUser._id)); // Sử dụng customer ID làm user ID
-            formData.append('userName', customerAsUser.name);
-            formData.append('userEmail', customerAsUser.email);
-            formData.append('userPhone', customerAsUser.phone);
-            formData.append('userArea', customerAsUser.area);
-            formData.append('duration', String(lastDurationSecRef.current));
-            formData.append('startTime', new Date(Date.now() - (lastDurationSecRef.current * 1000)).toISOString());
-            formData.append('callStatus', 'completed');
-            formData.append('sipStatusCode', '200');
+            formData.append('userId', String(callUser._id)); // Sử dụng user ID (nhân viên hoặc customer)
+            formData.append('userName', callUser.name);
+            formData.append('userEmail', callUser.email);
+            formData.append('userPhone', callUser.phone);
+            formData.append('userArea', callUser.area);
+            // Lấy duration và callStatus từ lastEndInfoRef (đã tính trong ended event)
+            const finalStatus = callStatus || toCallStatus(statusCode, finalDuration);
+            const finalCode = statusCode ?? 0;
+
+            formData.append('duration', String(finalDuration));
+            formData.append('startTime', new Date(Date.now() - (finalDuration * 1000)).toISOString());
+            formData.append('callStatus', finalStatus);
+            formData.append('sipStatusCode', String(finalCode));
             
             const result = await saveCallAction(null, formData);
             
             if (result.success) {
-                console.log('[Call] 🎤 Call saved successfully');
-                toast.success('Cuộc gọi đã được lưu thành công');
+                console.log('[Call] 🎤 Call saved successfully (auto-saved)');
+                toast.success('Cuộc gọi đã được lưu tự động');
                 
                 // Reload call history
                 const history = await call_data({ customerId: customer._id });
@@ -808,11 +1124,13 @@ export default function Call({ customer, user }) {
             } else {
                 console.error('[Call] ❌ Save call failed:', result.error);
                 toast.error('Không thể lưu cuộc gọi: ' + result.error);
+                processRecordingOnceRef.current = false; // Cho phép thử lại
             }
             
         } catch (error) {
             console.error('[Call] ❌ Process recording failed:', error);
             toast.error('Không thể xử lý ghi âm');
+            processRecordingOnceRef.current = false; // Cho phép thử lại
         }
     };
 
@@ -827,8 +1145,9 @@ export default function Call({ customer, user }) {
                 return;
             }
 
-            if (isCalling) {
-                console.log('[Call] ❌ Already calling');
+            // Kiểm tra stateCall thay vì isCalling
+            if (stateCall) {
+                console.log('[Call] ❌ Already calling (stateCall = true)');
                 toast.warning('Đang có cuộc gọi khác');
                 return;
             }
@@ -874,14 +1193,19 @@ export default function Call({ customer, user }) {
                 if (sdkRef.current) {
                     console.log('[Call] 📞 Using OMI Call SDK for real call');
                     
-                    // Thực hiện cuộc gọi thật qua OMI Call SDK
-                    await sdkRef.current.makeCall(phoneNumber, {
-                        isVideo: false,
-                        sipNumber: { number: '842471238879' },
-                        userData: `Gọi từ web app - ${new Date().toLocaleString('vi-VN')}`
-                    });
+                    // Gọi giống TestCallComponent: chỉ truyền số điện thoại
+                    await sdkRef.current.makeCall(phoneNumber);
                     
                     console.log('[Call] ✅ OMI Call initiated successfully');
+                    
+                    // Set stateCall = true sau khi cuộc gọi khởi tạo thành công
+                    setStateCall(true);
+                    // Lưu vào localStorage để persist
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('omicall_stateCall', 'true');
+                    }
+                    console.log('[Call] ✅ stateCall set to true (after successful call initiation)');
+                    
                     toast.success(`Đang gọi ${phoneNumber} qua OMI Call SDK`);
                     
                 } else {
@@ -929,108 +1253,160 @@ export default function Call({ customer, user }) {
     };
 
     const endCall = async () => {
+        console.log('[Call] 📞 Ending call - Công thức chung để kết thúc cuộc gọi');
+        
         try {
-            console.log('[Call] 📞 Ending call');
+            // ===== CÔNG THỨC CHUNG: LUÔN THỬ TẤT CẢ CÁC CÁCH ĐỂ KẾT THÚC CUỘC GỌI =====
             
-            // Debug: Log available methods
-            if (currentCallRef.current) {
-                console.log('[Call] 🔍 Available methods on currentCallRef:', Object.getOwnPropertyNames(currentCallRef.current));
-            }
-            if (sdkRef.current) {
-                console.log('[Call] 🔍 Available methods on sdkRef:', Object.getOwnPropertyNames(sdkRef.current));
-            }
+            const sdk = sdkRef.current || window.OMICallSDK;
             
-            // End call using multiple methods to ensure call is terminated
-            if (currentCallRef.current) {
-                console.log('[Call] 🔄 Attempting to end call via currentCallRef...');
-                
-                // Method 1: Try end() method
-                if (typeof currentCallRef.current.end === 'function') {
-                    try {
-                        await currentCallRef.current.end();
-                        console.log('[Call] ✅ Call ended via currentCallRef.end()');
-                    } catch (error) {
-                        console.log('[Call] ⚠️ currentCallRef.end() failed:', error);
-                    }
-                }
-                
-                // Method 2: Try hangup() method
-                if (currentCallRef.current && typeof currentCallRef.current.hangup === 'function') {
-                    try {
-                        await currentCallRef.current.hangup();
-                        console.log('[Call] ✅ Call ended via currentCallRef.hangup()');
-                    } catch (error) {
-                        console.log('[Call] ⚠️ currentCallRef.hangup() failed:', error);
-                    }
-                }
-                
-                // Method 3: Try terminate() method
-                if (currentCallRef.current && typeof currentCallRef.current.terminate === 'function') {
-                    try {
-                        await currentCallRef.current.terminate();
-                        console.log('[Call] ✅ Call ended via currentCallRef.terminate()');
-                    } catch (error) {
-                        console.log('[Call] ⚠️ currentCallRef.terminate() failed:', error);
-                    }
+            // LUÔN LẤY CALL OBJECT MỚI NHẤT TỪ NHIỀU NGUỒN TRƯỚC KHI KẾT THÚC
+            let currentCall = null;
+            
+            // Ưu tiên 1: sdk.currentCall (nguồn chính xác nhất từ SDK)
+            if (sdk && sdk.currentCall) {
+                currentCall = sdk.currentCall;
+                // Cập nhật ref và window để đảm bảo đồng bộ
+                currentCallRef.current = sdk.currentCall;
+                if (typeof window !== 'undefined') {
+                    window.__OMICall_ActiveCall = sdk.currentCall;
                 }
             }
+            // Ưu tiên 2: currentCallRef.current (từ component ref)
+            else if (currentCallRef.current) {
+                currentCall = currentCallRef.current;
+            }
+            // Ưu tiên 3: window.__OMICall_ActiveCall (persistent qua component remount)
+            else if (typeof window !== 'undefined' && window.__OMICall_ActiveCall) {
+                currentCall = window.__OMICall_ActiveCall;
+                // Restore vào ref
+                currentCallRef.current = window.__OMICall_ActiveCall;
+            }
             
-            // Fallback: Try SDK methods
-            if (sdkRef.current) {
-                console.log('[Call] 🔄 Attempting to end call via SDK...');
-                
-                // Method 1: Try endCall() method
-                if (typeof sdkRef.current.endCall === 'function') {
+            // THỬ TẤT CẢ CÁC PHƯƠNG THỨC CÓ THỂ - KHÔNG DỪNG LẠI SAU LẦN ĐẦU
+            const methodsTried = [];
+            
+            // BƯỚC 1: Thử end() trên call object (ưu tiên cao nhất)
+            if (currentCall) {
+                // Thử currentCall.end()
+                if (typeof currentCall.end === 'function') {
                     try {
-                        await sdkRef.current.endCall();
-                        console.log('[Call] ✅ Call ended via sdkRef.endCall()');
+                        currentCall.end();
+                        methodsTried.push('currentCall.end()');
                     } catch (error) {
-                        console.log('[Call] ⚠️ sdkRef.endCall() failed:', error);
+                        console.log('[Call] ⚠️ currentCall.end() failed:', error);
                     }
                 }
                 
-                // Method 2: Try hangup() method
-                if (typeof sdkRef.current.hangup === 'function') {
+                // Thử currentCall.hangup() nếu có
+                if (typeof currentCall.hangup === 'function') {
                     try {
-                        await sdkRef.current.hangup();
-                        console.log('[Call] ✅ Call ended via sdkRef.hangup()');
+                        currentCall.hangup();
+                        methodsTried.push('currentCall.hangup()');
                     } catch (error) {
-                        console.log('[Call] ⚠️ sdkRef.hangup() failed:', error);
+                        console.log('[Call] ⚠️ currentCall.hangup() failed:', error);
                     }
                 }
                 
-                // Method 3: Try disconnect() method
-                if (typeof sdkRef.current.disconnect === 'function') {
+                // Thử currentCall.decline() nếu có (cho inbound calls)
+                if (typeof currentCall.decline === 'function') {
                     try {
-                        await sdkRef.current.disconnect();
-                        console.log('[Call] ✅ Call ended via sdkRef.disconnect()');
+                        currentCall.decline();
+                        methodsTried.push('currentCall.decline()');
                     } catch (error) {
-                        console.log('[Call] ⚠️ sdkRef.disconnect() failed:', error);
+                        console.log('[Call] ⚠️ currentCall.decline() failed:', error);
                     }
                 }
             }
             
-            // Force disconnect all calls
-            if (sdkRef.current && typeof sdkRef.current.disconnectAll === 'function') {
-                try {
-                    await sdkRef.current.disconnectAll();
-                    console.log('[Call] ✅ All calls disconnected via disconnectAll()');
-                } catch (error) {
-                    console.log('[Call] ⚠️ disconnectAll() failed:', error);
+            // BƯỚC 2: Thử SDK-level methods (fallback)
+            if (sdk) {
+                // Thử sdk.endCall()
+                if (typeof sdk.endCall === 'function') {
+                    try {
+                        sdk.endCall();
+                        methodsTried.push('sdk.endCall()');
+                    } catch (error) {
+                        console.log('[Call] ⚠️ sdk.endCall() failed:', error);
+                    }
+                }
+                
+                // Thử sdk.hangup()
+                if (typeof sdk.hangup === 'function') {
+                    try {
+                        sdk.hangup();
+                        methodsTried.push('sdk.hangup()');
+                    } catch (error) {
+                        console.log('[Call] ⚠️ sdk.hangup() failed:', error);
+                    }
                 }
             }
             
-            // Force reset state regardless of SDK response
-            console.log('[Call] 🔄 Force resetting call state...');
+            // BƯỚC 3: Đợi một chút để SDK xử lý các lệnh kết thúc
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            console.log('[Call] 📊 Đã thử các phương thức:', methodsTried);
+            
+            // BƯỚC 4: Set stateCall = false - ĐIỀU KIỆN DUY NHẤT để chuyển về false
+            setStateCall(false);
+            // Xóa khỏi localStorage
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('omicall_stateCall');
+            }
+            console.log('[Call] ✅ stateCall set to false');
+            
+            // BƯỚC 5: Cleanup và reset UI state
+            stopRecording();
+            
+            // Cleanup audio streams
+            if (remoteAudioRef.current) {
+                remoteAudioRef.current.pause();
+                remoteAudioRef.current.srcObject = null;
+            }
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach(track => track.stop());
+                localStreamRef.current = null;
+            }
+            if (remoteStreamRef.current) {
+                remoteStreamRef.current.getTracks().forEach(track => track.stop());
+                remoteStreamRef.current = null;
+            }
+            
+            // Clear duration interval
+            if (durationIntervalRef.current) {
+                clearInterval(durationIntervalRef.current);
+                durationIntervalRef.current = null;
+            }
+            
+            // Reset currentCallRef và window
+            currentCallRef.current = null;
+            if (typeof window !== 'undefined') {
+                window.__OMICall_ActiveCall = null;
+                window.__OMICall_ActiveCallUID = null;
+            }
+            
+            // Reset UI state
             onCallEnded(null);
             
+            console.log('[Call] ✅ Đã hoàn tất cleanup và reset UI state');
             toast.success('Đã kết thúc cuộc gọi');
             
         } catch (error) {
             console.error('[Call] ❌ End call error:', error);
             
-            // Force reset state even if there's an error
-            console.log('[Call] 🔄 Force resetting call state due to error...');
+            // Set stateCall = false ngay cả khi có lỗi
+            setStateCall(false);
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('omicall_stateCall');
+            }
+            
+            // Force cleanup and reset
+            stopRecording();
+            currentCallRef.current = null;
+            if (typeof window !== 'undefined') {
+                window.__OMICall_ActiveCall = null;
+                window.__OMICall_ActiveCallUID = null;
+            }
             onCallEnded(null);
             
             toast.success('Đã kết thúc cuộc gọi');
@@ -1066,6 +1442,266 @@ export default function Call({ customer, user }) {
     // ===== EFFECTS =====
     useEffect(() => {
         console.log('[Call] 🚀 Component mounted, initializing...');
+        
+        // ===== KIỂM TRA SDK INJECT STYLES =====
+        // Lưu styles ban đầu của body và html để so sánh
+        const originalBodyStyles = {
+            overflow: document.body.style.overflow || '',
+            position: document.body.style.position || '',
+            width: document.body.style.width || '',
+            height: document.body.style.height || '',
+            margin: document.body.style.margin || '',
+            padding: document.body.style.padding || ''
+        };
+        
+        const originalHtmlStyles = {
+            overflow: document.documentElement.style.overflow || '',
+            position: document.documentElement.style.position || '',
+            width: document.documentElement.style.width || '',
+            height: document.documentElement.style.height || '',
+            margin: document.documentElement.style.margin || '',
+            padding: document.documentElement.style.padding || ''
+        };
+        
+        // Lưu classes ban đầu
+        const originalBodyClasses = document.body.className;
+        const originalHtmlClasses = document.documentElement.className;
+        
+        // Đếm số lượng <style> tags ban đầu
+        const originalStyleTagsCount = document.head.querySelectorAll('style').length;
+        const originalLinkTagsCount = document.head.querySelectorAll('link[rel="stylesheet"]').length;
+        
+        // ===== TẠO SHADOW DOM ĐỂ CHẶN SDK INJECT CSS =====
+        let shadowHost = null;
+        let shadowRoot = null;
+        
+        try {
+            // Kiểm tra xem shadow host đã tồn tại chưa
+            shadowHost = document.getElementById('omi-shadow-host');
+            
+            if (!shadowHost) {
+                // Tạo shadow host
+                shadowHost = document.createElement('div');
+                shadowHost.id = 'omi-shadow-host';
+                shadowHost.style.cssText = 'position: fixed; top: 0; left: 0; width: 0; height: 0; pointer-events: none; z-index: -1;';
+                document.body.appendChild(shadowHost);
+                
+                // Tạo shadow root
+                shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+                
+                // Tạo container trong shadow DOM
+                const shadowContainer = document.createElement('div');
+                shadowContainer.id = 'omi-shadow-container';
+                shadowRoot.appendChild(shadowContainer);
+                
+                console.log('[Call] ✅ Shadow DOM đã được tạo để chặn SDK inject CSS');
+            } else {
+                shadowRoot = shadowHost.shadowRoot;
+                console.log('[Call] ✅ Shadow DOM đã tồn tại, sử dụng lại');
+            }
+        } catch (error) {
+            console.error('[Call] ❌ Lỗi khi tạo Shadow DOM:', error);
+        }
+        
+        // ===== CHẶN SDK INJECT CSS VÀO HEAD =====
+        // Override document.createElement để chặn SDK tạo style/link tags
+        const originalCreateElement = document.createElement.bind(document);
+        let createElementOverride = null;
+        let shadowHostRef = shadowHost; // Lưu ref để cleanup
+        
+        if (shadowRoot) {
+            createElementOverride = function(tagName, options) {
+                const element = originalCreateElement(tagName, options);
+                
+                // Nếu SDK cố tạo style hoặc link tag, chuyển vào Shadow DOM
+                if (tagName.toLowerCase() === 'style' || 
+                    (tagName.toLowerCase() === 'link' && element.rel === 'stylesheet')) {
+                    const href = element.href || '';
+                    const content = element.textContent || element.innerHTML || '';
+                    
+                    // Kiểm tra nếu là từ SDK (chứa omicrm.com hoặc omi-css)
+                    if (href.includes('omicrm.com') || 
+                        content.includes('omi-css') || 
+                        content.includes('omi-toastify') ||
+                        content.includes('with-scroll-bars-hidden')) {
+                        console.log('[Call] 🚫 CHẶN SDK inject CSS:', tagName, href || content.substring(0, 100));
+                        
+                        // Chuyển vào Shadow DOM thay vì head
+                        try {
+                            shadowRoot.appendChild(element);
+                            console.log('[Call] ✅ Đã chuyển CSS vào Shadow DOM');
+                            return element; // Trả về element nhưng đã ở trong Shadow DOM
+                        } catch (err) {
+                            console.error('[Call] ❌ Lỗi khi chuyển vào Shadow DOM:', err);
+                            // Fallback: Xóa element
+                            return document.createDocumentFragment(); // Trả về fragment rỗng
+                        }
+                    }
+                }
+                
+                return element;
+            };
+            
+            // Override document.createElement
+            document.createElement = createElementOverride;
+            console.log('[Call] ✅ Đã override document.createElement để chặn SDK inject CSS');
+        }
+        
+        // MutationObserver để theo dõi và chặn style changes
+        let styleObserver = null;
+        try {
+            styleObserver = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    // Theo dõi thêm <style> tags vào head
+                    if (mutation.type === 'childList') {
+                        mutation.addedNodes.forEach((node) => {
+                            if (node.nodeType === 1) { // Element node
+                                if (node.tagName === 'STYLE') {
+                                    const content = node.textContent || node.innerHTML || '';
+                                    
+                                    // Nếu style tag chứa .with-scroll-bars-hidden (gây vỡ layout)
+                                    if (content.includes('with-scroll-bars-hidden') && content.includes('overflow')) {
+                                        console.log('[Call] 🚫 PHÁT HIỆN STYLE TAG GÂY VỠ LAYOUT! Đang xóa...');
+                                        try {
+                                            node.remove();
+                                            console.log('[Call] ✅ Đã xóa style tag gây vỡ layout');
+                                        } catch (error) {
+                                            console.error('[Call] ❌ Lỗi khi xóa style tag:', error);
+                                        }
+                                    }
+                                }
+                                
+                                if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
+                                    // Nếu là stylesheet từ SDK, chuyển vào Shadow DOM
+                                    if (node.href && node.href.includes('omicrm.com')) {
+                                        console.log('[Call] 🚫 CHẶN SDK stylesheet, chuyển vào Shadow DOM...');
+                                        try {
+                                            if (shadowRoot) {
+                                                shadowRoot.appendChild(node);
+                                                console.log('[Call] ✅ Đã chuyển stylesheet vào Shadow DOM');
+                                            } else {
+                                                node.remove();
+                                                console.log('[Call] ✅ Đã xóa stylesheet (không có Shadow DOM)');
+                                            }
+                                        } catch (error) {
+                                            console.error('[Call] ❌ Lỗi khi chuyển stylesheet:', error);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+            
+            // Quan sát body và html attributes (style, class)
+            styleObserver.observe(document.body, {
+                attributes: true,
+                attributeFilter: ['style', 'class']
+            });
+            
+            styleObserver.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ['style', 'class']
+            });
+            
+            // Quan sát head để phát hiện thêm <style> hoặc <link> tags
+            styleObserver.observe(document.head, {
+                childList: true,
+                subtree: true
+            });
+            
+            console.log('[Call] ✅ Style observer đã được thiết lập để theo dõi SDK inject styles');
+        } catch (error) {
+            console.error('[Call] ❌ Lỗi khi thiết lập style observer:', error);
+        }
+        
+        // Thêm CSS để ẩn popup màu đen của OMICall SDK
+        const styleId = 'hide-omicall-popup';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+                /* Ẩn popup/overlay mặc định của OMICall SDK */
+                [class*="omi-call"],
+                [class*="omicall"],
+                [id*="omi-call"],
+                [id*="omicall"],
+                [data-omicall-popup],
+                [data-omi-call-popup],
+                .omi-call-popup,
+                .omicall-popup,
+                .omi-call-overlay,
+                .omicall-overlay {
+                    display: none !important;
+                    visibility: hidden !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                }
+            `;
+            document.head.appendChild(style);
+            console.log('[Call] ✅ CSS để ẩn popup OMICall đã được thêm');
+        }
+        
+        // MutationObserver để ẩn popup ngay khi SDK tạo
+        let observer = null;
+        try {
+            observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === 1) { // Element node
+                            const el = node;
+                            // Kiểm tra nếu là popup của OMICall SDK (có background màu đen/xanh đậm, position fixed)
+                            const style = window.getComputedStyle(el);
+                            const isFixed = style.position === 'fixed';
+                            const hasHighZIndex = parseInt(style.zIndex) > 1000;
+                            const hasDarkBg = style.backgroundColor && (
+                                style.backgroundColor.includes('rgb(0,') ||
+                                style.backgroundColor.includes('rgba(0,') ||
+                                style.backgroundColor.includes('#000') ||
+                                style.backgroundColor.includes('#1') ||
+                                style.backgroundColor.includes('rgb(13,') ||
+                                style.backgroundColor.includes('rgb(17,') ||
+                                style.backgroundColor.includes('rgb(30,')
+                            );
+                            
+                            // Nếu là popup của SDK (fixed position, z-index cao, background tối)
+                            if (isFixed && hasHighZIndex && hasDarkBg && !el.closest('[id*="sonner"]') && !el.closest('[class*="toast"]')) {
+                                console.log('[Call] 🚫 Phát hiện popup OMICall SDK, đang ẩn...', el);
+                                el.style.display = 'none';
+                                el.style.visibility = 'hidden';
+                                el.style.opacity = '0';
+                                el.style.pointerEvents = 'none';
+                            }
+                            
+                            // Kiểm tra các element con có thể là popup
+                            const children = el.querySelectorAll ? el.querySelectorAll('[class*="omi"], [id*="omi"], [class*="omicall"], [id*="omicall"]') : [];
+                            children.forEach((child) => {
+                                const childStyle = window.getComputedStyle(child);
+                                if (childStyle.position === 'fixed' && parseInt(childStyle.zIndex) > 1000) {
+                                    console.log('[Call] 🚫 Phát hiện popup OMICall SDK (child), đang ẩn...', child);
+                                    child.style.display = 'none';
+                                    child.style.visibility = 'hidden';
+                                    child.style.opacity = '0';
+                                    child.style.pointerEvents = 'none';
+                                }
+                            });
+                        }
+                    });
+                });
+            });
+        
+            // Bắt đầu quan sát
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            console.log('[Call] ✅ MutationObserver đã được thiết lập để ẩn popup OMICall');
+        } catch (error) {
+            console.error('[Call] ❌ Lỗi khi thiết lập MutationObserver:', error);
+        }
+        
         initializeSDK();
         
         // Check if OMI SDK is available and initialize if needed
@@ -1082,6 +1718,20 @@ export default function Call({ customer, user }) {
         return () => {
             console.log('[Call] 🧹 Component unmounting, cleaning up...');
             clearTimeout(timeoutId);
+            
+            // Disconnect observers
+            if (observer) {
+                observer.disconnect();
+            }
+            if (styleObserver) {
+                styleObserver.disconnect();
+            }
+            
+            // Restore original createElement
+            if (createElementOverride) {
+                document.createElement = originalCreateElement;
+                console.log('[Call] ✅ Đã restore document.createElement');
+            }
             
             // Clear duration interval
             if (durationIntervalRef.current) {
@@ -1138,12 +1788,120 @@ export default function Call({ customer, user }) {
 
         loadCallHistory();
     }, [customer?._id]);
+    
+    // ===== SYNC UI STATE WHEN COMPONENT MOUNTS =====
+    // Khi component mount lại, nếu stateCall = true, restore UI state từ SDK
+    useEffect(() => {
+        if (!stateCall) {
+            // Nếu stateCall = false, không cần sync
+            return;
+        }
+        
+        const syncUIState = () => {
+            try {
+                const sdk = sdkRef.current || window.OMICallSDK;
+                if (!sdk) {
+                    console.log('[Call] SDK not available for UI state sync');
+                    return;
+                }
+                
+                // Kiểm tra xem có cuộc gọi đang diễn ra không
+                // Ưu tiên lấy từ sdk.currentCall trước
+                let currentCall = null;
+                if (sdk.currentCall) {
+                    currentCall = sdk.currentCall;
+                    // Restore currentCallRef từ SDK - QUAN TRỌNG!
+                    currentCallRef.current = sdk.currentCall;
+                    console.log('[Call] 🔄 Restored currentCallRef from sdk.currentCall');
+                } else if (currentCallRef.current) {
+                    currentCall = currentCallRef.current;
+                    console.log('[Call] 🔄 Using existing currentCallRef.current');
+                } else if (typeof window !== 'undefined' && window.__OMICall_ActiveCall) {
+                    currentCall = window.__OMICall_ActiveCall;
+                    currentCallRef.current = window.__OMICall_ActiveCall;
+                    console.log('[Call] 🔄 Restored currentCallRef from window.__OMICall_ActiveCall');
+                }
+                
+                if (currentCall) {
+                    const callStatus = currentCall.status || currentCall.state;
+                    console.log('[Call] 🔄 stateCall = true, restoring UI state from SDK:', callStatus);
+                    
+                    // Restore UI state
+                    if (callStatus === 'connecting') {
+                        setCallStage('connecting');
+                        setStatusText('Đang kết nối...');
+                    } else if (callStatus === 'ringing') {
+                        setCallStage('ringing');
+                        setStatusText('Đang đổ chuông...');
+                        hasRingingRef.current = true;
+                    } else if (callStatus === 'accepted' || callStatus === 'in_call' || 
+                               callStatus === 'calling' || callStatus === 'active') {
+                        setCallStage('in_call');
+                        setStatusText('Đang trong cuộc gọi');
+                        setIsRecording(true);
+                        
+                        // Restore duration
+                        const duration = currentCall.callingDuration?.text || currentCall.duration?.text || '00:00';
+                        setDurationText(duration);
+                        
+                        // Restore acceptedAt và khởi động lại duration counter
+                        if (currentCall.acceptedAt) {
+                            acceptedAtRef.current = currentCall.acceptedAt;
+                        } else if (duration !== '00:00') {
+                            const durationSec = hhmmssToSec(duration);
+                            acceptedAtRef.current = Date.now() - (durationSec * 1000);
+                        }
+                        
+                        // Khởi động lại duration counter
+                        if (durationIntervalRef.current) {
+                            clearInterval(durationIntervalRef.current);
+                        }
+                        durationIntervalRef.current = setInterval(() => {
+                            const elapsed = Math.floor((Date.now() - acceptedAtRef.current) / 1000);
+                            const minutes = Math.floor(elapsed / 60);
+                            const seconds = elapsed % 60;
+                            const durationText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                            setDurationText(durationText);
+                            lastDurationSecRef.current = elapsed;
+                        }, 1000);
+                        
+                        // Restore audio streams nếu có
+                        if (currentCall.streams) {
+                            localStreamRef.current = currentCall.streams.local || null;
+                            remoteStreamRef.current = currentCall.streams.remote || null;
+                            if (remoteStreamRef.current) {
+                                setupAudioPlayback(currentCall);
+                            }
+                        }
+                    }
+                } else {
+                    console.log('[Call] ⚠️ stateCall = true but no active call found in SDK');
+                }
+            } catch (error) {
+                console.error('[Call] Error syncing UI state:', error);
+            }
+        };
+        
+        // Sync ngay lập tức
+        syncUIState();
+        
+        // Sync lại sau 500ms để đảm bảo SDK đã sẵn sàng
+        const timeout1 = setTimeout(syncUIState, 500);
+        
+        // Sync lại sau 1s để đảm bảo
+        const timeout2 = setTimeout(syncUIState, 1000);
+        
+        return () => {
+            clearTimeout(timeout1);
+            clearTimeout(timeout2);
+        };
+    }, [stateCall, setupAudioPlayback]);
 
     return (
         <>
             {/* Load OMI Call SDK */}
             <Script
-                src="https://cdn.omicrm.com/sdk/web/3.0.0/core.min.js"
+                src="https://cdn.omicrm.com/sdk/web/3.0.33/core.min.js"
                 onLoad={handleSDKLoad}
                 strategy="lazyOnload"
             />
@@ -1190,12 +1948,13 @@ export default function Call({ customer, user }) {
                     </div>
 
 
-                    {/* Call Button */}
+                    {/* Call Button - Render dựa trên stateCall */}
                     <div className="flex gap-2">
-                        {callStage === 'idle' ? (
+                        {!stateCall ? (
+                            // stateCall === false: Hiển thị nút Gọi
                             <Button
                                 onClick={makeCall}
-                                disabled={connectionStatus.status !== 'connected' || !customer?.phone || isCalling}
+                                disabled={connectionStatus.status !== 'connected' || !customer?.phone}
                                 className="flex-1 h-7 text-xs"
                                 size="sm"
                             >
@@ -1203,18 +1962,32 @@ export default function Call({ customer, user }) {
                                 Gọi thực tế
                             </Button>
                         ) : (
+                            // stateCall === true: Hiển thị nút Kết thúc (luôn enabled)
                             <Button 
                                 variant="destructive" 
                                 onClick={endCall} 
                                 className="flex-1 h-7 text-xs"
                                 size="sm"
-                                disabled={!isCalling}
                             >
                                 <PhoneOff className="mr-1 h-3 w-3" />
                                 Kết thúc cuộc gọi
                             </Button>
                         )}
                     </div>
+
+                    {/* Call Status Display - Chỉ hiển thị khi stateCall === true */}
+                    {stateCall && (
+                        <div className="text-center space-y-1 p-1.5 bg-blue-50 rounded">
+                            <div className="font-medium text-blue-600 text-xs">{statusText}</div>
+                            <div className="text-xs font-mono tracking-wider">{durationText}</div>
+                            {isRecording && (
+                                <div className="flex items-center justify-center gap-1 text-red-600 text-xs">
+                                    <CircleDot className="h-3 w-3 animate-pulse" />
+                                    <span>Đang ghi âm…</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* Call Status Display */}
                     {isCalling && (

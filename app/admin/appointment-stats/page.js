@@ -6,7 +6,7 @@ import { user_data } from "@/data/actions/get";
 export default async function AdminPage() {
     const data = await appointment_data_all();
     const user = await user_data({})
-    console.log(data);
+    // console.log(data);
     return (
         <>
             <Navbar />

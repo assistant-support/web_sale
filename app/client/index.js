@@ -13,6 +13,7 @@ import RunningActions from './ui/action';
 import SettingVariant from './ui/variant';
 import SettingZaloRoles from './ui/zalos';
 import ActionHistory from './ui/hisotry';
+import ZaloSystemButton from './ui/zalo-system';
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
 
 function TableSkeleton() {
@@ -100,10 +101,11 @@ export default function CustomerView({ customer, c, running, initialResult, user
                     <div className={styles.filterSection}>
                         <div className={styles.filterHeader}>
                             <div style={{ display: 'flex', gap: 8 }}>
-                                <SettingZalo user={user[0]} zalo={zaloData} />
+                                <SettingZalo user={user && user[0] ? user[0] : null} zalo={zaloData} />
                                 <RunningActions user={user} running={runningSchedules} />
                             </div>
                             <div style={{ display: 'flex', gap: 8 }}>
+                                <ZaloSystemButton />
                                 {!c.type && (
                                     <BulkActions
                                         selectedCustomers={selectedCustomers}
@@ -112,11 +114,11 @@ export default function CustomerView({ customer, c, running, initialResult, user
                                         variants={variant}
                                         users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
                                         workflows={workflow}
-                                        auth={user[0]}
+                                        auth={user && user[0] ? user[0] : null}
                                     />
                                 )}
                                 <ActionHistory history={historySchedules} />
-                                {!user[0].role.includes('Sale') && (
+                                {user && user[0] && user[0].role && !user[0].role.includes('Sale') && (
                                     <>
                                         <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
                                         <SettingVariant data={variant} />
@@ -128,7 +130,7 @@ export default function CustomerView({ customer, c, running, initialResult, user
                         </div>
                     </div>
                     <FilterControls
-                        auth={user[0]}
+                        auth={user && user[0] ? user[0] : null}
                         zaloAccounts={zaloData}
                         users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
                         labels={labelData}

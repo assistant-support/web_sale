@@ -11,6 +11,7 @@ import { reloadCustomers } from '@/data/customers/wraperdata.db';
 import Service from '@/models/services.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
 import { uploadFileToDrive } from '@/function/drive/image';
+import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
@@ -941,21 +942,39 @@ export async function assignRoleToCustomersAction(prevState, formData) {
         };
 
         // 6. Cập nhật hàng loạt khách hàng
-        const result = await Customer.updateMany(
-            { _id: { $in: customerIds } },
-            {
+        // Lấy danh sách customers để validate pipelineStatus
+        const customers = await Customer.find({ _id: { $in: customerIds } }).lean();
+        let updatedCount = 0;
+        
+        // Cập nhật từng customer để validate pipelineStatus
+        for (const customer of customers) {
+            const validatedStatus = validatePipelineStatusUpdate(customer, newPipelineStatus);
+            const updateData = {
                 $set: {
-                    // Thay thế toàn bộ danh sách phụ trách bằng nhân sự mới
                     assignees: [assigneeObject],
-                    'pipelineStatus.0': newPipelineStatus, // Trạng thái tổng quan gần nhất
-                    'pipelineStatus.3': newPipelineStatus, // Trạng thái cho Bước 3: Phân bổ
                 },
-                // Ghi log hành động
                 $push: {
                     care: careNote,
                 }
+            };
+            
+            // Chỉ cập nhật pipelineStatus nếu step mới > step hiện tại
+            if (validatedStatus) {
+                updateData.$set['pipelineStatus.0'] = validatedStatus;
+                updateData.$set['pipelineStatus.3'] = validatedStatus;
             }
-        );
+            
+            const updateResult = await Customer.updateOne(
+                { _id: customer._id },
+                updateData
+            );
+            
+            if (updateResult.modifiedCount > 0) {
+                updatedCount++;
+            }
+        }
+        
+        const result = { modifiedCount: updatedCount };
 
         revalidateData();
         if (result.modifiedCount > 0) {
@@ -980,9 +999,10 @@ export async function unassignRoleFromCustomersAction(prevState, formData) {
     if (!user || !user.id) {
         return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
     }
-    if (!user.role.includes('Admin') && !user.role.includes('Admin Sale')&& !user.role.includes('Manager')) {
-        return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
-    }
+    // Cho phép mọi tài khoản đều có quyền sử dụng các chức năng trong Hành động
+    // if (!user.role.includes('Admin') && !user.role.includes('Admin Sale')&& !user.role.includes('Manager')) {
+    //     return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
+    // }
 
     // 2) Dữ liệu đầu vào
     const customersJSON = formData.get('selectedCustomersJSON');

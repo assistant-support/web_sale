@@ -23,7 +23,7 @@ async function dataAreaCustomer(_id) {
         if (db) {
             const directCollection = db.collection('area_customer')
             const directCount = await directCollection.countDocuments({})
-            console.log('📊 [dataAreaCustomer] Số lượng documents trong collection "area_customer" (query trực tiếp):', directCount)
+            // console.log('📊 [dataAreaCustomer] Số lượng documents trong collection "area_customer" (query trực tiếp):', directCount)
             
             if (directCount > 0) {
                 // Chuyển đổi _id sang ObjectId nếu có
@@ -39,7 +39,7 @@ async function dataAreaCustomer(_id) {
                     }
                 }
                 const directData = await directCollection.find(directQuery).project({ name: 1, type_area: 1, _id: 1 }).toArray()
-                console.log('📦 [dataAreaCustomer] Dữ liệu từ collection trực tiếp:', directData)
+                // console.log('📦 [dataAreaCustomer] Dữ liệu từ collection trực tiếp:', directData)
                 const result = JSON.parse(JSON.stringify(directData))
                 return result
             }
@@ -47,14 +47,14 @@ async function dataAreaCustomer(_id) {
         
         // Nếu query trực tiếp không có dữ liệu, thử dùng model
         const count = await AreaCustomer.countDocuments(query)
-        console.log('📊 [dataAreaCustomer] Số lượng documents từ model:', count)
+        // console.log('📊 [dataAreaCustomer] Số lượng documents từ model:', count)
         
         const areaCustomer = await AreaCustomer.find(query).select('name type_area _id').lean()
-        console.log('📦 [dataAreaCustomer] Kết quả query từ model:', {
-            count: areaCustomer?.length,
-            sample: areaCustomer?.[0],
-            all: areaCustomer
-        })
+        // console.log('📦 [dataAreaCustomer] Kết quả query từ model:', {
+        //     count: areaCustomer?.length,
+        //     sample: areaCustomer?.[0],
+        //     all: areaCustomer
+        // })
         
         if (_id && areaCustomer.length === 0) return null
         const result = JSON.parse(JSON.stringify(areaCustomer))
@@ -71,12 +71,12 @@ export async function getAreaCustomerAll() {
         console.log('🔄 [getAreaCustomerAll] Bắt đầu lấy dữ liệu...')
         // Tạm thời bypass cache để debug - sẽ bật lại sau
         const result = await dataAreaCustomer()
-        console.log('📦 [getAreaCustomerAll] Kết quả (bypass cache):', {
-            type: typeof result,
-            isArray: Array.isArray(result),
-            length: result?.length,
-            data: result
-        })
+        // console.log('📦 [getAreaCustomerAll] Kết quả (bypass cache):', {
+        //     type: typeof result,
+        //     isArray: Array.isArray(result),
+        //     length: result?.length,
+        //     data: result
+        // })
         return result
         // TODO: Bật lại cache sau khi fix xong
         // const cachedFunction = cacheData(() => dataAreaCustomer(), ['area_customers'])

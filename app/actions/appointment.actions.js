@@ -6,6 +6,7 @@ import Customer from "@/models/customer.model";
 import checkAuthToken from '@/utils/checktoken';
 import { reloadAppointments } from '@/data/appointment_db/wraperdata.db';
 import { revalidateData } from '@/app/actions/customer.actions';
+import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 
 /**
  * Action để tạo lịch hẹn mới.
@@ -246,9 +247,13 @@ export async function updateAppointmentStatusAction(prevState, formData) {
 
         const pipelineUpdates = {};
         if (desiredPipelineCode) {
-            pipelineUpdates['pipelineStatus.0'] = desiredPipelineCode;
-            if (desiredPipelineStage) {
-                pipelineUpdates[`pipelineStatus.${desiredPipelineStage}`] = desiredPipelineCode;
+            // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
+            const validatedStatus = validatePipelineStatusUpdate(customerDocument, desiredPipelineCode);
+            if (validatedStatus) {
+                pipelineUpdates['pipelineStatus.0'] = validatedStatus;
+                if (desiredPipelineStage) {
+                    pipelineUpdates[`pipelineStatus.${desiredPipelineStage}`] = validatedStatus;
+                }
             }
         }
 

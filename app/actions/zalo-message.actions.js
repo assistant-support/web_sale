@@ -3,9 +3,10 @@
 import connectDB from '@/config/connectDB';
 import Customer from '@/models/customer.model';
 import Zalo from '@/models/zalo.model';
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
 import Logs from '@/models/log.model';
 import checkAuthToken from '@/utils/checktoken';
-import { actionZalo } from '@/function/drive/appscript';
+import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import { revalidateData } from '@/app/actions/customer.actions';
 
 /**
@@ -84,18 +85,50 @@ export async function sendZaloMessageAction(previousState, formData) {
             
         } else {
             console.log('⚠️ [Zalo Message] No UID found, searching by phone...');
-            // Try to find UID by phone using actionZalo
-            const findUidResult = await actionZalo({
-                phone: customer.phone,
-                uid: selectedZalo.uid,
-                actionType: 'findUid'
+            
+            // Lấy accountKey từ ZaloAccount mới
+            let accountKey = null;
+            try {
+                // Tìm ZaloAccount bằng profile.zaloId hoặc accountKey
+                const zaloAccount = await ZaloAccountNew.findOne({
+                    $or: [
+                        { 'profile.zaloId': String(selectedZalo.uid).trim() },
+                        { accountKey: String(selectedZalo.uid).trim() }
+                    ],
+                    status: 'active'
+                }).sort({ updatedAt: 1 }).lean();
+                
+                if (zaloAccount?.accountKey) {
+                    accountKey = zaloAccount.accountKey;
+                } else {
+                    // Fallback: lấy account đầu tiên có status active
+                    const fallbackAccount = await ZaloAccountNew.findOne({ 
+                        status: 'active' 
+                    }).sort({ updatedAt: 1 }).lean();
+                    if (fallbackAccount?.accountKey) {
+                        accountKey = fallbackAccount.accountKey;
+                    }
+                }
+            } catch (err) {
+                console.error('[Zalo Message] Lỗi khi tìm accountKey:', err);
+            }
+            
+            if (!accountKey) {
+                return { 
+                    success: false, 
+                    message: 'Không tìm thấy tài khoản Zalo hợp lệ. Vui lòng đăng nhập QR trước.' 
+                };
+            }
+            
+            // Tìm UID bằng zca-js
+            const formattedPhone = customer.phone.toString().trim().replace(/\D/g, '');
+            const findUidResult = await findUserUid({
+                accountKey: accountKey,
+                phoneOrUid: formattedPhone
             });
             
-           
-            if (findUidResult.status) {
-                const targetUid = findUidResult.content?.data?.uid;
-              
-                const normalizedUid = normalizeUid(targetUid);
+            if (findUidResult.ok && findUidResult.uid) {
+                const normalizedUid = normalizeUid(findUidResult.uid);
                 
                 if (normalizedUid) {
                     // Save UID to customer
@@ -103,8 +136,8 @@ export async function sendZaloMessageAction(previousState, formData) {
                         { _id: customerId },
                         { 
                             $set: { 
-                                zaloavt: findUidResult.content?.data?.avatar || customer.zaloavt || null,
-                                zaloname: findUidResult.content?.data?.zalo_name || customer.zaloname || null
+                                zaloavt: findUidResult.avatar || customer.zaloavt || null,
+                                zaloname: findUidResult.displayName || customer.zaloname || null
                             },
                             $push: { 
                                 uid: { 
@@ -118,7 +151,6 @@ export async function sendZaloMessageAction(previousState, formData) {
                     );
                     
                     uidPerson = normalizedUid;
-                   
                 } else {
                     console.log('❌ [Zalo Message] Normalized UID is empty');
                     return { 
@@ -127,24 +159,64 @@ export async function sendZaloMessageAction(previousState, formData) {
                     };
                 }
             } else {
-                console.log('❌ [Zalo Message] Find UID failed:', findUidResult.content?.error_message || findUidResult.message);
+                console.log('❌ [Zalo Message] Find UID failed:', findUidResult.message || 'Không tìm thấy UID');
                 return { 
                     success: false, 
-                    message: findUidResult.content?.error_message || findUidResult.message || 'Không tìm thấy UID Zalo của khách hàng. Vui lòng kiểm tra lại số điện thoại.' 
+                    message: findUidResult.message || 'Không tìm thấy UID Zalo của khách hàng. Vui lòng kiểm tra lại số điện thoại.' 
                 };
             }
         }
 
-        // 6. Send message via actionZalo
-        const phone = customer.phone;
-       
-        const result = await actionZalo({
-            phone: phone,
-            uidPerson: uidPerson,
-            actionType: 'sendMessage',
-            message: message,
-            uid: selectedZalo.uid
+        // 6. Lấy accountKey từ ZaloAccount mới để gửi tin nhắn
+        let accountKey = null;
+        try {
+            const zaloAccount = await ZaloAccountNew.findOne({
+                $or: [
+                    { 'profile.zaloId': String(selectedZalo.uid).trim() },
+                    { accountKey: String(selectedZalo.uid).trim() }
+                ],
+                status: 'active'
+            }).sort({ updatedAt: 1 }).lean();
+            
+            if (zaloAccount?.accountKey) {
+                accountKey = zaloAccount.accountKey;
+            } else {
+                // Fallback: lấy account đầu tiên có status active
+                const fallbackAccount = await ZaloAccountNew.findOne({ 
+                    status: 'active' 
+                }).sort({ updatedAt: 1 }).lean();
+                if (fallbackAccount?.accountKey) {
+                    accountKey = fallbackAccount.accountKey;
+                }
+            }
+        } catch (err) {
+            console.error('[Zalo Message] Lỗi khi tìm accountKey:', err);
+        }
+        
+        if (!accountKey) {
+            return { 
+                success: false, 
+                message: 'Không tìm thấy tài khoản Zalo hợp lệ. Vui lòng đăng nhập QR trước.' 
+            };
+        }
+        
+        // 7. Send message via zca-js
+        const sendResult = await sendUserMessage({
+            accountKey: accountKey,
+            userId: uidPerson,
+            text: message,
+            attachments: []
         });
+        
+        // Format result để tương thích với code cũ
+        const result = {
+            status: sendResult.ok || false,
+            content: {
+                error_code: sendResult.ok ? 0 : -1,
+                error_message: sendResult.ok ? '' : (sendResult.message || 'Gửi tin nhắn thất bại'),
+                data: sendResult.ack || {}
+            }
+        };
 
         
         // 7. Log the action

@@ -7,7 +7,8 @@ import Customer from "@/models/customer.model";
 import Variant from "@/models/variant.model";
 import Logs from "@/models/log.model";
 import dbConnect from "@/config/connectDB";
-import { actionZalo } from '@/function/drive/appscript';
+import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
+import { sendUserMessage } from '@/data/zalo/chat.actions';
 
 export async function formatMessage(template, targetDoc, zaloAccountDoc) {
     if (!template) return "";
@@ -50,11 +51,12 @@ async function processSingleTask(taskDetail) {
         const actionType = job.actionType;
         let uidPerson = null;
 
-        // Logic tìm uidPerson chỉ áp dụng cho Customer
+        // Logic tìm uidPerson: chỉ cần có UID là được, không cần kiểm tra UID thuộc về tài khoản Zalo nào
         if (actionType === 'addFriend' || actionType === 'sendMessage' || actionType === 'checkFriend') {
-            const uidEntry = targetDoc.uid?.find(u => u.zalo?.toString() === zaloAccount._id.toString());
+            // Tìm UID đầu tiên có sẵn (bất kỳ UID nào)
+            const uidEntry = targetDoc.uid?.find(u => u && u.uid && String(u.uid).trim().length > 0);
             if (!uidEntry || !uidEntry.uid) {
-                errorMessageForLog = "Không tìm thấy UID của khách hàng tương ứng với tài khoản Zalo thực hiện.";
+                errorMessageForLog = "Không tìm thấy UID của khách hàng.";
                 apiResponse = { status: false, message: errorMessageForLog, content: { error_code: -1, error_message: errorMessageForLog, data: {} } };
             } else {
                 uidPerson = uidEntry.uid;
@@ -64,13 +66,155 @@ async function processSingleTask(taskDetail) {
         let finalMessage = "";
         if (!errorMessageForLog) {
             finalMessage = await formatMessage(job.config.messageTemplate, targetDoc, zaloAccount);
-            apiResponse = await actionZalo({
-                phone: targetDoc.phone,
-                uidPerson: uidPerson,
-                actionType: actionType,
-                message: finalMessage,
-                uid: zaloAccount.uid,
-            });
+            
+            // Chỉ xử lý sendMessage bằng zca-js, các actionType khác vẫn dùng actionZalo
+            if (actionType === 'sendMessage') {
+                // Lấy accountKey từ zaloAccount đã được format trong scheduler
+                let accountKey = null;
+                try {
+                    // Nếu zaloAccount đã có accountKey (từ ZaloAccount mới)
+                    if (zaloAccount.accountKey) {
+                        accountKey = zaloAccount.accountKey;
+                    } else if (zaloAccount.uid) {
+                        // Nếu là ZaloAccount cũ, tìm trong ZaloAccount mới
+                        const zaloAccountNew = await ZaloAccountNew.findOne({
+                            $or: [
+                                { 'profile.zaloId': String(zaloAccount.uid).trim() },
+                                { accountKey: String(zaloAccount.uid).trim() }
+                            ],
+                            status: 'active'
+                        }).sort({ updatedAt: 1 }).lean();
+                        
+                        if (zaloAccountNew?.accountKey) {
+                            accountKey = zaloAccountNew.accountKey;
+                        }
+                    }
+                    
+                    // Fallback: lấy account đầu tiên có status active nếu vẫn chưa có
+                    if (!accountKey) {
+                        const fallbackAccount = await ZaloAccountNew.findOne({ 
+                            status: 'active' 
+                        }).sort({ updatedAt: 1 }).lean();
+                        if (fallbackAccount?.accountKey) {
+                            accountKey = fallbackAccount.accountKey;
+                        }
+                    }
+                } catch (err) {
+                    console.error('[processSingleTask] Lỗi khi tìm accountKey:', err);
+                }
+                
+                if (!accountKey) {
+                    errorMessageForLog = 'Không tìm thấy tài khoản Zalo hợp lệ. Vui lòng đăng nhập QR trước.';
+                    apiResponse = { status: false, message: errorMessageForLog, content: { error_code: -1, error_message: errorMessageForLog, data: {} } };
+                } else {
+                    try {
+                        const result = await sendUserMessage({
+                            accountKey: accountKey,
+                            userId: uidPerson,
+                            text: finalMessage,
+                            attachments: []
+                        });
+                        
+                        // Format result để tương thích với code cũ
+                        apiResponse = {
+                            status: result.ok || false,
+                            message: result.ok ? 'Gửi tin nhắn thành công' : (result.message || 'Gửi tin nhắn thất bại'),
+                            content: {
+                                error_code: result.ok ? 0 : -1,
+                                error_message: result.ok ? '' : (result.message || 'Gửi tin nhắn thất bại'),
+                                data: result.ack || {}
+                            }
+                        };
+                    } catch (err) {
+                        console.error('[processSingleTask] Lỗi khi gửi tin nhắn:', err);
+                        apiResponse = {
+                            status: false,
+                            message: err?.message || 'Lỗi không xác định',
+                            content: {
+                                error_code: -1,
+                                error_message: err?.message || 'Lỗi không xác định',
+                                data: {}
+                            }
+                        };
+                    }
+                }
+            } else if (actionType === 'checkFriend') {
+                // Sử dụng getFriendRequestStatus từ zca-js
+                try {
+                    const { getFriendRequestStatus } = await import('@/data/zalo/chat.actions');
+                    const result = await getFriendRequestStatus({
+                        accountKey: zaloAccount.accountKey || zaloAccount.uid,
+                        friendId: uidPerson
+                    });
+                    
+                    // Format response để tương thích với code cũ
+                    const isFriend = result.ok && result.is_friend === 1 ? 1 : 0;
+                    
+                    apiResponse = {
+                        status: result.ok,
+                        message: result.ok ? 'Kiểm tra bạn bè thành công' : (result.message || 'Kiểm tra bạn bè thất bại'),
+                        content: {
+                            error_code: result.ok ? 0 : -1,
+                            error_message: result.ok ? String(isFriend) : (result.message || 'Kiểm tra bạn bè thất bại'),
+                            data: { isFriend },
+                            isFriend
+                        }
+                    };
+                } catch (err) {
+                    console.error('[processSingleTask] Lỗi khi kiểm tra bạn bè:', err);
+                    apiResponse = {
+                        status: false,
+                        message: err?.message || 'Lỗi không xác định',
+                        content: {
+                            error_code: -1,
+                            error_message: err?.message || 'Lỗi không xác định',
+                            data: { isFriend: 0 }
+                        }
+                    };
+                }
+            } else if (actionType === 'addFriend') {
+                // Sử dụng sendFriendRequest từ zca-js
+                try {
+                    const { sendFriendRequest } = await import('@/data/zalo/chat.actions');
+                    const result = await sendFriendRequest({
+                        accountKey: zaloAccount.accountKey || zaloAccount.uid,
+                        userId: uidPerson,
+                        msg: finalMessage || 'Xin chào, hãy kết bạn với tôi!'
+                    });
+                    
+                    // Format response để tương thích với code cũ
+                    apiResponse = {
+                        status: result.ok,
+                        message: result.ok ? 'Gửi lời mời kết bạn thành công' : (result.message || 'Gửi lời mời kết bạn thất bại'),
+                        content: {
+                            error_code: result.ok ? 0 : -1,
+                            error_message: result.ok ? '' : (result.message || 'Gửi lời mời kết bạn thất bại'),
+                            data: result.result || {}
+                        }
+                    };
+                } catch (err) {
+                    console.error('[processSingleTask] Lỗi khi gửi lời mời kết bạn:', err);
+                    apiResponse = {
+                        status: false,
+                        message: err?.message || 'Lỗi không xác định',
+                        content: {
+                            error_code: -1,
+                            error_message: err?.message || 'Lỗi không xác định',
+                            data: {}
+                        }
+                    };
+                }
+            } else {
+                // Các actionType khác vẫn dùng actionZalo (nếu còn)
+                const { actionZalo } = await import('@/function/drive/appscript');
+                apiResponse = await actionZalo({
+                    phone: targetDoc.phone,
+                    uidPerson: uidPerson,
+                    actionType: actionType,
+                    message: finalMessage,
+                    uid: zaloAccount.uid,
+                });
+            }
         }
 
         const logPayload = {
@@ -116,8 +260,11 @@ async function processSingleTask(taskDetail) {
             }
         }
         if (actionType === 'checkFriend') {
-            const friendStatus = Number(apiResponse.content?.error_message);
-            if (!isNaN(friendStatus)) {
+            // Lấy isFriend từ response.content.isFriend hoặc response.content.data.isFriend hoặc response.content.error_message
+            const friendStatus = apiResponse.content?.isFriend ?? 
+                                 apiResponse.content?.data?.isFriend ?? 
+                                 Number(apiResponse.content?.error_message);
+            if (!isNaN(friendStatus) && (friendStatus === 0 || friendStatus === 1)) {
                 await TargetModel.updateOne(
                     { _id: targetId },
                     { $set: { "uid.$[elem].isFriend": friendStatus } },
@@ -160,11 +307,16 @@ async function processSingleTask(taskDetail) {
     }
 }
 
-export async function GET(request) {
+/**
+ * Hàm xử lý các task đến hạn (có thể gọi trực tiếp hoặc qua HTTP)
+ */
+export async function processScheduledTasks() {
     try {
         await dbConnect();
         const now = new Date();
         const oneMinuteLater = new Date(now.getTime() + 60 * 1000);
+        
+        // Tìm các task đến hạn
         const dueTasksDetails = await ScheduledJob.aggregate([
             { $match: { 'tasks.status': false, 'tasks.scheduledFor': { $lte: oneMinuteLater } } },
             { $unwind: '$tasks' },
@@ -174,26 +326,67 @@ export async function GET(request) {
                     from: 'zaloaccounts',
                     localField: 'zaloAccount',
                     foreignField: '_id',
-                    as: 'zaloAccountInfo'
+                    as: 'zaloAccountInfoNew'
                 }
             },
-            { $match: { 'zaloAccountInfo': { $ne: [] } } },
+            {
+                $lookup: {
+                    from: 'zalos',
+                    localField: 'zaloAccount',
+                    foreignField: '_id',
+                    as: 'zaloAccountInfoOld'
+                }
+            },
+            { 
+                $match: { 
+                    $or: [
+                        { 'zaloAccountInfoNew': { $ne: [] } },
+                        { 'zaloAccountInfoOld': { $ne: [] } }
+                    ]
+                } 
+            },
             { $sort: { 'tasks.scheduledFor': 1 } },
             {
                 $project: {
                     _id: 0,
                     job: { _id: '$_id', jobName: '$jobName', actionType: '$actionType', zaloAccount: '$zaloAccount', config: '$config', createdBy: '$createdBy' },
                     task: '$tasks',
-                    zaloAccount: { $arrayElemAt: ['$zaloAccountInfo', 0] }
+                    zaloAccountNew: { $arrayElemAt: ['$zaloAccountInfoNew', 0] },
+                    zaloAccountOld: { $arrayElemAt: ['$zaloAccountInfoOld', 0] }
                 }
             }
         ]);
+        
+        // Format zaloAccount để tương thích với processSingleTask
+        const formattedTasks = dueTasksDetails.map(detail => {
+            let zaloAccount = null;
+            if (detail.zaloAccountNew) {
+                // Format ZaloAccount mới
+                zaloAccount = {
+                    _id: detail.zaloAccountNew._id,
+                    uid: detail.zaloAccountNew.accountKey,
+                    name: detail.zaloAccountNew.profile?.displayName || 'Zalo Account',
+                    accountKey: detail.zaloAccountNew.accountKey
+                };
+            } else if (detail.zaloAccountOld) {
+                // Format ZaloAccount cũ
+                zaloAccount = detail.zaloAccountOld;
+            }
+            return {
+                ...detail,
+                zaloAccount
+            };
+        }).filter(detail => detail.zaloAccount !== null);
 
-        if (dueTasksDetails.length === 0) {
-            return NextResponse.json({ message: 'No due tasks to process.' }, { status: 200 });
+        if (formattedTasks.length === 0) {
+            return {
+                success: true,
+                message: 'No due tasks to process.',
+                count: 0
+            };
         }
 
-        const taskUpdateOperations = dueTasksDetails.map(detail => ({
+        const taskUpdateOperations = formattedTasks.map(detail => ({
             updateOne: {
                 filter: { _id: detail.job._id, 'tasks._id': detail.task._id },
                 update: { $set: { 'tasks.$.status': true } }
@@ -201,18 +394,43 @@ export async function GET(request) {
         }));
         await ScheduledJob.bulkWrite(taskUpdateOperations);
 
-        for (const taskDetail of dueTasksDetails) {
-            processSingleTask(taskDetail);
+        // Xử lý các task trong background
+        for (const taskDetail of formattedTasks) {
+            processSingleTask(taskDetail).catch(err => {
+                console.error('[Scheduler] Lỗi khi xử lý task:', err);
+            });
         }
 
-        return NextResponse.json({
-            message: `Scheduler triggered. Processing ${dueTasksDetails.length} tasks in the background.`
-        }, { status: 202 });
+        return {
+            success: true,
+            message: `Scheduler triggered. Processing ${formattedTasks.length} tasks in the background.`,
+            count: formattedTasks.length
+        };
 
     } catch (error) {
-        console.error('[Scheduler API Error]', error);
+        console.error('[Scheduler Error]', error);
+        return {
+            success: false,
+            message: 'Internal Server Error',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * HTTP endpoint để gọi scheduler (cho testing hoặc manual trigger)
+ */
+export async function GET(request) {
+    const result = await processScheduledTasks();
+    
+    if (result.success) {
+        return NextResponse.json({
+            message: result.message,
+            count: result.count
+        }, { status: result.count > 0 ? 202 : 200 });
+    } else {
         return NextResponse.json(
-            { message: 'Internal Server Error', error: error.message },
+            { message: result.message, error: result.error },
             { status: 500 }
         );
     }
