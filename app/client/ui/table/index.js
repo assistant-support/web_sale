@@ -37,19 +37,39 @@ const ALL_COLUMNS = [
 const INITIAL_VISIBLE_COLUMNS = ['name', 'phonex', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
 const MAX_VISIBLE_COLUMNS = 6;
 
+// const useBreakpoint = () => {
+//     const [breakpoint, setBreakpoint] = useState('lg');
+//     useEffect(() => {
+//         const handleResize = () => {
+//             if (window.innerWidth < 768) setBreakpoint('sm');
+//             else if (window.innerWidth < 1024) setBreakpoint('md');
+//             else setBreakpoint('lg');
+//         };
+//         window.addEventListener('resize', handleResize);
+//         handleResize();
+//         return () => window.removeEventListener('resize', handleResize);
+//     }, []);
+//     return breakpoint;
+// };
+
+
+
 const useBreakpoint = () => {
-    const [breakpoint, setBreakpoint] = useState('lg');
-    useEffect(() => {
-        const handleResize = () => {
-            if (window.innerWidth < 768) setBreakpoint('sm');
-            else if (window.innerWidth < 1024) setBreakpoint('md');
-            else setBreakpoint('lg');
-        };
-        window.addEventListener('resize', handleResize);
-        handleResize();
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-    return breakpoint;
+  const [breakpoint, setBreakpoint] = useState<null | 'sm' | 'md' | 'lg'>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) setBreakpoint('sm');
+      else if (window.innerWidth < 1024) setBreakpoint('md');
+      else setBreakpoint('lg');
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return breakpoint;
 };
 
 // =============================================================
