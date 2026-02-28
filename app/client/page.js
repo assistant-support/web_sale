@@ -5,9 +5,11 @@ import { getCombinedData } from "../actions/customer.actions";
 import checkAuthToken from "@/utils/checktoken";
 import CustomerView from './index';
 import { variant_data } from '../actions/variant.actions';
+import { discount_data } from '../actions/discount.actions';
 import { getRunningSchedulesAction } from '../actions/schedule.actions';
 import { workflow_data } from '@/data/workflow/wraperdata.db';
 import { service_data } from '@/data/services/wraperdata.db';
+import { unitMedicine_data, treatmentDoctor_data } from '../actions/treatment.actions';
 import { maskPhoneNumber } from '@/function';
 import { customer_data } from '@/data/customers/wraperdata.db';
 import { area_customer_data, filter_customer_data } from '@/data/actions/get';
@@ -20,7 +22,7 @@ export default async function Page({ searchParams }) {
     let c = await searchParams
     const user = await checkAuthToken()
     if (!user) return null
-    const [customer, initialResult, userAuth, sources, messageSources, label, zalo, users, variant, running, workflow, service, areaCustomers, filterCustomer] = await Promise.all([
+    const [customer, initialResult, userAuth, sources, messageSources, label, zalo, users, variant, discount, running, workflow, service, areaCustomers, filterCustomer, unitMedicines, treatmentDoctors] = await Promise.all([
         customer_data(),
         getCombinedData(c),
         user_data({ _id: user.id }),
@@ -30,11 +32,14 @@ export default async function Page({ searchParams }) {
         zalo_data(),
         user_data({}),
         variant_data(),
+        discount_data(),
         getRunningSchedulesAction(),
         workflow_data(),
         service_data(),
         area_customer_data(),
-        filter_customer_data()
+        filter_customer_data(),
+        unitMedicine_data(),
+        treatmentDoctor_data()
     ]);
     const reversedLabel = [...label].reverse();
     if (userAuth && userAuth[0] && userAuth[0].role && userAuth[0].role.includes('Sale')) {
@@ -83,6 +88,7 @@ export default async function Page({ searchParams }) {
                 zaloData={zalo}
                 users={users}
                 variant={variant}
+                discount={discount || []}
                 running={running.data}
                 c={c}
                 workflow={workflow}
@@ -90,6 +96,8 @@ export default async function Page({ searchParams }) {
                 customer={customer}
                 areaCustomers={areaCustomers || []}
                 filterCustomer={filterCustomer || {}}
+                unitMedicines={unitMedicines || []}
+                treatmentDoctors={treatmentDoctors || []}
             />
         </Suspense>
     );

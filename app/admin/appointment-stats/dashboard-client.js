@@ -221,7 +221,8 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         return toYMD(d);
     });
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
-    const [statusFilter, setStatusFilter] = useState('all'); // all | completed | confirmed | pending | cancelled | postponed | missed
+    const [statusFilter, setStatusFilter] = useState('all'); // all | completed | pending | cancelled | postponed | missed | not_attended (gộp Hủy+Hoãn+Không đến)
+    const [customerTypeFilter, setCustomerTypeFilter] = useState('all'); // all | new | old (dựa trên đơn dịch vụ)
 
     // Users map (for group lookup by createdBy)
     const userMap = useMemo(() => {
@@ -240,12 +241,20 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
 
     const statusOptions = useMemo(() => ([
         { value: 'all', label: 'Tất cả trạng thái' },
-        { value: 'completed', label: 'Hoàn thành' },
-        { value: 'confirmed', label: 'Đã xác nhận' },
+        { value: 'completed', label: 'Hoàn thành(Đã đến)' },
         { value: 'pending', label: 'Chờ xử lý' },
         { value: 'cancelled', label: 'Đã hủy' },
-        { value: 'postponed', label: 'Hoãn' },
-        { value: 'missed', label: 'Không đến' },
+        // 'Hoãn' vẫn tồn tại trong dữ liệu nhưng không cần hiển thị riêng ở filter
+        { value: 'not_attended', label: 'Không đến (Hủy + Hoãn + Không đến)' },
+    ]), []);
+
+    // Loại khách hàng theo đơn dịch vụ (serviceDetails trong model Customer):
+    // - Khách hàng mới: chưa có bất kỳ đơn nào (serviceDetails rỗng/không tồn tại)
+    // - Khách hàng cũ: đã có ít nhất 1 đơn (serviceDetails có phần tử)
+    const customerTypeOptions = useMemo(() => ([
+        { value: 'all', label: 'Tất cả loại khách hàng' },
+        { value: 'new', label: 'Khách hàng mới (chưa có đơn)' },
+        { value: 'old', label: 'Khách hàng cũ (đã có đơn)' },
     ]), []);
 
     // Apply filters
@@ -267,19 +276,36 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
             }
 
             // Status
-            if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+            if (statusFilter !== 'all') {
+                if (statusFilter === 'not_attended') {
+                    const s = a.status;
+                    if (s !== 'cancelled' && s !== 'postponed' && s !== 'missed') return false;
+                } else if (a.status !== statusFilter) {
+                    return false;
+                }
+            }
+
+            // Loại khách hàng theo đơn dịch vụ (serviceDetails của customer)
+            if (customerTypeFilter !== 'all') {
+                const serviceDetails = a?.customer?.serviceDetails;
+                const hasOrder = Array.isArray(serviceDetails)
+                    ? serviceDetails.length > 0
+                    : !!serviceDetails;
+
+                if (customerTypeFilter === 'new' && hasOrder) return false;
+                if (customerTypeFilter === 'old' && !hasOrder) return false;
+            }
 
             return true;
         });
-    }, [initialData, startDate, endDate, groupFilter, statusFilter, userMap]);
+    }, [initialData, startDate, endDate, groupFilter, statusFilter, customerTypeFilter, userMap]);
 
     // Stats + Chart (thêm % hiển thị trong 4 ô)
     const { stats, chartData } = useMemo(() => {
-        let confirmed = 0, completed = 0, cancelled = 0, postponed = 0, missed = 0, pending = 0;
+        let completed = 0, cancelled = 0, postponed = 0, missed = 0, pending = 0;
 
         filtered.forEach(appt => {
             switch (appt.status) {
-                case 'confirmed': confirmed++; break;
                 case 'completed': completed++; break;
                 case 'postponed': postponed++; break;
                 case 'missed': missed++; break;
@@ -289,7 +315,8 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         });
 
         const total = filtered.length;
-        const denomForShowRate = completed + missed;
+        const notAttended = cancelled + postponed + missed;
+        const denomForShowRate = completed + notAttended;
         const showRate = denomForShowRate > 0 ? (completed / denomForShowRate) * 100 : 0;
 
         const pctOfTotal = (n) => total > 0 ? Math.round((n / total) * 100) : 0;
@@ -300,17 +327,17 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                 totalPct: total > 0 ? 100 : 0,
                 attended: completed,
                 attendedPct: pctOfTotal(completed),
-                canceledOrPostponed: cancelled + postponed,
-                canceledOrPostponedPct: pctOfTotal(cancelled + postponed),
+                canceledOrPostponed: notAttended,
+                canceledOrPostponedPct: pctOfTotal(notAttended),
                 showRate: Math.round(showRate),          // %
-                showDenom: denomForShowRate,             // completed + missed
+                showDenom: denomForShowRate,             // completed + (cancelled+postponed+missed)
             },
             chartData: {
-                labels: ['Hoàn thành', 'Đã xác nhận', 'Chờ xử lý', 'Hủy/Hoãn', 'Không đến'],
+                labels: ['Hoàn thành(Đã đến)', 'Chờ xử lý', 'Không đến'],
                 datasets: [{
                     label: 'Số lượng',
-                    data: [completed, confirmed, pending, cancelled + postponed, missed],
-                    backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#6b7280'],
+                    data: [completed, pending, notAttended],
+                    backgroundColor: ['#10b981', '#f59e0b', '#6b7280'],
                 }]
             }
         };
@@ -327,7 +354,13 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                     </div>
                     <button
                         type="button"
-                        onClick={() => { setStartDate(''); setEndDate(''); setGroupFilter('all'); setStatusFilter('all'); }}
+                        onClick={() => {
+                            setStartDate('');
+                            setEndDate('');
+                            setGroupFilter('all');
+                            setStatusFilter('all');
+                            setCustomerTypeFilter('all');
+                        }}
                         className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
                         style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                     >
@@ -335,7 +368,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                     </button>
                 </CardHeader>
 
-                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
                     <Listbox
                         label="Nhóm (group)"
                         options={groupOptions}
@@ -347,6 +380,12 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                         options={statusOptions}
                         value={statusFilter}
                         onChange={setStatusFilter}
+                    />
+                    <Listbox
+                        label="Loại khách hàng (theo lịch hẹn)"
+                        options={customerTypeOptions}
+                        value={customerTypeFilter}
+                        onChange={setCustomerTypeFilter}
                     />
                     <div>
                         <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
@@ -388,10 +427,10 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                     color="#10b981"
                 />
                 <StatCard
-                    title="Hủy / Hoãn"
+                    title="Không đến"
                     value={`${stats.canceledOrPostponed} (${stats.canceledOrPostponedPct}%)`}
                     icon={X}
-                    description="Lịch hẹn bị hủy hoặc dời lại"
+                    description="Hủy, hoãn, hoặc khách không đến"
                     color="#ef4444"
                 />
                 <StatCard

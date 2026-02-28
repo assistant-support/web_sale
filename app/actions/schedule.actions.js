@@ -9,6 +9,7 @@ import { user_data } from '@/data/actions/get';
 import { revalidateData } from "./customer.actions";
 import { reloadRunningSchedules } from "@/data/actions/reload";
 import { unstable_cache as nextCache } from 'next/cache';
+import Customer from "@/models/customer.model";
 
 export async function getRunningSchedulesAction() {
     try {
@@ -22,6 +23,8 @@ export async function getRunningSchedulesAction() {
                 filter.zaloAccount = { $in: permittedAccountIds };
             }
             return ScheduledJob.find(filter)
+                .select('jobName actionType zaloAccount config statistics createdBy estimatedCompletionTime createdAt tasks')
+                .limit(50)
                 .populate('zaloAccount', 'name avt')
                 .populate('createdBy', 'name')
                 .populate({
@@ -123,10 +126,6 @@ export async function createScheduleAction(prevState, formData) {
         const tasksToSchedule = JSON.parse(selectedCustomersJSON);
 
         if (!tasksToSchedule || tasksToSchedule.length === 0) throw new Error("Không có khách hàng nào được chọn.");
-        
-        // Debug: Log dữ liệu khách hàng để kiểm tra
-        console.log('[createScheduleAction] Số lượng khách hàng:', tasksToSchedule.length);
-        console.log('[createScheduleAction] Mẫu dữ liệu khách hàng đầu tiên:', JSON.stringify(tasksToSchedule[0], null, 2));
 
         let dbUser = await user_data({ _id: user.id });
         dbUser = dbUser[0] || {};
@@ -162,69 +161,36 @@ export async function createScheduleAction(prevState, formData) {
         }
         
         if (!account) throw new Error("Không tìm thấy tài khoản Zalo trong Zalo Hệ Thống. Vui lòng chọn lại tài khoản trong Cấu hình.");
-        
-        // Lấy accountKey từ ZaloAccount mới hoặc uid từ model cũ
-        const accountKey = isNewAccount ? zaloAccountNew.accountKey : account.uid;
 
-        // --- LỌC KHÁCH HÀNG: CHỈ CẦN CÓ UID LÀ ĐƯỢC ---
-        let validTasks = tasksToSchedule;
-        let removedCount = 0;
+        // 🔥 QUAN TRỌNG: Fetch lại customer từ DB để đảm bảo có dữ liệu uid đầy đủ
+        // (client có thể không populate uid đúng cách)
+        const customerIds = tasksToSchedule.map(t => t.person?._id || t._id).filter(Boolean);
+        const customersFromDB = await Customer.find({ _id: { $in: customerIds } })
+            .select('_id uid zaloavt zaloname')
+            .lean();
+        const customerMap = new Map(customersFromDB.map(c => [String(c._id), c]));
 
-        // Chỉ lọc nếu hành động không phải là 'findUid'
-        if (actionType !== 'findUid') {
-            const originalCount = validTasks.length;
-            // Chỉ cần có UID là được, không cần kiểm tra UID thuộc về tài khoản Zalo nào
-            validTasks = validTasks.filter(task => {
-                // Debug: Log để kiểm tra
-                console.log('[createScheduleAction] Kiểm tra task:', {
-                    _id: task._id,
-                    name: task.name,
-                    hasUid: !!task.uid,
-                    uidType: typeof task.uid,
-                    isArray: Array.isArray(task.uid),
-                    uidLength: task.uid?.length,
-                    uidValue: task.uid
-                });
-                
-                // Kiểm tra xem có UID không (bất kỳ UID nào)
-                if (!task.uid) {
-                    console.log('[createScheduleAction] ❌ Task không có field uid');
-                    return false;
-                }
-                
-                if (!Array.isArray(task.uid)) {
-                    console.log('[createScheduleAction] ❌ Task.uid không phải là array:', typeof task.uid);
-                    return false;
-                }
-                
-                if (task.uid.length === 0) {
-                    console.log('[createScheduleAction] ❌ Task.uid là array rỗng');
-                    return false;
-                }
-                
-                // Kiểm tra xem có ít nhất một UID hợp lệ không
-                const hasValidUid = task.uid.some(u => {
-                    const isValid = u && u.uid && String(u.uid).trim().length > 0;
-                    if (!isValid) {
-                        console.log('[createScheduleAction] ❌ UID entry không hợp lệ:', u);
+        // Cập nhật tasks với uid từ DB (nếu có)
+        const tasksWithUidFromDB = tasksToSchedule.map(task => {
+            const customerId = task.person?._id || task._id;
+            const customerFromDB = customerMap.get(String(customerId));
+            if (customerFromDB && customerFromDB.uid) {
+                return {
+                    ...task,
+                    uid: customerFromDB.uid,
+                    person: {
+                        ...task.person,
+                        uid: customerFromDB.uid
                     }
-                    return isValid;
-                });
-                
-                if (hasValidUid) {
-                    console.log('[createScheduleAction] ✅ Task có UID hợp lệ');
-                } else {
-                    console.log('[createScheduleAction] ❌ Task không có UID hợp lệ');
-                }
-                
-                return hasValidUid;
-            });
-            removedCount = originalCount - validTasks.length;
-
-            if (validTasks.length === 0) {
-                return { success: true, message: `Tất cả ${originalCount} người đã bị loại bỏ do không có UID.` };
+                };
             }
-        }
+            return task;
+        });
+
+        // Không loại bỏ khách chưa có UID ở bước tạo lịch.
+        // Đối với các hành động cần UID, processSingleTask sẽ tự kiểm tra và log lỗi "Không tìm thấy UID".
+        let validTasks = tasksWithUidFromDB;
+        let removedCount = 0;
         // Từ đây, tất cả logic sẽ sử dụng `validTasks` thay vì `tasksToSchedule`
 
         let finalActionsPerHour = Math.min(Number(actionsPerHour) || 30, 30);
@@ -305,8 +271,12 @@ export async function createScheduleAction(prevState, formData) {
             message += ` Đã tự động loại bỏ ${removedCount} người do không có UID hợp lệ.`;
         }
 
-        revalidateData();
+        // Invalidate ngay để nút "Hiện tại" cập nhật sau router.refresh()
         reloadRunningSchedules();
+        // Không chờ revalidateData để tránh block UI "Đang gửi yêu cầu" khi tạo nhiều job (guitinnhanzalo3)
+        setImmediate(() => {
+            revalidateData().catch(() => {});
+        });
         return { success: true, message: message };
     } catch (err) {
         console.error("Error creating schedule:", err);
@@ -330,8 +300,8 @@ export async function cancelScheduleAction(prevState, formData) {
             { _id: jobToDelete.zaloAccount },
             { $pull: { action: jobId } }
         );
-        revalidateData();
         reloadRunningSchedules();
+        setImmediate(() => revalidateData().catch(() => {}));
         return { success: true, message: `Đã hủy thành công lịch trình "${jobToDelete.jobName}".` };
     } catch (err) {
         return { success: false, error: err.message || "Lỗi không xác định từ máy chủ." };

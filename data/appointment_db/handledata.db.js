@@ -160,9 +160,9 @@ export async function dataAppointment(params = {}) {
 export async function dataAppointments() {
     try {
         await connectDB()
-        // CẬP NHẬT: populate thêm 'service'
+        // CẬP NHẬT: populate thêm 'service' và lấy cả serviceDetails của khách để biết KH đã có đơn hay chưa
         let appointments = await Appointment.find({})
-            .populate('customer', 'name phone')
+            .populate('customer', 'name phone serviceDetails')
             .populate('createdBy', 'name group')
             .populate('service', 'name') // Thêm populate cho service
             .sort({ appointmentDate: -1 })

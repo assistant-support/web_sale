@@ -241,7 +241,7 @@ export default function ServicesTable({ initialData, actions }) {
                                                 <span className="font-medium">{courseCount}</span>
                                                 <span>liệu trình</span>
                                             </div>
-                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]">
+                                            <div className="inline-flex items-center gap-2 text-sm text-[var(--primary)]" style={{ backgroundColor: 'red' }}>
                                                 <DollarSign className="w-4 h-4" />
                                                 <span className="font-medium">{formatCurrency(totalBasePrice)}</span>
                                             </div>

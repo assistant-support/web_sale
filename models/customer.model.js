@@ -45,7 +45,12 @@ const SelectedCourseSchema = new Schema({
         fullMedication: { type: Number, default: 0 },
         partialMedication: { type: Number, default: 0 },
         otherFees: { type: Number, default: 0 },
-    }
+    },
+    medicationName: { type: String, trim: true, default: '' }, // Tên thuốc
+    medicationDosage: { type: String, trim: true, default: '' }, // Liều lượng thuốc
+    medicationUnit: { type: String, trim: true, default: '' }, // Đơn vị thuốc
+    consultantName: { type: String, trim: true, default: '' }, // Tư vấn viên (tên người đăng nhập)
+    doctorName: { type: String, trim: true, default: '' }, // Bác sĩ Tư vấn
 }, { _id: false });
 
 
@@ -69,7 +74,7 @@ const ServiceDetailSchema = new Schema(
         // Lưu lại thông tin chi tiết của liệu trình đã chọn tại thời điểm chốt
         selectedCourse: { type: SelectedCourseSchema },
 
-        // Giá/giảm giá/chốt
+        // Giá/giảm giá/chốt (đồng bộ từ service_details)
         pricing: {
             listPrice: { type: Number, default: 0, min: 0 },
             discountType: { type: String, enum: ['none', 'amount', 'percent'], default: 'none' },
@@ -78,6 +83,8 @@ const ServiceDetailSchema = new Schema(
             adjustmentValue: { type: Number, default: 0, min: 0 },
             finalPrice: { type: Number, default: 0, min: 0 },
         },
+        name_CTKM: { type: String, trim: true, default: '' },
+        idCTKM: { type: Schema.Types.ObjectId, ref: 'discountprogram', default: null },
 
         // Thanh toán nhiều đợt
         payments: { type: [PaymentSchema], default: [] },
@@ -216,10 +223,27 @@ const FormSchema = new Schema(
         // Format: { "Tên dịch vụ": ["Liệu trình 1", "Liệu trình 2", ...] }
         history_service: { type: Schema.Types.Mixed, default: {} },
         
+        // Danh sách ID các service đã được sử dụng (từ các đơn đã tạo)
+        // Mỗi khi tạo đơn mới, serviceId sẽ được thêm vào mảng này (không trùng lặp)
+        service_use: { type: [{ type: Schema.Types.ObjectId, ref: 'service' }], default: [] },
+        
         id_phone_mes: { type: String, default: null }, // ID conversation từ Pancake
         Id_area_customer: { type: String, trim: true, default: null }, // Tên khu vực khách hàng từ bảng area_customer
         service_start_date: { type: Date, default: null }, // Ngày bắt đầu sử dụng dịch vụ
         service_last_date: { type: Date, default: null }, // Ngày sử dụng dịch vụ lần cuối
+        
+        // Phân loại khách hàng: 'new' (khách mới) hoặc 'old' (khách cũ)
+        // Khách mới: chưa có đơn nào (số đơn = 0)
+        // Khách cũ: đã có đơn (số đơn > 0)
+        customerType: { 
+            type: String, 
+            enum: ['new', 'old'], 
+            default: 'new' 
+        },
+        
+        // Thống kê cho phân loại khách mới/cũ và doanh thu
+        total_completed_orders: { type: Number, default: 0, min: 0 }, // Tổng số đơn đã hoàn thành
+        lifetime_revenue: { type: Number, default: 0, min: 0 }, // Tổng doanh thu khách hàng đã chi
     },
     { timestamps: false, versionKey: false }
 );

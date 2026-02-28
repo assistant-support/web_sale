@@ -9,6 +9,7 @@ import '@/models/zalo.model' // Giữ lại nếu Zalo Account vẫn liên quan 
 import ScheduledJob from "@/models/schedule";
 import { reloadCustomers } from '@/data/customers/wraperdata.db';
 import Service from '@/models/services.model';
+import ServiceDetail from '@/models/service_details.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
 import { uploadFileToDrive } from '@/function/drive/image';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
@@ -17,8 +18,9 @@ import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
 
 /**
- * Build history_service từ serviceDetails
- * Format: { "Tên dịch vụ": ["Liệu trình 1", "Liệu trình 2", ...] }
+ * Build history_service từ serviceDetails (structure per history_service.md).
+ * Format: { "Service Name": ["Course Name 1", "Course Name 2", ...] }
+ * Deduplication via Sets; skips incomplete records (missing serviceName or courseName).
  */
 function buildHistoryService(serviceDetails = [], services = []) {
     if (!Array.isArray(serviceDetails) || serviceDetails.length === 0) {
@@ -29,7 +31,7 @@ function buildHistoryService(serviceDetails = [], services = []) {
     const serviceMap = new Map();
     services.forEach((svc) => {
         if (svc?._id) {
-            serviceMap.set(String(svc._id), svc.name || 'Không rõ dịch vụ');
+            serviceMap.set(String(svc._id), (svc.name || '').trim());
         }
     });
 
@@ -45,36 +47,27 @@ function buildHistoryService(serviceDetails = [], services = []) {
         
         
         
-        // Lấy serviceId
+        // serviceId: từ serviceId (snapshot) hoặc selectedService (per history_service.md)
         let serviceId = null;
-        if (detail.selectedService) {
+        if (detail.serviceId) {
+            serviceId = typeof detail.serviceId === 'object' && detail.serviceId !== null
+                ? String(detail.serviceId._id ?? detail.serviceId.$oid ?? detail.serviceId)
+                : String(detail.serviceId);
+        }
+        if (!serviceId && detail.selectedService) {
             if (typeof detail.selectedService === 'string') {
                 serviceId = detail.selectedService;
             } else if (detail.selectedService._id) {
                 serviceId = String(detail.selectedService._id);
             }
         }
+        if (!serviceId) return;
 
-        if (!serviceId) {
-            console.log(`⚠️ [buildHistoryService] Detail ${index} không có serviceId`);
-            return;
-        }
-        
-        // Lấy serviceName từ serviceMap hoặc từ detail
-        const serviceName =
-            serviceMap.get(serviceId) ||
-            detail.selectedService?.name ||
-            'Không rõ dịch vụ';
-
-      
-
-        // Lấy courseName từ selectedCourse.name
+        const serviceName = serviceMap.get(serviceId) || detail.selectedService?.name || '';
         const courseName = detail.selectedCourse?.name || '';
-        
-        if (!courseName) {
-            console.log(`⚠️ [buildHistoryService] Detail ${index} không có courseName, bỏ qua`);
-            return; // Bỏ qua nếu không có tên liệu trình
-        }
+
+        // Skip incomplete records (missing serviceName or courseName)
+        if (!serviceName || !courseName) return;
 
         // Khởi tạo Set cho dịch vụ nếu chưa có
         if (!grouped[serviceName]) {
@@ -117,13 +110,10 @@ export async function syncHistoryService(customerId) {
        
         const serviceIds = new Set();
         customerDoc.serviceDetails?.forEach((detail) => {
-            if (detail?.selectedService) {
-                if (typeof detail.selectedService === 'string') {
-                    serviceIds.add(detail.selectedService);
-                } else if (detail.selectedService._id) {
-                    serviceIds.add(String(detail.selectedService._id));
-                }
-            }
+            const raw = detail?.serviceId ?? detail?.selectedService;
+            if (!raw) return;
+            const idStr = typeof raw === 'object' && raw !== null ? String(raw._id ?? raw.$oid ?? raw) : String(raw);
+            if (idStr && mongoose.Types.ObjectId.isValid(idStr)) serviceIds.add(idStr);
         });
 
         
@@ -200,8 +190,17 @@ export async function getCombinedData(params) {
                     sourceIndexHint = 'source_1';
                 } else {
                     // Nếu không phải ObjectId, có thể là sourceDetails (nguồn tin nhắn)
-                    // Lọc theo sourceDetails
-                    filterConditions.push({ sourceDetails: currentParams.source });
+                    const sourceValue = String(currentParams.source);
+                    
+                    // Nếu filter theo "Tin nhắn", lấy tất cả sourceDetails bắt đầu bằng "Tin nhắn"
+                    if (sourceValue === 'Tin nhắn') {
+                        filterConditions.push({
+                            sourceDetails: { $regex: '^Tin nhắn', $options: 'i' }
+                        });
+                    } else {
+                        // Các sourceDetails khác: filter chính xác
+                        filterConditions.push({ sourceDetails: sourceValue });
+                    }
                     sourceIndexHint = 'sourceDetails_1';
                 }
             }
@@ -349,6 +348,26 @@ export async function getCombinedData(params) {
                 }
             }
 
+            // Lọc theo thẻ LEAD/NOT_LEAD (conversation lead status): khách hàng có sourceDetails + name trùng với bản ghi đã gán thẻ
+            if (currentParams.leadStatusLabelId && mongoose.Types.ObjectId.isValid(currentParams.leadStatusLabelId)) {
+                const ConversationLeadStatus = (await import('@/models/conversationLeadStatus.model')).default;
+                const leadStatuses = await ConversationLeadStatus.find({
+                    labelId: new mongoose.Types.ObjectId(currentParams.leadStatusLabelId),
+                    $and: [
+                        { pageDisplayName: { $exists: true, $ne: null, $ne: '' } },
+                        { name: { $exists: true, $ne: null, $ne: '' } },
+                    ],
+                })
+                    .select('pageDisplayName name')
+                    .lean();
+                const pairs = leadStatuses.map((s) => ({ sourceDetails: s.pageDisplayName, name: s.name }));
+                if (pairs.length > 0) {
+                    filterConditions.push({ $or: pairs });
+                } else {
+                    filterConditions.push({ _id: { $in: [] } });
+                }
+            }
+
             const matchStage =
                 filterConditions.length > 0 ? { $match: { $and: filterConditions } } : { $match: {} };
 
@@ -442,7 +461,8 @@ export async function getCombinedData(params) {
                     if (c.createdBy) sdUserIds.add(String(c.createdBy));
                 });
 
-                // Services
+                // Services — dùng serviceId của snapshot (customers) để nhóm/hiển thị đúng sau khi sửa đơn
+                if (sd.serviceId) sdServiceIds.add(String(sd.serviceId));
                 if (sd.selectedService) sdServiceIds.add(String(sd.selectedService));
                 (sd.interestedServices || []).forEach((sid) => sdServiceIds.add(String(sid)));
             };
@@ -472,6 +492,30 @@ export async function getCombinedData(params) {
                 sdServiceMap = new Map(services.map((s) => [String(s._id), s]));
             }
 
+            // Lấy pricing + name_CTKM, idCTKM từ collection service_details (nguồn đúng cho giá gốc/giảm giá/thành tiền)
+            const sdDetailIds = new Set();
+            paginatedData.forEach((customer) => {
+                const list = Array.isArray(customer.serviceDetails)
+                    ? customer.serviceDetails
+                    : customer.serviceDetails ? [customer.serviceDetails] : [];
+                list.forEach((sd) => {
+                    const id = sd?.serviceDetailId ?? sd?._id;
+                    if (id) {
+                        const idStr = typeof id === 'object' && id !== null ? String(id._id ?? id.$oid ?? id) : String(id);
+                        if (idStr && mongoose.Types.ObjectId.isValid(idStr)) sdDetailIds.add(idStr);
+                    }
+                });
+            });
+            let sdPricingMap = new Map();
+            if (sdDetailIds.size > 0) {
+                const details = await ServiceDetail.find({ _id: { $in: Array.from(sdDetailIds).map((id) => new mongoose.Types.ObjectId(id)) } })
+                    .select('pricing name_CTKM idCTKM')
+                    .lean();
+                details.forEach((doc) => {
+                    sdPricingMap.set(String(doc._id), { pricing: doc.pricing, name_CTKM: doc.name_CTKM, idCTKM: doc.idCTKM });
+                });
+            }
+
             // Map dữ liệu vào từng serviceDetails
             paginatedData.forEach((customer) => {
                 const list = Array.isArray(customer.serviceDetails)
@@ -483,6 +527,16 @@ export async function getCombinedData(params) {
                 // Gán lại đã map → đảm bảo luôn là mảng trong output
                 customer.serviceDetails = list.map((sd) => {
                     const cloned = { ...sd };
+
+                    // Pricing + CTKM: ưu tiên từ service_details (nguồn đúng)
+                    const sdId = sd?.serviceDetailId ?? sd?._id;
+                    const sdIdStr = sdId != null ? (typeof sdId === 'object' ? String(sdId._id ?? sdId.$oid ?? sdId) : String(sdId)) : null;
+                    if (sdIdStr && sdPricingMap.has(sdIdStr)) {
+                        const fromDetail = sdPricingMap.get(sdIdStr);
+                        if (fromDetail.pricing) cloned.pricing = fromDetail.pricing;
+                        if (fromDetail.name_CTKM !== undefined) cloned.name_CTKM = fromDetail.name_CTKM;
+                        if (fromDetail.idCTKM !== undefined) cloned.idCTKM = fromDetail.idCTKM;
+                    }
 
                     // Users
                     if (cloned.closedBy && sdUserMap.has(String(cloned.closedBy))) {
@@ -519,10 +573,13 @@ export async function getCombinedData(params) {
                         });
                     }
 
-                    // Services
-                    if (cloned.selectedService && sdServiceMap.has(String(cloned.selectedService))) {
-                        cloned.selectedService = sdServiceMap.get(String(cloned.selectedService));
+                    // Services — ưu tiên serviceId từ snapshot (customers) để tên dịch vụ khớp nhóm
+                    const serviceIdForLookup = cloned.serviceId || cloned.selectedService;
+                    const sid = serviceIdForLookup && (typeof serviceIdForLookup === 'object' ? serviceIdForLookup._id ?? serviceIdForLookup : serviceIdForLookup);
+                    if (sid && sdServiceMap.has(String(sid))) {
+                        cloned.selectedService = sdServiceMap.get(String(sid));
                     }
+                    if (cloned.selectedService && !cloned.serviceId) cloned.serviceId = cloned.selectedService._id;
                     if (Array.isArray(cloned.interestedServices)) {
                         cloned.interestedServices = cloned.interestedServices
                             .map((sid) => sdServiceMap.get(String(sid)))

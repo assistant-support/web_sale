@@ -237,7 +237,8 @@ export async function findUserUid({ accountKey, phoneOrUid }) {
             return mapFindError(err, 'Không tìm thấy người dùng theo UID.');
         }
     } catch (err) {
-        // Lỗi bước chuẩn bị phiên (cookie hỏng/chưa từng login)
+        // Lỗi bước chuẩn bị phiên (cookie hỏng/chưa từng login) → xóa API để lần sau thử đăng nhập lại
+        if (accountKey) removeRuntimeApi(accountKey);
         return { ok: false, code: 'bootstrap_failed', message: err?.message || 'Không thể khởi tạo phiên Zalo.' };
     }
 }
@@ -250,22 +251,33 @@ export async function findUserUid({ accountKey, phoneOrUid }) {
 export async function sendUserMessage({ accountKey, userId, text = '', attachments = [] }) {
     if (!accountKey) throw new Error('accountKey is required');
     if (!userId) throw new Error('userId is required');
-    const api = await ensureZaloApi(accountKey);
+    let api;
+    try {
+        api = await ensureZaloApi(accountKey);
+    } catch (err) {
+        if (accountKey) removeRuntimeApi(accountKey);
+        throw err;
+    }
 
     const payload = { msg: text || '', attachments: Array.isArray(attachments) ? attachments : [] };
     const { ThreadType } = await import('zca-js');
-    const ack = await api.sendMessage(payload, String(userId), ThreadType.User);
-    
-    // Kiểm tra kết quả
-    const success = (ack?.message !== null && ack?.message?.msgId !== undefined) ||
-                   (Array.isArray(ack?.attachment) && ack?.attachment.length > 0);
-    
-    return { 
-        ok: success, 
-        ack,
-        msgId: ack?.message?.msgId,
-        message: success ? 'Gửi tin nhắn thành công' : 'Gửi tin nhắn thất bại'
-    };
+    try {
+        const ack = await api.sendMessage(payload, String(userId), ThreadType.User);
+        const success = (ack?.message !== null && ack?.message?.msgId !== undefined) ||
+                       (Array.isArray(ack?.attachment) && ack?.attachment.length > 0);
+        return {
+            ok: success,
+            ack,
+            msgId: ack?.message?.msgId,
+            message: success ? 'Gửi tin nhắn thành công' : 'Gửi tin nhắn thất bại'
+        };
+    } catch (err) {
+        const msg = String(err?.message || '');
+        if (/login|cookie|unauth|forbidden|zpw|401|403|session/i.test(msg)) {
+            removeRuntimeApi(accountKey);
+        }
+        throw err;
+    }
 }
 
 /**

@@ -3,6 +3,7 @@
 import { unstable_cache as cache, revalidateTag } from 'next/cache';
 import dbConnect from '@/config/connectDB';
 import Label from '@/models/label.model'; // Đảm bảo đường dẫn này chính xác
+import ConversationLeadStatus from '@/models/conversationLeadStatus.model';
 
 /**
  * Lấy tất cả các nhãn từ database.
@@ -246,48 +247,56 @@ export async function getConversationIdsByLabelsAndPage({ labelIds, pageId }) {
             return { success: false, error: 'Không tìm thấy nhãn.', conversationIds: [], conversationCustomerMap: {} };
         }
 
-        // Lấy tất cả conversation_ids và mapping với customer_ids từ các labels theo cấu trúc mới
+        // Thẻ LEAD / NOT_LEAD dùng collection conversationleadstatuses, không dùng labelfb.customer
+        const isLeadLabelName = (name) => (name === 'LEAD' || name === 'NOT LEAD' || name === 'NOT_LEAD');
+        const leadLabels = labels.filter((l) => isLeadLabelName(l.name));
+        const normalLabels = labels.filter((l) => !isLeadLabelName(l.name));
+
         const allConversationIds = new Set();
         const conversationCustomerMap = {}; // Map conversation_id -> customer_id
-        
-        labels.forEach((label, labelIndex) => {
-           
-            // Xử lý trường hợp customer là array cũ hoặc object mới
+
+        // 1) Lấy conversationIds từ ConversationLeadStatus cho thẻ LEAD / NOT_LEAD
+        if (leadLabels.length > 0) {
+            const leadLabelIds = leadLabels.map((l) => l._id);
+            const leadStatuses = await ConversationLeadStatus.find({
+                labelId: { $in: leadLabelIds },
+                pageId: String(pageId),
+            }).lean();
+            leadStatuses.forEach((row) => {
+                const convIdStr = String(row.conversationId);
+                allConversationIds.add(convIdStr);
+                if (row.idcustomers) {
+                    conversationCustomerMap[convIdStr] = String(row.idcustomers);
+                }
+            });
+            console.log(`📋 [getConversationIdsByLabelsAndPage] Lead/NOT_LEAD: ${leadStatuses.length} conversations from conversationleadstatuses`);
+        }
+
+        // 2) Lấy conversationIds từ Labelfb.customer cho các thẻ thường
+        normalLabels.forEach((label) => {
             let customerData = {};
             if (Array.isArray(label.customer)) {
-                // Nếu là array, có thể là:
-                // 1. Array cũ: [] hoặc ["conversation_id1", "conversation_id2"]
-                // 2. Array chứa object: [{ pzl_xxx: {...} }] - đây là format mới nhưng lưu sai
                 if (label.customer.length > 0 && typeof label.customer[0] === 'object' && !Array.isArray(label.customer[0])) {
-                    // Trường hợp array chứa object - merge tất cả objects lại
-                    
                     label.customer.forEach((item) => {
                         if (item && typeof item === 'object') {
                             customerData = { ...customerData, ...item };
                         }
                     });
                 } else {
-                    // Array cũ - chuyển sang object rỗng
                     console.log(`⚠️ [getConversationIdsByLabelsAndPage] Label ${label.name} có customer là array cũ, chuyển sang object rỗng`);
                     customerData = {};
                 }
             } else if (label.customer && typeof label.customer === 'object' && !Array.isArray(label.customer)) {
-                // Object trực tiếp - sử dụng luôn
                 customerData = label.customer;
             }
-            
-            
-            
+
             const pageData = customerData[pageId];
-            
-            
+
             if (pageData && Array.isArray(pageData.IDconversation) && Array.isArray(pageData.IDcustomer)) {
-                
                 pageData.IDconversation.forEach((convId, index) => {
                     if (convId) {
                         const convIdStr = String(convId);
                         allConversationIds.add(convIdStr);
-                        // Lưu mapping conversation_id -> customer_id (cùng index)
                         if (pageData.IDcustomer[index] !== undefined && pageData.IDcustomer[index] !== '') {
                             conversationCustomerMap[convIdStr] = String(pageData.IDcustomer[index]);
                         }

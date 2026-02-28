@@ -3,8 +3,10 @@ import ChatClient from './ChatClient';
 import { getPagesFromAPI, PANCAKE_USER_ACCESS_TOKEN } from '@/lib/pancake-api';
 import { getLabelData } from '@/app/(setting)/label/page';
 
-export default async function ChatPage({ params }) {
+export default async function ChatPage({ params, searchParams }) {
     const { pageId } = await params;
+    const resolvedSearchParams = await searchParams || {};
+    const preselectConversationId = resolvedSearchParams.conversationId || null;
 
     let pageConfig = await getPagesFromAPI();
     
@@ -34,6 +36,7 @@ export default async function ChatPage({ params }) {
             pageConfig={pageConfig}
             label={label}
             token={PANCAKE_USER_ACCESS_TOKEN}
+            preselectConversationId={preselectConversationId}
         />
     );
 }

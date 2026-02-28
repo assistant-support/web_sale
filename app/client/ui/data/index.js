@@ -207,6 +207,14 @@ export default function SettingData({ data, service, customer }) {
         }
     };
 
+    // Danh sách các form đặc biệt không hiển thị đường dẫn và nút xóa
+    const specialForms = ['TIN NHẮN', 'NGUỒN CŨ', 'NHẬP TRỰC TIẾP TẠI QUẦY'];
+    const isSpecialForm = (formName) => {
+        return specialForms.some(specialName => 
+            formName?.toUpperCase().trim() === specialName.toUpperCase().trim()
+        );
+    };
+
     return (
         <>
             <button className='btn_s' onClick={() => setIsRightPopupOpen(true)}>
@@ -243,7 +251,7 @@ export default function SettingData({ data, service, customer }) {
                                             <div style={{ display: 'flex', gap: 16 }}>
                                                 <h6>Ngày tạo: {formatDate(new Date(item.createdAt)) || 'Không rõ'}</h6>
                                                 <h6>Được tạo bởi: {item.createdBy?.name || 'Không rõ'}</h6>
-                                                <h6>Số khách hàng: {sum}</h6>
+                                                {/* <h6>Số khách hàng: {sum}</h6> */}
                                             </div>
                                             <h5 className="text_w_400">{item.describe}</h5>
                                         </div>
@@ -276,26 +284,28 @@ export default function SettingData({ data, service, customer }) {
                     <>
                         <Title content="Chỉnh sửa Form" click={() => { setIsUpdatePopupOpen(false) }} />
                         <div className={styles.mainform}>
-                            <div className={styles.inputGroup}>
-                                <h5>Đường dẫn tới form</h5>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', borderRadius: 3, border: ' thin solid var(--border-color)', alignItems: 'center', padding: 3, paddingLeft: 8 }}>
-                                    <h5> {`https://crm.blingkim.com/form?id=${editingItem._id}`}</h5>
-                                    <div style={{ display: 'flex', gap: 4 }}>
-                                        <WrapIcon
-                                            icon={<Svg_Coppy w={'var(--font-size-base)'} h={'var(--font-size-base)'} c={'var(--text-primary)'} />}
-                                            click={() => handleCopyToClipboard(`https://crm.blingkim.com/form?id=${editingItem._id}`)}
-                                            className='mainIcon'
-                                            content={copyStatus === 'copied' ? 'Đã sao chép!' : copyStatus === 'error' ? 'Sao chép lỗi!' : 'Sao chép đường dẫn'}
-                                        />
-                                        <WrapIcon
-                                            icon={<Svg_Delete w={'var(--font-size-base)'} h={'var(--font-size-base)'} c={'white'} />}
-                                            click={() => handleOpenDeleteConfirm(editingItem)}
-                                            className='deleteIcon'
-                                            content="Xóa form này"
-                                        />
+                            {!isSpecialForm(editingItem.name) && (
+                                <div className={styles.inputGroup}>
+                                    <h5>Đường dẫn tới form</h5>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', borderRadius: 3, border: ' thin solid var(--border-color)', alignItems: 'center', padding: 3, paddingLeft: 8 }}>
+                                        <h5> {`https://crm.blingkim.com/form?id=${editingItem._id}`}</h5>
+                                        <div style={{ display: 'flex', gap: 4 }}>
+                                            <WrapIcon
+                                                icon={<Svg_Coppy w={'var(--font-size-base)'} h={'var(--font-size-base)'} c={'var(--text-primary)'} />}
+                                                click={() => handleCopyToClipboard(`https://crm.blingkim.com/form?id=${editingItem._id}`)}
+                                                className='mainIcon'
+                                                content={copyStatus === 'copied' ? 'Đã sao chép!' : copyStatus === 'error' ? 'Sao chép lỗi!' : 'Sao chép đường dẫn'}
+                                            />
+                                            <WrapIcon
+                                                icon={<Svg_Delete w={'var(--font-size-base)'} h={'var(--font-size-base)'} c={'white'} />}
+                                                click={() => handleOpenDeleteConfirm(editingItem)}
+                                                className='deleteIcon'
+                                                content="Xóa form này"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                             <AreaForm
                                 formAction={updateAction}
                                 formState={updateState}

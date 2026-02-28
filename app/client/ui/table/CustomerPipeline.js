@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -26,6 +26,7 @@ import {
     updateServiceDetailAction,
     deleteServiceDetailAction,
     closeServiceAction,
+    getServiceDetailById,
 } from '@/data/customers/wraperdata.db';
 
 import { useActionFeedback as useAction } from '@/hooks/useAction';
@@ -160,6 +161,11 @@ const closeServiceSchema = z.object({
     status: z.enum(['completed', 'in_progress', 'rejected']),
     selectedService: z.string().optional(),
     selectedCourseName: z.string().optional(),
+    medicationName: z.string().optional(), // Tên thuốc
+    medicationDosage: z.string().optional(), // Liều lượng thuốc
+    medicationUnit: z.string().optional(), // Đơn vị thuốc
+    consultantName: z.string().optional(), // Tư vấn viên
+    doctorName: z.string().optional(), // Bác sĩ Tư vấn
     notes: z.string().optional(),
     invoiceImage: z.any().optional(), // FileList
     customerPhotos: z.any().optional(), // FileList cho ảnh khách hàng
@@ -168,6 +174,8 @@ const closeServiceSchema = z.object({
     adjustmentType: z.enum(['none', 'discount', 'increase']).default('none'), // Mới: loại điều chỉnh
     adjustmentValue: z.string().optional(), // Mới: giá trị điều chỉnh
     hasExistingInvoice: z.coerce.boolean().default(false), // ép string->boolean
+    discountProgramId: z.string().optional(), // id chương trình khuyến mãi (idCTKM)
+    discountProgramName: z.string().optional(), // tên chương trình khuyến mãi (name_CTKM)
 }).superRefine((data, ctx) => {
     if (data.status !== 'rejected') {
         const hasNew = !!data.invoiceImage && data.invoiceImage.length > 0;
@@ -196,17 +204,49 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
         return [...arr].sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
     }, [customer.serviceDetails]);
 
+    // Nhóm details theo serviceId từ customers.serviceDetails (snapshot) để hiển thị đúng sau khi sửa đơn
+    const groupedByService = useMemo(() => {
+        const groups = new Map();
+
+        const toServiceIdStr = (d) => {
+            const raw = d.serviceId ?? d.selectedService;
+            if (raw == null) return null;
+            return typeof raw === 'object' && raw !== null ? String(raw._id ?? raw.$oid ?? raw) : String(raw);
+        };
+
+        details.forEach((detail) => {
+            const serviceIdStr = toServiceIdStr(detail);
+            const serviceId = serviceIdStr || null;
+
+            const service = serviceIdStr ? services.find(s => String(s._id) === serviceIdStr) : null;
+            const serviceName = service?.name ?? detail.selectedService?.name ?? 'Không rõ dịch vụ';
+            const groupKey = serviceIdStr || serviceName;
+
+            if (!groups.has(groupKey)) {
+                groups.set(groupKey, { serviceId: serviceIdStr, serviceName, details: [] });
+            }
+            groups.get(groupKey).details.push(detail);
+        });
+
+        return Array.from(groups.values()).sort((a, b) =>
+            a.serviceName.localeCompare(b.serviceName, 'vi')
+        );
+    }, [details, services]);
+
     const approvedTotalReceived = useMemo(
         () => details.filter(d => d.approvalStatus === 'approved')
-            .reduce((sum, d) => sum + (Number(d.pricing.finalPrice) || 0), 0),
+            .reduce((sum, d) => sum + (Number(d.pricing?.finalPrice || d.revenue || 0)), 0),
         [details]
     );
 
     const handleDelete = async (customerId, serviceDetailId) => {
         if (!window.confirm('Bạn có chắc chắn muốn xóa đơn chốt này không?')) return;
+        const idStr = serviceDetailId != null && typeof serviceDetailId === 'object'
+            ? String(serviceDetailId._id ?? serviceDetailId.$oid ?? serviceDetailId)
+            : String(serviceDetailId);
         const fd = new FormData();
         fd.append('customerId', customerId);
-        fd.append('serviceDetailId', serviceDetailId);
+        fd.append('serviceDetailId', idStr);
         await runAction(deleteServiceDetailAction, [null, fd], {
             successMessage: (res) => res?.message || 'Đã xóa đơn.',
             errorMessage: (res) => res?.error || 'Xóa đơn thất bại.',
@@ -230,12 +270,23 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
             {details.length === 0 ? (
                 <h6 className="text-center text-muted-foreground py-6">Chưa có đơn chốt nào.</h6>
             ) : (
-                <div className="space-y-3">
-                    {details.map((d) => {
+                <Accordion type="multiple" className="w-full">
+                    {groupedByService.map((group, groupIndex) => (
+                        <AccordionItem key={group.serviceId || `service-${groupIndex}`} value={`service-${groupIndex}`}>
+                            <AccordionTrigger className="hover:no-underline">
+                                <div className="flex items-center justify-between w-full pr-4">
+                                    <span className="font-semibold">{group.serviceName}</span>
+                                    <Badge variant="secondary" className="ml-2">
+                                        {group.details.length} đơn
+                                    </Badge>
+                                </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                <div className="space-y-3 pt-2">
+                                    {group.details.map((d) => {
                         const approved = d.approvalStatus === 'approved';
-                        const canEditOrDelete = !approved && !!currentUserId &&
-                            ((typeof d.closedBy === 'string' && d.closedBy === currentUserId) ||
-                                (d.closedBy?._id && String(d.closedBy._id) === currentUserId));
+                        // Cho phép sửa/xóa khi đơn chưa duyệt và có user đăng nhập (backend vẫn kiểm tra approvalStatus)
+                        const canEditOrDelete = !approved && !!currentUserId;
 
                         const statusChip = d.status === 'completed'
                             ? { text: 'Hoàn thành', className: 'bg-green-100 text-green-800' }
@@ -247,14 +298,23 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                             ? { text: 'Đã duyệt', className: 'bg-emerald-100 text-emerald-800', Icon: CheckCircle }
                             : { text: 'Chờ duyệt', className: 'bg-amber-100 text-amber-800', Icon: CircleDot };
 
-                        const serviceName = d.selectedService?.name || 'Không rõ';
+                        // Lấy serviceId từ snapshot (customers.serviceDetails) rồi resolve tên
+                        const rawSid = d.serviceId ?? d.selectedService;
+                        const detailServiceIdStr = rawSid != null ? (typeof rawSid === 'object' ? String(rawSid._id ?? rawSid.$oid ?? rawSid) : String(rawSid)) : null;
+                        const detailService = detailServiceIdStr ? services.find(s => String(s._id) === detailServiceIdStr) : null;
+                        const serviceName = detailService?.name ?? d.selectedService?.name ?? 'Không rõ';
                         const courseName = d.selectedCourse?.name || '';
-                        const listPrice = Number(d?.pricing?.listPrice || 0);
-                        const finalPrice = Number(d?.pricing?.finalPrice || d.revenue || 0);
-                        const discountAmount = Math.max(0, listPrice - finalPrice);
+                        // Lấy đúng từ service_details.pricing: listPrice = giá gốc, finalPrice = thành tiền, discountValue = giá trị giảm, discountType = loại giảm (amount = đơn vị VND, percent = %)
+                        const finalPrice = Number(d?.pricing?.finalPrice ?? d?.revenue ?? 0);
+                        const listPrice = Number(d?.pricing?.listPrice ?? 0) || (finalPrice > 0 ? finalPrice : 0);
+                        const discountValue = Number(d?.pricing?.discountValue ?? 0) || 0;
+                        const discountType = d?.pricing?.discountType === 'percent' ? 'percent' : 'amount';
+                        const discountDisplay = d?.pricing?.adjustmentType === 'discount'
+                            ? (discountType === 'percent' ? `${discountValue}%` : vnd.format(discountValue))
+                            : vnd.format(0);
 
                         return (
-                            <Card key={d._id} className="border">
+                            <Card key={d.serviceDetailId || d._id || `detail-${Math.random()}`} className="border">
                                 <CardContent className="p-3">
                                     <div className="flex flex-col gap-2">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -277,13 +337,16 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                                             </div>
                                             <div className="rounded-md bg-muted/40 p-2">
                                                 <div className="text-muted-foreground">Giảm giá</div>
-                                                <div className="font-medium text-red-600">{vnd.format(discountAmount)}</div>
+                                                <div className="font-medium text-red-600">{discountDisplay}</div>
                                             </div>
                                             <div className="rounded-md bg-muted/40 p-2">
                                                 <div className="text-muted-foreground">Thành tiền</div>
                                                 <div className="font-medium">{vnd.format(finalPrice)}</div>
                                             </div>
                                         </div>
+                                        {d.name_CTKM ? (
+                                            <div className="text-xs text-muted-foreground">CTKM: <span className="font-medium text-foreground">{d.name_CTKM}</span></div>
+                                        ) : null}
 
                                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground">
                                             <div className="flex gap-3">
@@ -304,30 +367,42 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                                             <Button size="sm" onClick={() => onOpenViewPopup(d)}>
                                                 Xem
                                             </Button>
-                                            {canEditOrDelete && (
-                                                <>
-                                                    <Button size="sm" variant="secondary" onClick={() => onOpenEditPopup(d)}>
-                                                        <Pencil className="h-4 w-4 mr-1" />Sửa
-                                                    </Button>
-                                                    <Button size="sm" variant="destructive" onClick={() => handleDelete(customer._id, d._id)}>
-                                                        <Trash2 className="h-4 w-4 mr-1" />Xóa
-                                                    </Button>
-                                                </>
-                                            )}
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                disabled={!canEditOrDelete}
+                                                title={!canEditOrDelete ? 'Chỉ có thể sửa đơn chưa duyệt' : undefined}
+                                                onClick={() => canEditOrDelete && onOpenEditPopup(d)}
+                                            >
+                                                <Pencil className="h-4 w-4 mr-1" />Sửa
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="destructive"
+                                                disabled={!canEditOrDelete}
+                                                title={!canEditOrDelete ? 'Chỉ có thể xóa đơn chưa duyệt' : undefined}
+                                                onClick={() => canEditOrDelete && handleDelete(customer._id, d.serviceDetailId || d._id)}
+                                            >
+                                                <Trash2 className="h-4 w-4 mr-1" />Xóa
+                                            </Button>
                                         </div>
                                     </div>
                                 </CardContent>
                             </Card>
                         );
-                    })}
-                </div>
+                                    })}
+                                </div>
+                            </AccordionContent>
+                        </AccordionItem>
+                    ))}
+                </Accordion>
             )}
         </div>
     );
 }
 
 /* ============================ COMPONENT CHÍNH ============================ */
-export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId }) {
+export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
     const router = useRouter();
     const PIPELINE_STAGES = useMemo(() => [
         { id: 1, title: 'Tiếp nhận & Xử lý', getStatus: getStep1Status },
@@ -361,8 +436,32 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
     const [listPrice, setListPrice] = useState(0);
     const [finalRevenue, setFinalRevenue] = useState(0);
     const { run: runFormAction, loading: isFormSubmitting } = useAction();
+    const [isPending, startTransition] = useTransition();
 
-    const services = useMemo(() => customer.tags || [], [customer.tags]);
+    // Chỉ hiển thị dịch vụ mà khách hàng quan tâm (có trong customer.tags) khi chốt đơn
+    const services = useMemo(() => {
+        const fromProp = Array.isArray(serviceProp) ? serviceProp : (serviceProp ? [serviceProp] : []);
+        const fromTags = Array.isArray(customer.tags) ? customer.tags : (customer.tags ? [customer.tags] : []);
+        const tagIds = new Set(
+            fromTags.map((tag) => {
+                if (typeof tag === 'string') return tag;
+                if (tag?._id) return String(tag._id);
+                return String(tag);
+            }).filter(Boolean)
+        );
+        const byId = new Map();
+        fromProp.forEach((s) => {
+            if (!s || !(s._id || s.id)) return;
+            const id = String(s._id || s.id);
+            if (tagIds.has(id) && !byId.has(id)) byId.set(id, s);
+        });
+        fromTags.forEach((s) => {
+            if (!s || !(s._id || s.id)) return;
+            const id = String(s._id || s.id);
+            if (tagIds.has(id) && !byId.has(id)) byId.set(id, s);
+        });
+        return Array.from(byId.values());
+    }, [customer.tags, serviceProp]);
 
     const form = useForm({
         resolver: zodResolver(closeServiceSchema),
@@ -378,6 +477,8 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             adjustmentType: 'none',
             adjustmentValue: '0',
             hasExistingInvoice: false,
+            discountProgramId: '',
+            discountProgramName: '',
         },
     });
 
@@ -397,6 +498,11 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             status: 'completed',
             selectedService: '',
             selectedCourseName: '',
+            medicationName: '',
+            medicationDosage: '',
+            medicationUnit: '',
+            consultantName: currentUserName || '',
+            doctorName: '',
             notes: '',
             invoiceImage: new DataTransfer().files,
             customerPhotos: new DataTransfer().files,
@@ -405,6 +511,8 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             adjustmentType: 'none',
             adjustmentValue: '0',
             hasExistingInvoice: false,
+            discountProgramId: '',
+            discountProgramName: '',
         });
         setExistingImageUrls([]);
         setExistingImageIds([]);
@@ -419,14 +527,51 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         setCloseServiceOpen(true);
     };
 
-    const openEditPopup = (detail) => {
-        setEditingDetail(detail);
+    // Chuẩn hóa id đơn từ snapshot (customers.serviceDetails: serviceDetailId có thể là ObjectId hoặc object)
+    const getServiceDetailId = (d) => {
+        const id = d?.serviceDetailId ?? d?._id;
+        if (id == null) return null;
+        return typeof id === 'object' && id !== null ? String(id._id ?? id.$oid ?? id) : String(id);
+    };
+
+    const openEditPopup = async (detail) => {
+        const fullId = getServiceDetailId(detail);
+        if (fullId && !detail.invoiceDriveIds) {
+            try {
+                const result = await getServiceDetailById(fullId);
+                if (result.success && result.data) {
+                    setEditingDetail(result.data);
+                } else {
+                    setEditingDetail(detail);
+                }
+            } catch (error) {
+                console.error('Lỗi khi fetch service detail:', error);
+                setEditingDetail(detail);
+            }
+        } else {
+            setEditingDetail(detail);
+        }
         setIsReadOnlyView(false);
         setCloseServiceOpen(true);
     };
 
-    const openViewPopup = (detail) => {
-        setEditingDetail(detail);
+    const openViewPopup = async (detail) => {
+        const fullId = getServiceDetailId(detail);
+        if (fullId && !detail.invoiceDriveIds) {
+            try {
+                const result = await getServiceDetailById(fullId);
+                if (result.success && result.data) {
+                    setEditingDetail(result.data);
+                } else {
+                    setEditingDetail(detail);
+                }
+            } catch (error) {
+                console.error('Lỗi khi fetch service detail:', error);
+                setEditingDetail(detail);
+            }
+        } else {
+            setEditingDetail(detail);
+        }
         setIsReadOnlyView(true);
         setCloseServiceOpen(true);
     };
@@ -435,11 +580,14 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
     useEffect(() => {
         if (!isCloseServiceOpen || !editingDetail) return;
 
-        // Ép serviceId về string an toàn
-        const raw = editingDetail.selectedService;
-        const serviceId = String(
-            (raw && (typeof raw === 'object' ? raw._id : raw)) ?? ''
-        );
+        // Ép serviceId về string an toàn (DB: service_details.serviceId là ObjectId, getServiceDetailById populate thành { _id, name })
+        let serviceId = '';
+        const rawService = editingDetail.serviceId || editingDetail.selectedService;
+        if (rawService) {
+            serviceId = typeof rawService === 'object' && rawService !== null
+                ? String(rawService._id ?? rawService.$oid ?? rawService)
+                : String(rawService);
+        }
 
         // Tìm service trong danh sách truyền vào
         const service = services.find(s => String(s._id) === serviceId);
@@ -480,46 +628,101 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             index: idx
         })));
 
-        // Reset form với giá trị cũ (chỉ set course nếu tồn tại trong options)
-        form.reset({
+        // Lấy giá trị pricing từ editingDetail
+        const pricing = editingDetail.pricing || {};
+        const adjustmentType = pricing.adjustmentType || 'none';
+        const adjustmentValue = pricing.adjustmentValue || 0;
+        const discountValue = pricing.discountValue || 0;
+        const listPriceValue = pricing.listPrice || 0;
+        
+        // Format discountValue và adjustmentValue theo discountType
+        const formatDiscountValue = (value, unit) => {
+            if (unit === 'percent') {
+                return value.toString();
+            } else if (unit === 'amount') {
+                return new Intl.NumberFormat('vi-VN').format(value);
+            }
+            return '0';
+        };
+
+        // Map status DB (processing|completed|cancelled) sang form (in_progress|completed|rejected)
+        const formStatus = editingDetail.status === 'processing' ? 'in_progress' : editingDetail.status === 'cancelled' ? 'rejected' : (editingDetail.status || 'completed');
+
+        // Luôn dùng tên liệu trình từ đơn (để hiển thị khi mở Sửa), nếu có trong danh sách course thì chọn đúng
+        const selectedCourseNameValue = courseName && courses.some(c => c.name === courseName) ? courseName : courseName;
+
+        const resetPayload = {
             _id: editingDetail._id,
-            status: editingDetail.status || 'completed',
+            status: formStatus,
             selectedService: serviceId,
-            selectedCourseName: courses.some(c => c.name === courseName) ? courseName : '',
+            selectedCourseName: selectedCourseNameValue || '',
+            medicationName: editingDetail.selectedCourse?.medicationName || '',
+            medicationDosage: editingDetail.selectedCourse?.medicationDosage || '',
+            medicationUnit: editingDetail.selectedCourse?.medicationUnit || '',
+            consultantName: editingDetail.selectedCourse?.consultantName || currentUserName || '',
+            doctorName: editingDetail.selectedCourse?.doctorName || '',
             notes: editingDetail.notes || '',
-            invoiceImage: new DataTransfer().files, // rỗng; chỉ preview ảnh cũ
-            customerPhotos: new DataTransfer().files, // rỗng; chỉ preview ảnh cũ
-            discountType: editingDetail.pricing?.discountType || 'none',
-            discountValue: new Intl.NumberFormat('vi-VN').format(editingDetail.pricing?.discountValue || 0),
-            adjustmentType: 'none',
-            adjustmentValue: '0',
+            invoiceImage: new DataTransfer().files,
+            customerPhotos: new DataTransfer().files,
+            discountType: pricing.discountType || 'none',
+            discountValue: formatDiscountValue(discountValue, pricing.discountType || 'none'),
+            adjustmentType: adjustmentType,
+            adjustmentValue: formatDiscountValue(adjustmentValue, pricing.discountType || 'none'),
             hasExistingInvoice: urls.length > 0,
-        });
+            discountProgramId: editingDetail.idCTKM ? String(editingDetail.idCTKM) : '',
+            discountProgramName: editingDetail.name_CTKM || '',
+        };
+
+        // Set listPrice và các state hiển thị trước, sau đó reset form (đặc biệt khi Sửa để form nhận đủ options)
+        setListPrice(listPriceValue);
         setDeletedImageIds([]);
         setDeletedCustomerPhotoIds([]);
         setFormResetToken(Date.now());
+
+        // Defer form.reset để đảm bảo CloseServiceForm đã nhận availableCourses/existingImageUrls (tránh Sửa không hiển thị)
+        const tid = setTimeout(() => {
+            form.reset(resetPayload);
+        }, 0);
+        return () => clearTimeout(tid);
     }, [editingDetail, isCloseServiceOpen, services, form]);
 
-    // tính giá list theo service/course
+    // Key ổn định để dependency array không đổi độ dài (tránh lỗi "changed size between renders")
+    const servicesKey = useMemo(
+        () => (services?.length ?? 0) + '_' + (services?.map((s) => String(s._id ?? s.id)).filter(Boolean).join(',') ?? ''),
+        [services]
+    );
+
+    // Khi chọn dịch vụ chốt → cập nhật dropdown liệu trình theo dịch vụ đó (và xóa liệu trình cũ nếu đổi dịch vụ)
+    useEffect(() => {
+        const serviceIdStr = selectedServiceId ? String(selectedServiceId) : '';
+        const service = serviceIdStr ? services.find(s => String(s._id) === serviceIdStr) : null;
+        const courses = service?.treatmentCourses ?? [];
+        setAvailableCourses(courses);
+
+        // Nếu đổi dịch vụ, xóa liệu trình đã chọn (vì liệu trình thuộc dịch vụ cũ)
+        if (serviceIdStr && selectedCourseName) {
+            const stillValid = courses.some(c => c.name === selectedCourseName);
+            if (!stillValid) form.setValue('selectedCourseName', '', { shouldValidate: true });
+        }
+    }, [selectedServiceId, servicesKey, form]);
+
+    // Tính giá gốc theo dịch vụ + liệu trình đang chọn (cả tạo mới và sửa đơn: đổi dịch vụ/liệu trình thì giá gốc đổi theo)
     useEffect(() => {
         let price = 0;
-        if (selectedServiceId) {
-            const service = services.find(s => s._id === selectedServiceId);
-            const courses = service?.treatmentCourses || [];
-            setAvailableCourses(courses);
+        const serviceIdStr = selectedServiceId ? String(selectedServiceId) : '';
+        const service = serviceIdStr ? services.find(s => String(s._id) === serviceIdStr) : null;
+        const courses = service?.treatmentCourses || [];
 
-            if (selectedCourseName) {
-                const course = courses.find(c => c.name === selectedCourseName);
-                if (course?.costs) {
-                    price = (course.costs.basePrice || 0) + (course.costs.fullMedication || 0) +
-                        (course.costs.partialMedication || 0) + (course.costs.otherFees || 0);
-                }
+        if (selectedCourseName && courses.length) {
+            const course = courses.find(c => c.name === selectedCourseName);
+            if (course?.costs) {
+                const costs = course.costs;
+                price = (costs.basePrice || 0) + (costs.fullMedication || 0) +
+                    (costs.partialMedication || 0) + (costs.otherFees || 0);
             }
-        } else {
-            setAvailableCourses([]);
         }
         setListPrice(price);
-    }, [selectedServiceId, selectedCourseName, services]);
+    }, [selectedServiceId, selectedCourseName, servicesKey]);
 
     // tính thành tiền
     useEffect(() => {
@@ -541,21 +744,31 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         setEditingDetail(null);
         setDeletedImageIds([]);
         setDeletedCustomerPhotoIds([]);
-        router.refresh();
+        // Render lại giao diện để đơn hiển thị đúng nhóm sau khi cập nhật/xóa
+        startTransition(() => {
+            router.refresh();
+        });
     };
 
-    const onSubmit = async (values) => {
+    const onSubmit = async (values, submitOptions = {}) => {
+        const deletedImageIdsToSend = submitOptions?.deletedImageIds ?? deletedImageIds;
+        const deletedCustomerPhotoIdsToSend = submitOptions?.deletedCustomerPhotoIds ?? deletedCustomerPhotoIds;
         console.log('🟡 [onSubmit] Starting submit with values:', values);
         console.log('🟡 [onSubmit] editingDetail:', editingDetail);
-        console.log('🟡 [onSubmit] deletedImageIds:', deletedImageIds);
-        console.log('🟡 [onSubmit] deletedCustomerPhotoIds:', deletedCustomerPhotoIds);
-        
+        console.log('🟡 [onSubmit] deletedImageIds (for submit):', deletedImageIdsToSend);
+        console.log('🟡 [onSubmit] deletedCustomerPhotoIds (for submit):', deletedCustomerPhotoIdsToSend);
+
         const formData = new FormData();
         formData.append('customerId', customer._id);
         formData.append('status', values.status);
         formData.append('notes', values.notes || '');
         if (values.selectedService) formData.append('selectedService', values.selectedService);
         if (values.selectedCourseName) formData.append('selectedCourseName', values.selectedCourseName);
+        if (values.medicationName) formData.append('medicationName', values.medicationName);
+        if (values.medicationDosage) formData.append('medicationDosage', values.medicationDosage);
+        if (values.medicationUnit) formData.append('medicationUnit', values.medicationUnit);
+        if (values.consultantName) formData.append('consultantName', values.consultantName);
+        if (values.doctorName) formData.append('doctorName', values.doctorName);
 
         // Gửi ảnh theo thứ tự từ unified state (đã sắp xếp)
         // Gửi ảnh mới (files) theo thứ tự trong unified state
@@ -578,9 +791,11 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         formData.append('adjustmentValue', String(values.adjustmentValue || '0').replace(/\D/g, ''));
         formData.append('listPrice', String(listPrice));
         formData.append('finalPrice', String(finalRevenue));
+        if (values.discountProgramId) formData.append('idCTKM', values.discountProgramId);
+        if (values.discountProgramName) formData.append('name_CTKM', values.discountProgramName);
 
         if (editingDetail) {
-            formData.append('serviceDetailId', editingDetail._id);
+            formData.append('serviceDetailId', getServiceDetailId(editingDetail) || editingDetail._id);
             
             // Gửi thứ tự ảnh đã lưu theo unified state (đã sắp xếp)
             unifiedInvoiceImages.forEach(img => {
@@ -596,12 +811,12 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                 }
             });
             
-            // Gửi danh sách ID ảnh cần xóa
-            if (deletedImageIds.length > 0) {
-                deletedImageIds.forEach(id => formData.append('deletedImageIds', id));
+            // Gửi danh sách ID ảnh cần xóa (dùng từ submitOptions để tránh state cũ khi vừa xóa vừa thêm ảnh)
+            if (Array.isArray(deletedImageIdsToSend) && deletedImageIdsToSend.length > 0) {
+                deletedImageIdsToSend.forEach(id => formData.append('deletedImageIds', id));
             }
-            if (deletedCustomerPhotoIds.length > 0) {
-                deletedCustomerPhotoIds.forEach(id => formData.append('deletedCustomerPhotoIds', id));
+            if (Array.isArray(deletedCustomerPhotoIdsToSend) && deletedCustomerPhotoIdsToSend.length > 0) {
+                deletedCustomerPhotoIdsToSend.forEach(id => formData.append('deletedCustomerPhotoIds', id));
             }
             
             console.log('🟡 [onSubmit] Calling updateServiceDetailAction...');
@@ -822,7 +1037,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                             </AccordionTrigger>
 
                             <AccordionContent className="p-2">
-                                <div className="border rounded-md p-2">
+                                <div className="border rounded-md p-2" >
                                     {stage.id === 6 ? (
                                         <ServiceDetailsSection
                                             customer={customer}
@@ -859,7 +1074,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             <Popup
                 open={isCloseServiceOpen}
                 onClose={() => setCloseServiceOpen(false)}
-                widthClass="max-w-3xl"
+                widthClass="max-w-5xl"
                 header={isReadOnlyView ? "Xem Chi Tiết Đơn Chốt Dịch Vụ" : (editingDetail ? "Chỉnh Sửa Đơn Chốt Dịch Vụ" : "Chốt Đơn Dịch Vụ Mới")}
                 footer={
                     isReadOnlyView ? (
@@ -874,7 +1089,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                 }
             >
                 <CloseServiceForm
-                    key={editingDetail?._id || 'new'}
+                    key={editingDetail ? (getServiceDetailId(editingDetail) || 'edit') : 'new'}
                     form={form}
                     status={status}
                     services={services}
@@ -882,6 +1097,10 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                     listPrice={listPrice}
                     finalRevenue={finalRevenue}
                     discountType={discountType}
+                    discountPrograms={discountPrograms}
+                    currentUserName={currentUserName}
+                    unitMedicines={unitMedicines}
+                    treatmentDoctors={treatmentDoctors}
                     fileReg={fileReg}
                     onImageChange={onImageChange}
                     existingImageUrls={existingImageUrls}

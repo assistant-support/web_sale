@@ -5,7 +5,7 @@
     z-index: 2000;
     display: flex;
     justify-content: center;
-    align-items: flex-end;
+    align-items: center;
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.3s ease-in-out, visibility 0s 0.3s;
@@ -15,11 +15,13 @@
     position: relative;
     background-color: var(--bg-primary);
     width: 100%;
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.15);
+    max-width: 600px;
+    border-radius: 16px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
     overflow: hidden;
-    transform: translateY(100%);
-    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transform: scale(0.9) translateY(20px);
+    opacity: 0;
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s ease-in-out;
 }
 
 .backdrop.open {
@@ -29,7 +31,8 @@
 }
 
 .popup.open {
-    transform: translateY(0);
+    transform: scale(1) translateY(0);
+    opacity: 1;
 }
 
 .indicator {

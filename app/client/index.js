@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 
 import CustomerTable from './ui/table';
 import FilterControls from "./ui/filter";
+import LeadTagConversations from "./ui/LeadTagConversations";
 import SettingLabel from "./ui/label";
 import SettingData from "./ui/data";
 import SettingZalo from './ui/zalo';
 import BulkActions from './ui/run';
 import RunningActions from './ui/action';
 import SettingVariant from './ui/variant';
+import SettingDiscount from './ui/discount';
 import SettingZaloRoles from './ui/zalos';
 import ActionHistory from './ui/hisotry';
 import ZaloSystemButton from './ui/zalo-system';
@@ -24,7 +26,7 @@ function TableSkeleton() {
     );
 }
 
-export default function CustomerView({ customer, c, running, initialResult, user, sources, messageSources = [], labelData, formData, zaloData, users, variant, workflow, service, areaCustomers = [], filterCustomer = {} }) {
+export default function CustomerView({ customer, c, running, initialResult, user, sources, messageSources = [], labelData, formData, zaloData, users, variant, discount = [], workflow, service, areaCustomers = [], filterCustomer = {}, unitMedicines = [], treatmentDoctors = [] }) {
     const router = useRouter();
     const intervalRef = useRef(null);
 
@@ -122,6 +124,7 @@ export default function CustomerView({ customer, c, running, initialResult, user
                                     <>
                                         <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
                                         <SettingVariant data={variant} />
+                                        <SettingDiscount data={discount} />
                                         <SettingLabel data={labelData} />
                                     </>
                                 )}
@@ -140,6 +143,7 @@ export default function CustomerView({ customer, c, running, initialResult, user
                         areaCustomers={areaCustomers}
                         filterCustomer={filterCustomer}
                     />
+                    <LeadTagConversations labels={labelData} />
                 </>
             )}
             <Suspense fallback={<TableSkeleton />}>
@@ -153,6 +157,9 @@ export default function CustomerView({ customer, c, running, initialResult, user
                     onToggleViewMode={toggleViewMode}
                     zalo={zaloData}
                     service={service}
+                    discountPrograms={discount}
+                    unitMedicines={unitMedicines}
+                    treatmentDoctors={treatmentDoctors}
                 />
             </Suspense>
         </div>

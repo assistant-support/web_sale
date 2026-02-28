@@ -57,7 +57,7 @@ function CustomerDetailHeader({ customer, zalo }) {
 // == COMPONENT CHÍNH
 // =============================================================
 export default function CustomerRow({
-    customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, zalo, service
+    customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, zalo, service, discountPrograms = [], unitMedicines = [], treatmentDoctors = []
 }) {
     const [isPopupOpen, setIsPopupOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('pipeline');
@@ -174,6 +174,11 @@ export default function CustomerRow({
                         closeServiceAction={closeServiceActionFn}
                         closeState={closeState}
                         currentUserId={user[0]?._id}
+                        currentUserName={user[0]?.name || ''}
+                        discountPrograms={discountPrograms}
+                        unitMedicines={unitMedicines}
+                        treatmentDoctors={treatmentDoctors}
+                        service={service}
                     />
                 );
             case 'history':
@@ -185,7 +190,14 @@ export default function CustomerRow({
                     />
                 );
             case 'info':
-                return <CustomerInfo customer={customer} service={service} onClose={() => setIsPopupOpen(false)} />;
+                return <CustomerInfo 
+                    customer={customer} 
+                    service={service} 
+                    discountPrograms={discountPrograms}
+                    unitMedicines={unitMedicines}
+                    treatmentDoctors={treatmentDoctors}
+                    onClose={() => setIsPopupOpen(false)} 
+                />;
             case 'appointments':
                 return <CustomerAppointments customer={customer} />;
             case 'calls':

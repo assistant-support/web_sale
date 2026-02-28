@@ -63,6 +63,9 @@ const ScheduledJobSchema = new Schema(
     },
 );
 
+// Index cho worker: mỗi lần chỉ lấy 1 task đến hạn (guitinnhanzalo3)
+ScheduledJobSchema.index({ 'tasks.status': 1, 'tasks.scheduledFor': 1 });
+
 const ScheduledJob =
     models.scheduledjob || model("scheduledjob", ScheduledJobSchema);
 

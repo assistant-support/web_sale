@@ -15,7 +15,9 @@ import { Loader2, ChevronsUpDown, Check, X, Upload, Image as ImageIcon, Plus, Tr
 // --- Action & Data Function Imports ---
 import { updateCustomerInfo, syncHistoryService } from '@/app/actions/customer.actions';
 import { area_customer_data } from '@/data/actions/get';
+import { getServiceDetailById } from '@/data/customers/wraperdata.db';
 import { cn } from "@/lib/utils";
+import { driveImage } from '@/function/index';
 
 // --- Shadcn UI Component Imports ---
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,9 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import Popup from '@/components/ui/popup';
+import CloseServiceForm from './CloseServiceForm';
 
 
 // =============================================================
@@ -264,7 +269,7 @@ const updateFormSchema = z.object({
     service_last_date: z.string().optional(),
 });
 
-export default function CustomerInfo({ customer, onClose, service = [] }) {
+export default function CustomerInfo({ customer, onClose, service = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [coverImage, setCoverImage] = useState(null);
     const [coverImageRemoved, setCoverImageRemoved] = useState(false);
@@ -285,6 +290,14 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
     const [editAreaName, setEditAreaName] = useState('');
     const [editAreaType, setEditAreaType] = useState('');
     const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
+    
+    // State cho popup xem chi tiết đơn chốt dịch vụ
+    const [isViewDetailOpen, setIsViewDetailOpen] = useState(false);
+    const [viewingDetail, setViewingDetail] = useState(null);
+    
+    // ✅ State để lưu full serviceDetails đã fetch từ service_details collection
+    const [fullServiceDetails, setFullServiceDetails] = useState([]);
+    const [isLoadingServiceDetails, setIsLoadingServiceDetails] = useState(false);
 
     // Danh sách loại khu vực
     const areaTypeOptions = [
@@ -293,7 +306,8 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
         { value: 'xa HCM', label: 'xa HCM' }
     ];
 
-    const [historyService, setHistoryService] = useState(customer.history_service || {});
+    // Lịch sử liệu trình/dịch vụ được lấy từ collection treatment_sessions (thiết kế mới)
+    const [treatmentSummary, setTreatmentSummary] = useState([]);
     const [isHistorySyncing, setIsHistorySyncing] = useState(false);
 
     const serviceOptions = useMemo(() =>
@@ -301,13 +315,77 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
         [service]
     );
 
-    // Lấy tên dịch vụ từ history_service (ưu tiên) hoặc serviceDetails
+    // ✅ Fetch full serviceDetails từ service_details collection dựa vào serviceDetailIds
+    useEffect(() => {
+        const fetchFullServiceDetails = async () => {
+            if (!customer.serviceDetails || !Array.isArray(customer.serviceDetails) || customer.serviceDetails.length === 0) {
+                setFullServiceDetails([]);
+                return;
+            }
+
+            // Lấy danh sách serviceDetailIds từ customer.serviceDetails
+            const serviceDetailIds = customer.serviceDetails
+                .map(sd => {
+                    // Lấy serviceDetailId từ reference (có thể là ObjectId object hoặc string)
+                    if (sd.serviceDetailId) {
+                        // Nếu là object có _id hoặc toString, lấy _id hoặc toString
+                        if (typeof sd.serviceDetailId === 'object') {
+                            return String(sd.serviceDetailId._id || sd.serviceDetailId.toString());
+                        }
+                        return String(sd.serviceDetailId);
+                    }
+                    // Fallback: nếu có _id trực tiếp
+                    if (sd._id) {
+                        if (typeof sd._id === 'object') {
+                            return String(sd._id._id || sd._id.toString());
+                        }
+                        return String(sd._id);
+                    }
+                    return null;
+                })
+                .filter(id => id); // Lọc bỏ null/undefined
+
+            if (serviceDetailIds.length === 0) {
+                setFullServiceDetails([]);
+                return;
+            }
+
+            setIsLoadingServiceDetails(true);
+            try {
+                console.log('[CustomerInfo] Fetching service details với IDs:', serviceDetailIds);
+                const response = await fetch('/api/service-details/batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ serviceDetailIds }),
+                });
+
+                const result = await response.json();
+                console.log('[CustomerInfo] Fetch result:', result);
+                if (result.success && result.data) {
+                    console.log('[CustomerInfo] Fetched service details:', result.data.length, 'items');
+                    setFullServiceDetails(result.data);
+                } else {
+                    console.error('[CustomerInfo] Error fetching service details:', result.error);
+                    setFullServiceDetails([]);
+                }
+            } catch (error) {
+                console.error('[CustomerInfo] Error fetching service details:', error);
+                setFullServiceDetails([]);
+            } finally {
+                setIsLoadingServiceDetails(false);
+            }
+        };
+
+        fetchFullServiceDetails();
+    }, [customer.serviceDetails]);
+
+    // Lấy tên dịch vụ đã sử dụng từ treatmentSummary (thiết kế mới) hoặc fallback serviceDetails
     const serviceNamesFromServiceDetails = useMemo(() => {
-        if (Array.isArray(historyService) && historyService.length > 0) {
-            const names = historyService
-                .map((item) => item?.serviceName)
-                .filter(Boolean);
-            return names.join(', ');
+        if (Array.isArray(treatmentSummary) && treatmentSummary.length > 0) {
+            const names = treatmentSummary.map((s) => s?.serviceName).filter(Boolean);
+            return [...new Set(names)].join(', ');
         }
 
         if (!customer.serviceDetails || !Array.isArray(customer.serviceDetails) || customer.serviceDetails.length === 0) {
@@ -353,177 +431,435 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
 
         const uniqueNames = [...new Set(serviceNames)];
         return uniqueNames.join(', ');
-    }, [historyService, customer.serviceDetails, serviceOptions]);
+    }, [treatmentSummary, customer.serviceDetails, serviceOptions]);
 
-    // Đồng bộ history_service khi cần
+    // Đồng bộ dữ liệu lịch sử liệu trình từ treatment_sessions
     useEffect(() => {
         let isMounted = true;
-        // Kiểm tra xem có cần sync không
-        const hasServiceDetails = 
-            customer.serviceDetails &&
-            Array.isArray(customer.serviceDetails) &&
-            customer.serviceDetails.length > 0;
-        
-        const hasHistoryService = 
-            customer.history_service &&
-            typeof customer.history_service === 'object' &&
-            !Array.isArray(customer.history_service) &&
-            Object.keys(customer.history_service).length > 0;
-
-        // Nếu có serviceDetails thì luôn sync (để đảm bảo history_service luôn được cập nhật)
-        if (hasServiceDetails) {
-            const syncHistory = async () => {
-                try {
-                    console.log('🔄 [CustomerInfo] Bắt đầu sync history_service cho customer:', customer._id);
-                    setIsHistorySyncing(true);
-                    const result = await syncHistoryService(customer._id);
-                    console.log('📦 [CustomerInfo] Kết quả sync:', result);
-                    if (isMounted) {
-                        if (result?.success && result?.history_service) {
-                            setHistoryService(result.history_service);
-                            console.log('✅ [CustomerInfo] Đã sync và cập nhật history_service:', result.history_service);
-                        } else if (result?.error) {
-                            console.error('❌ [CustomerInfo] Lỗi từ syncHistoryService:', result.error);
-                        }
-                    }
-                } catch (error) {
-                    console.error('❌ [CustomerInfo] Lỗi sync history_service:', error);
-                } finally {
-                    if (isMounted) {
-                        setIsHistorySyncing(false);
-                    }
+        const fetchTreatmentSummary = async () => {
+            try {
+                if (!customer?._id) return;
+                setIsHistorySyncing(true);
+                const res = await fetch(`/api/treatment-sessions/summary/${customer._id}`);
+                const data = await res.json();
+                if (!isMounted) return;
+                if (data?.success && Array.isArray(data.data)) {
+                    setTreatmentSummary(data.data);
+                } else {
+                    console.error('[CustomerInfo] Lỗi khi tải treatment summary:', data?.error);
+                    setTreatmentSummary([]);
                 }
-            };
+            } catch (error) {
+                console.error('[CustomerInfo] Lỗi fetch treatment summary:', error);
+                if (isMounted) {
+                    setTreatmentSummary([]);
+                }
+            } finally {
+                if (isMounted) {
+                    setIsHistorySyncing(false);
+                }
+            }
+        };
 
-            syncHistory();
-        } else {
-            // Nếu không có serviceDetails, chỉ set state từ customer.history_service
-            setHistoryService(customer.history_service || {});
-        }
+        fetchTreatmentSummary();
 
         return () => {
             isMounted = false;
         };
-    }, [customer._id, customer.history_service, customer.serviceDetails]);
+    }, [customer._id]);
 
-    // Nhóm dữ liệu lịch sử để hiển thị (sử dụng history_service đã lưu trong database)
+    // ✅ Nhóm dữ liệu lịch sử để hiển thị
+    // Ưu tiên dùng treatmentSummary (treatment_sessions) cho đúng kiến trúc tối ưu,
+    // fallback sang fullServiceDetails (service_details) nếu chưa có dữ liệu session.
     const groupedServiceDetailsByService = useMemo(() => {
-        // Sử dụng history_service làm nguồn dữ liệu chính (đã được lưu sẵn)
-        const historyServiceData = historyService || customer.history_service || {};
-        
-        // Nếu không có history_service, fallback về serviceDetails
-        if (!historyServiceData || Object.keys(historyServiceData).length === 0) {
-            if (!customer.serviceDetails || !Array.isArray(customer.serviceDetails) || customer.serviceDetails.length === 0) {
-                return [];
-            }
-            // Fallback: tính toán từ serviceDetails (logic cũ)
-            const groupedByService = {};
-            customer.serviceDetails.forEach((detail) => {
-                const courseName = detail.selectedCourse?.name || 'Không có tên';
-                const serviceName =
-                    detail.selectedCourse?.selectedService?.name ||
-                    detail.selectedService?.name ||
-                    (() => {
-                        let serviceId = null;
-                        if (detail.selectedService) {
-                            if (typeof detail.selectedService === 'string') {
-                                serviceId = detail.selectedService;
-                            } else if (detail.selectedService._id) {
-                                serviceId = detail.selectedService._id;
-                            }
-                        }
-                        if (serviceId) {
-                            const option = serviceOptions.find(
-                                (opt) =>
-                                    opt.value === serviceId ||
-                                    String(opt.value) === String(serviceId)
-                            );
-                            return option?.label;
-                        }
-                        return '';
-                    })();
-
-                if (!groupedByService[serviceName]) {
-                    groupedByService[serviceName] = {
-                        serviceName: serviceName || '',
-                        courses: {}
-                    };
-                }
-
-                if (!groupedByService[serviceName].courses[courseName]) {
-                    groupedByService[serviceName].courses[courseName] = [];
-                }
-                groupedByService[serviceName].courses[courseName].push(detail);
-            });
-
-            return Object.entries(groupedByService).map(([serviceName, serviceInfo]) => {
-                const courses = Object.entries(serviceInfo.courses).map(([courseName, items]) => ({
-                    courseName,
-                    startDate: items[0]?.closedAt || null,
-                    lastDate: items[items.length - 1]?.closedAt || null,
-                }));
-
-                return {
-                    serviceName: serviceInfo.serviceName,
-                    courses,
-                };
-            });
+        // 1) Ưu tiên: dùng treatmentSummary (treatment_sessions)
+        if (Array.isArray(treatmentSummary) && treatmentSummary.length > 0) {
+            return treatmentSummary.map((s) => ({
+                serviceId: s.serviceId,
+                serviceName: s.serviceName,
+                courses: (s.courses || []).map((course) => ({
+                    courseName: course.courseName || 'Chưa có liệu trình',
+                    startDate: course.firstTime || null,
+                    lastDate: course.lastTime || null,
+                })),
+            }));
         }
 
-        // Sử dụng history_service: { "Tên dịch vụ": ["Liệu trình 1", "Liệu trình 2", ...] }
-        // Tìm trong serviceDetails để lấy ngày bắt đầu và ngày cuối cho mỗi liệu trình
-        const serviceDetails = customer.serviceDetails || [];
+        // 2) Fallback: sử dụng fullServiceDetails đã fetch từ service_details collection
+        // Sử dụng fullServiceDetails (đã fetch đầy đủ từ service_details collection)
+        const serviceDetailsToUse = fullServiceDetails.length > 0 ? fullServiceDetails : [];
         
-        return Object.entries(historyServiceData).map(([serviceName, courseNames]) => {
-            // courseNames là mảng các tên liệu trình: ["Liệu trình 1", "Liệu trình 2"]
-            const courses = courseNames.map((courseName) => {
-                // Tìm tất cả serviceDetails có cùng dịch vụ và liệu trình này
-                const matchingDetails = serviceDetails.filter((detail) => {
-                    const detailCourseName = detail.selectedCourse?.name || 'Không có tên';
-                    const detailServiceName =
-                        detail.selectedCourse?.selectedService?.name ||
-                        detail.selectedService?.name ||
-                        (() => {
-                            let serviceId = null;
-                            if (detail.selectedService) {
-                                if (typeof detail.selectedService === 'string') {
-                                    serviceId = detail.selectedService;
-                                } else if (detail.selectedService._id) {
-                                    serviceId = detail.selectedService._id;
-                                }
-                            }
-                            if (serviceId) {
-                                const option = serviceOptions.find(
-                                    (opt) =>
-                                        opt.value === serviceId ||
-                                        String(opt.value) === String(serviceId)
-                                );
-                                return option?.label;
-                            }
-                            return '';
-                        })();
-                    
-                    return detailCourseName === courseName && detailServiceName === serviceName;
-                });
+        console.log('[CustomerInfo] groupedServiceDetailsByService - fullServiceDetails:', serviceDetailsToUse.length);
+        
+        // Nếu không có serviceDetails, trả về mảng rỗng
+        if (serviceDetailsToUse.length === 0) {
+            console.log('[CustomerInfo] Không có serviceDetails để hiển thị');
+            return [];
+        }
 
+        // Tạo map để tìm tên dịch vụ từ serviceId
+        const serviceMap = new Map();
+        service.forEach(s => {
+            if (s._id) {
+                serviceMap.set(String(s._id), s.name);
+            }
+        });
+
+        // Group serviceDetails theo serviceId
+        const groupedByServiceId = new Map();
+
+        serviceDetailsToUse.forEach(detail => {
+            // Lấy serviceId từ detail
+            let serviceIdStr = null;
+            if (detail.serviceId) {
+                serviceIdStr = String(detail.serviceId._id || detail.serviceId);
+            }
+
+            if (!serviceIdStr) {
+                return; // Bỏ qua nếu không có serviceId
+            }
+
+            // Lấy tên dịch vụ
+            const serviceName = serviceMap.get(serviceIdStr) 
+                || (detail.serviceId?.name) 
+                || serviceOptions.find(opt => String(opt.value) === serviceIdStr)?.label 
+                || 'Không rõ dịch vụ';
+
+            // Lấy courseName từ selectedCourse
+            const courseName = detail.selectedCourse?.name || 'Chưa có liệu trình';
+
+            // Khởi tạo group nếu chưa có
+            if (!groupedByServiceId.has(serviceIdStr)) {
+                groupedByServiceId.set(serviceIdStr, {
+                    serviceId: serviceIdStr,
+                    serviceName,
+                    courses: new Map(), // Dùng Map để group theo courseName
+                });
+            }
+
+            const serviceGroup = groupedByServiceId.get(serviceIdStr);
+            
+            // Group courses theo courseName
+            if (!serviceGroup.courses.has(courseName)) {
+                serviceGroup.courses.set(courseName, []);
+            }
+            serviceGroup.courses.get(courseName).push(detail);
+        });
+
+        // Chuyển Map thành mảng và tính startDate, lastDate cho mỗi course
+        return Array.from(groupedByServiceId.values()).map(serviceGroup => {
+            const courses = Array.from(serviceGroup.courses.entries()).map(([courseName, items]) => {
                 // Sắp xếp theo closedAt để lấy ngày đầu và ngày cuối
-                const sortedDetails = matchingDetails
+                const sortedItems = items
                     .filter(d => d.closedAt)
                     .sort((a, b) => new Date(a.closedAt) - new Date(b.closedAt));
 
                 return {
-                    courseName,
-                    startDate: sortedDetails[0]?.closedAt || null,
-                    lastDate: sortedDetails[sortedDetails.length - 1]?.closedAt || null,
+                    courseName: courseName || 'Chưa có liệu trình',
+                    startDate: sortedItems[0]?.closedAt || items[0]?.createdAt || items[0]?.closedAt || null,
+                    lastDate: sortedItems[sortedItems.length - 1]?.closedAt || items[items.length - 1]?.createdAt || items[items.length - 1]?.closedAt || null,
                 };
             });
 
             return {
-                serviceName,
+                serviceId: serviceGroup.serviceId,
+                serviceName: serviceGroup.serviceName,
                 courses,
             };
         });
-    }, [historyService, customer.history_service, customer.serviceDetails, customer.service_last_date, serviceOptions]);
+    }, [treatmentSummary, fullServiceDetails, service, serviceOptions]);
+
+    // Normalize và nhóm lịch sử liệu trình theo dịch vụ để hiển thị (dùng treatmentSummary nếu có)
+    const customerTreatments = useMemo(() => {
+        // Lấy danh sách dịch vụ từ service prop
+        const allServices = Array.isArray(service) ? service : [];
+
+        // Nếu đã có treatmentSummary từ API mới:
+        // - Ưu tiên: chỉ hiển thị các dịch vụ trong tags (dịch vụ quan tâm)
+        // - Với mỗi dịch vụ quan tâm: dùng dữ liệu session nếu có, và bổ sung các liệu trình chưa làm
+        if (Array.isArray(treatmentSummary) && treatmentSummary.length > 0) {
+            const summaryByServiceId = new Map();
+            treatmentSummary.forEach((s) => {
+                if (s?.serviceId) {
+                    summaryByServiceId.set(String(s.serviceId), s);
+                }
+            });
+
+            // Dịch vụ quan tâm (tags) của khách hàng
+            const tagIds = Array.isArray(customer.tags)
+                ? customer.tags
+                      .map((tag) => {
+                          if (typeof tag === 'string') return tag;
+                          if (tag?._id) return String(tag._id);
+                          return String(tag);
+                      })
+                      .filter(Boolean)
+                : [];
+
+            const serviceMapById = new Map();
+            allServices.forEach((s) => {
+                if (s?._id) serviceMapById.set(String(s._id), s);
+            });
+
+            const result = [];
+
+            // Ưu tiên dịch vụ trong tags
+            tagIds.forEach((id) => {
+                const svc = serviceMapById.get(String(id));
+                if (!svc) return;
+
+                const summary = summaryByServiceId.get(String(id));
+                const done = [];
+                const doneCourseIds = new Set();
+
+                if (summary && Array.isArray(summary.courses)) {
+                    summary.courses.forEach((course) => {
+                        if (course.status === 'done') {
+                            done.push({
+                                courseName: course.courseName,
+                                doneAt: course.lastTime,
+                                firstTime: course.firstTime,
+                                total: course.total,
+                                // Ưu tiên serviceDetailId từ treatment_sessions để dùng cho "Xem chi tiết"
+                                sourceId: course.serviceDetailId || course.courseId,
+                            });
+                            if (course.courseId) {
+                                doneCourseIds.add(String(course.courseId));
+                            }
+                        }
+                    });
+                }
+
+                const allCourses = Array.isArray(svc.treatmentCourses) ? svc.treatmentCourses : [];
+                const notDone = allCourses
+                    .filter((c) => !doneCourseIds.has(String(c._id || '')))
+                    .map((c) => ({
+                        courseId: String(c._id || ''),
+                        courseName: c.name || 'Liệu trình',
+                        totalSessions: c.totalSessions || 1,
+                        lastUsedDateForCourse: null,
+                    }));
+
+                result.push({
+                    serviceName: svc.name || 'Không rõ dịch vụ',
+                    serviceId: String(svc._id || ''),
+                    done,
+                    remaining: notDone.reduce((sum, c) => sum + (c.totalSessions || 1), 0),
+                    notDone,
+                    lastUsedDate: done.length > 0 ? done[0].doneAt : null,
+                });
+            });
+
+            // Nếu không có dịch vụ trong tags nhưng vẫn có session → hiển thị như trước (backup)
+            if (result.length === 0) {
+                return treatmentSummary.map((s) => {
+                    const done = [];
+                    const notDone = [];
+
+                    (s.courses || []).forEach((course) => {
+                        if (course.status === 'done') {
+                            done.push({
+                                courseName: course.courseName,
+                                doneAt: course.lastTime,
+                                firstTime: course.firstTime,
+                                total: course.total,
+                                sourceId: course.courseId,
+                            });
+                        } else {
+                            notDone.push({
+                                courseId: course.courseId,
+                                courseName: course.courseName,
+                                totalSessions: course.total || course.totalSessions || 1,
+                                lastUsedDateForCourse: course.lastTime || null,
+                            });
+                        }
+                    });
+
+                    return {
+                        serviceName: s.serviceName,
+                        serviceId: s.serviceId,
+                        done,
+                        remaining: notDone.reduce((sum, c) => sum + (c.totalSessions || 1), 0),
+                        notDone,
+                        lastUsedDate: done.length > 0 ? done[0].doneAt : null,
+                    };
+                });
+            }
+
+            return result;
+        }
+
+        // Fallback: logic cũ dựa trên customer.serviceDetails nếu chưa có treatmentSummary
+        // Nhưng CHỈ cho các dịch vụ khách hàng quan tâm (tags)
+        const customerTags = Array.isArray(customer.tags) ? customer.tags : [];
+        const tagIdsForFallback = customerTags
+            .map((tag) => {
+                if (typeof tag === 'string') return tag;
+                if (tag?._id) return String(tag._id);
+                return String(tag);
+            })
+            .filter(Boolean);
+
+        const servicesList = allServices.filter(
+            (s) => s?._id && tagIdsForFallback.includes(String(s._id))
+        );
+        
+        // Tạo map để dễ tìm service theo tên hoặc ID
+        const serviceMapByName = {};
+        const serviceMapById = {};
+        servicesList.forEach(s => {
+            if (s.name) serviceMapByName[s.name] = s;
+            if (s._id) serviceMapById[String(s._id)] = s;
+        });
+
+        // Nhóm serviceDetails theo dịch vụ
+        const treatmentMap = {};
+        
+        // Xử lý serviceDetails đã có
+        if (customer.serviceDetails && Array.isArray(customer.serviceDetails) && customer.serviceDetails.length > 0) {
+            customer.serviceDetails.forEach((sd) => {
+                let serviceName = 'Không rõ dịch vụ';
+                let serviceId = null;
+                // Ưu tiên serviceId (snapshot) để khớp với history_service và list API
+                if (sd.serviceId) {
+                    const sid = typeof sd.serviceId === 'object' ? String(sd.serviceId._id ?? sd.serviceId) : String(sd.serviceId);
+                    const found = serviceMapById[sid];
+                    if (found?.name) {
+                        serviceName = found.name;
+                        serviceId = sid;
+                    }
+                }
+                if (serviceName === 'Không rõ dịch vụ' && typeof sd.selectedService === 'string') {
+                    serviceId = sd.selectedService;
+                    const foundService = serviceMapById[serviceId];
+                    serviceName = foundService?.name || serviceId;
+                } else if (serviceName === 'Không rõ dịch vụ' && sd.selectedService?._id) {
+                    serviceId = String(sd.selectedService._id);
+                    serviceName = sd.selectedService.name || 'Không rõ dịch vụ';
+                } else if (serviceName === 'Không rõ dịch vụ' && sd.selectedService?.name) {
+                    serviceName = sd.selectedService.name;
+                    const foundService = serviceMapByName[serviceName];
+                    serviceId = foundService?._id ? String(foundService._id) : null;
+                }
+
+                const courseName = sd.selectedCourse?.name || '';
+                let courseId = null;
+                if (sd.selectedCourse?._id) {
+                    courseId = String(sd.selectedCourse._id);
+                }
+
+                if (!treatmentMap[serviceName]) {
+                    treatmentMap[serviceName] = {
+                        serviceName,
+                        serviceId,
+                        done: [],
+                        doneCourseIds: new Set(),
+                        doneCourseNames: new Set(), // Track theo tên liệu trình (để khớp history_service / snapshot không có _id)
+                        lastUsedDate: null,
+                        lastUsedByCourseName: {}   // { courseName: date } — ngày sử dụng lần cuối theo từng liệu trình
+                    };
+                }
+
+                const doneAt = sd.closedAt || sd.createdAt;
+                treatmentMap[serviceName].done.push({
+                    courseName,
+                    courseId,
+                    doneAt,
+                    sourceId: sd.serviceDetailId || sd._id
+                });
+
+                if (courseId) {
+                    treatmentMap[serviceName].doneCourseIds.add(courseId);
+                }
+                if (courseName) {
+                    treatmentMap[serviceName].doneCourseNames.add(courseName);
+                    // Ngày sử dụng lần cuối cho từng liệu trình (lấy ngày mới nhất nếu có nhiều đơn)
+                    const prev = treatmentMap[serviceName].lastUsedByCourseName[courseName];
+                    if (!prev || (doneAt && new Date(doneAt) > new Date(prev))) {
+                        treatmentMap[serviceName].lastUsedByCourseName[courseName] = doneAt;
+                    }
+                }
+
+                if (doneAt) {
+                    const doneDate = new Date(doneAt);
+                    const currentLastDate = treatmentMap[serviceName].lastUsedDate
+                        ? new Date(treatmentMap[serviceName].lastUsedDate)
+                        : null;
+                    if (!currentLastDate || doneDate > currentLastDate) {
+                        treatmentMap[serviceName].lastUsedDate = doneAt;
+                    }
+                }
+            });
+        }
+
+        // Xử lý tất cả dịch vụ từ services để tìm liệu trình chưa làm
+        const result = [];
+        
+        servicesList.forEach(service => {
+            const serviceName = service.name || 'Không rõ dịch vụ';
+            const serviceId = String(service._id || '');
+            
+            const treatment = treatmentMap[serviceName] || {
+                serviceName,
+                serviceId,
+                done: [],
+                doneCourseIds: new Set(),
+                doneCourseNames: new Set(),
+                lastUsedDate: null,
+                lastUsedByCourseName: {}
+            };
+
+            treatment.done.sort((a, b) => new Date(b.doneAt) - new Date(a.doneAt));
+
+            const allCourses = service.treatmentCourses || [];
+            // Liệu trình chưa làm: chưa có trong doneCourseIds VÀ chưa có trong doneCourseNames (tránh hiển thị sai khi snapshot không có _id)
+            const notDoneCourses = allCourses.filter(course => {
+                const courseId = String(course._id || '');
+                const courseName = course.name || 'Liệu trình';
+                return !treatment.doneCourseIds.has(courseId) && !treatment.doneCourseNames.has(courseName);
+            });
+
+            let remaining = 0;
+            notDoneCourses.forEach(course => {
+                remaining += (course.totalSessions || 1);
+            });
+
+            result.push({
+                serviceName,
+                serviceId,
+                done: treatment.done,
+                remaining,
+                notDone: notDoneCourses.map(course => {
+                    const courseName = course.name || 'Liệu trình';
+                    const lastUsedDateForCourse = treatment.lastUsedByCourseName?.[courseName] || null;
+                    return {
+                        courseId: String(course._id || ''),
+                        courseName,
+                        totalSessions: course.totalSessions || 1,
+                        lastUsedDateForCourse
+                    };
+                }),
+                lastUsedDate: treatment.lastUsedDate
+            });
+        });
+
+        // Nếu không có service nào trong services list, vẫn hiển thị những gì đã làm
+        if (result.length === 0 && Object.keys(treatmentMap).length > 0) {
+            Object.values(treatmentMap).forEach(treatment => {
+                treatment.done.sort((a, b) => new Date(b.doneAt) - new Date(a.doneAt));
+                result.push({
+                    serviceName: treatment.serviceName,
+                    serviceId: treatment.serviceId,
+                    done: treatment.done,
+                    remaining: 0,
+                    notDone: [],
+                    lastUsedDate: treatment.lastUsedDate
+                });
+            });
+        }
+
+        return result;
+    }, [customer.serviceDetails, customer.tags, customer.service_use, service, treatmentSummary]);
 
     // Load danh sách khu vực khách hàng
     const loadAreaCustomersData = async () => {
@@ -1243,12 +1579,150 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                     )}
                 />
 
+                {/* Liệu trình của khách hàng */}
+                <div className="mt-6">
+                    <h6 className="font-semibold mb-3">Liệu trình của khách hàng</h6>
+                    {customerTreatments.length === 0 ? (
+                        <div className="text-center text-muted-foreground py-4 border rounded-md">
+                            Chưa có liệu trình nào
+                        </div>
+                    ) : (
+                        <Accordion type="single" collapsible className="w-full">
+                            {customerTreatments.map((treatment, index) => {
+                                const formatDate = (date) => {
+                                    if (!date) return '';
+                                    const d = new Date(date);
+                                    if (isNaN(d.getTime())) return '';
+                                    return d.toLocaleDateString('vi-VN', { 
+                                        day: '2-digit', 
+                                        month: '2-digit', 
+                                        year: 'numeric' 
+                                    });
+                                };
+
+                                return (
+                                    <AccordionItem key={index} value={`treatment-${index}`}>
+                                        <AccordionTrigger className="hover:no-underline">
+                                            <div className="flex items-center justify-between w-full pr-4">
+                                                <span className="font-semibold">{treatment.serviceName}</span>
+                                            </div>
+                                        </AccordionTrigger>
+                                        <AccordionContent>
+                                            <div className="space-y-4 pt-2">
+                                                {/* Liệu trình đã làm */}
+                                                {treatment.done.length > 0 && (
+                                                    <div>
+                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình đã làm:</h6>
+                                                        <div className="space-y-2">
+                                                            {treatment.done.map((item, idx) => (
+                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-muted/30">
+                                                                    <span className="text-sm">
+                                                                        {item.courseName || 'Liệu trình'} - ngày làm {formatDate(item.doneAt)}
+                                                                    </span>
+                                                                    <Button 
+                                                                        type="button"
+                                                                        size="sm" 
+                                                                        variant="outline"
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            // Tìm serviceDetail từ customer.serviceDetails
+                                                                            const detail = customer.serviceDetails?.find(sd => {
+                                                                                const id = sd.serviceDetailId ?? sd._id;
+                                                                                const idStr = id != null ? (typeof id === 'object' ? String(id._id ?? id) : String(id)) : '';
+                                                                                return idStr === String(item.sourceId);
+                                                                            });
+                                                                            if (detail) {
+                                                                                setViewingDetail(detail);
+                                                                                setIsViewDetailOpen(true);
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        Xem chi tiết
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Liệu trình còn lại (số buổi) */}
+                                                {/* {treatment.remaining > 0 && (
+                                                    <div>
+                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình còn lại của dịch vụ:</h6>
+                                                        <div className="space-y-2">
+                                                            {Array.from({ length: treatment.remaining }).map((_, idx) => (
+                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-amber-50">
+                                                                    <span className="text-sm">
+                                                                        Buổi {idx + 1} - Thời gian sử dụng liệu trình trước đó: {treatment.lastUsedDate ? formatDate(treatment.lastUsedDate) : '—'}
+                                                                    </span>
+                                                                    <Button 
+                                                                        size="sm" 
+                                                                        variant="outline"
+                                                                        className="text-amber-700 border-amber-300 hover:bg-amber-100"
+                                                                        onClick={() => {
+                                                                            // TODO: Nhắc nhân viên
+                                                                            console.log('Nhắc nhân viên cho:', treatment.serviceName);
+                                                                        }}
+                                                                    >
+                                                                        Nhắc nhân viên
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )} */}
+
+                                                {/* Liệu trình chưa làm - chỉ hiển thị tên liệu trình */}
+                                                    {treatment.notDone && treatment.notDone.length > 0 && (
+                                                    <div>
+                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình chưa làm:</h6>
+                                                        <div className="space-y-2">
+                                                            {treatment.notDone.map((course, idx) => (
+                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-red-50">
+                                                                    <span className="text-sm">
+                                                                        {`${course.courseName} - Chưa thực hiện`}
+                                                                    </span>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        className="text-red-700 border-red-300 hover:bg-red-100"
+                                                                        onClick={() => {
+                                                                            console.log('Nhắc nhân viên cho liệu trình chưa làm:', course.courseName);
+                                                                        }}
+                                                                    >
+                                                                        Nhắc nhân viên
+                                                                    </Button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {treatment.done.length === 0 && treatment.remaining === 0 && (!treatment.notDone || treatment.notDone.length === 0) && (
+                                                    <div className="text-center text-muted-foreground py-2">
+                                                        Chưa có liệu trình
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </AccordionContent>
+                                    </AccordionItem>
+                                );
+                            })}
+                        </Accordion>
+                    )}
+                </div>
+
                 {/* Lịch sử - Sử dụng dịch vụ */}
                 <div className="mt-6">
                     <h6 className="font-semibold mb-3">Lịch sử - Sử dụng dịch vụ</h6>
                     <div className="border-2 border-black rounded-lg p-4 space-y-6">
-                        {/* Hiển thị từng dịch vụ, mỗi dịch vụ có nhiều liệu trình */}
-                        {groupedServiceDetailsByService.length > 0 ? (
+                        {/* Hiển thị loading state */}
+                        {isLoadingServiceDetails ? (
+                            <div className="text-center text-muted-foreground py-4">
+                                Đang tải dữ liệu...
+                            </div>
+                        ) : groupedServiceDetailsByService.length > 0 ? (
                             groupedServiceDetailsByService.map((serviceGroup, serviceIndex) => {
                                 // Format date để hiển thị trong input
                                 const formatDate = (date) => {
@@ -1389,6 +1863,241 @@ export default function CustomerInfo({ customer, onClose, service = [] }) {
                     </div>
                 }
             />
+            
+            {/* Popup xem chi tiết đơn chốt dịch vụ */}
+            {isViewDetailOpen && viewingDetail && (
+                <ViewServiceDetailPopup
+                    detail={viewingDetail}
+                    services={service}
+                    discountPrograms={discountPrograms}
+                    unitMedicines={unitMedicines}
+                    treatmentDoctors={treatmentDoctors}
+                    onClose={() => {
+                        setIsViewDetailOpen(false);
+                        setViewingDetail(null);
+                    }}
+                />
+            )}
         </Form>
+    );
+}
+
+// Schema cho CloseServiceForm (giống CustomerPipeline)
+const closeServiceSchema = z.object({
+    _id: z.string().optional(),
+    status: z.enum(['new', 'in_progress', 'completed', 'rejected']),
+    selectedService: z.string().optional(),
+    selectedCourseName: z.string().optional(),
+    notes: z.string().optional(),
+    invoiceImage: z.any().optional(),
+    customerPhotos: z.any().optional(),
+    discountType: z.enum(['none', 'amount', 'percent']).default('none'),
+    discountValue: z.string().optional(),
+    adjustmentType: z.enum(['none', 'discount', 'increase']).default('none'),
+    adjustmentValue: z.string().optional(),
+    medicationName: z.string().optional(),
+    medicationUnit: z.string().optional(),
+    medicationDosage: z.string().optional(),
+    consultantName: z.string().optional(),
+    doctorName: z.string().optional(),
+});
+
+// Component để hiển thị chi tiết đơn chốt dịch vụ (read-only)
+function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedicines, treatmentDoctors, onClose }) {
+    const [availableCourses, setAvailableCourses] = useState([]);
+    const [existingImageUrls, setExistingImageUrls] = useState([]);
+    const [existingImageIds, setExistingImageIds] = useState([]);
+    const [existingCustomerPhotoUrls, setExistingCustomerPhotoUrls] = useState([]);
+    const [existingCustomerPhotoIds, setExistingCustomerPhotoIds] = useState([]);
+    const [unifiedInvoiceImages, setUnifiedInvoiceImages] = useState([]);
+    const [unifiedCustomerPhotos, setUnifiedCustomerPhotos] = useState([]);
+    
+    const detailForm = useForm({
+        resolver: zodResolver(closeServiceSchema),
+        defaultValues: {
+            status: 'completed',
+            selectedService: '',
+            selectedCourseName: '',
+            notes: '',
+            discountType: 'none',
+            discountValue: '0',
+            adjustmentType: 'none',
+            adjustmentValue: '0',
+            medicationName: '',
+            medicationUnit: '',
+            medicationDosage: '',
+            consultantName: '',
+            doctorName: '',
+        },
+    });
+
+    useEffect(() => {
+        if (!detail) return;
+
+        const loadDetailData = (detailData) => {
+            if (!detailData) return;
+            let serviceId = '';
+            if (detailData.serviceId) {
+                const raw = detailData.serviceId;
+                serviceId = typeof raw === 'object' && raw !== null ? String(raw._id ?? raw) : String(raw);
+            } else {
+                const raw = detailData.selectedService;
+                serviceId = raw ? (typeof raw === 'object' ? String(raw._id ?? raw) : String(raw)) : '';
+            }
+
+            const service = services?.find(s => String(s._id) === serviceId) ?? null;
+            const courses = service?.treatmentCourses ?? [];
+            setAvailableCourses(courses);
+
+            const courseName = detailData.selectedCourse?.name ?? '';
+
+            const ids = detailData.invoiceDriveIds || [];
+            const urls = ids.map(id => driveImage(id)).filter(Boolean);
+            setExistingImageUrls(urls);
+            setExistingImageIds(ids);
+            setUnifiedInvoiceImages(urls.map((url, idx) => ({
+                type: 'existing',
+                url,
+                id: ids[idx],
+                index: idx
+            })));
+
+            const customerPhotoIds = detailData.customerPhotosDriveIds || [];
+            const customerPhotoUrls = customerPhotoIds.map(id => driveImage(id));
+            const validCustomerPhotoUrls = customerPhotoUrls.filter(Boolean);
+            setExistingCustomerPhotoUrls(validCustomerPhotoUrls);
+            setExistingCustomerPhotoIds(customerPhotoIds);
+            setUnifiedCustomerPhotos(validCustomerPhotoUrls.map((url, idx) => ({
+                type: 'existing',
+                url,
+                id: customerPhotoIds[idx],
+                index: idx
+            })));
+
+            const pricing = detailData.pricing || {};
+            const adjustmentType = pricing.adjustmentType || 'none';
+            const adjustmentValue = pricing.adjustmentValue ?? 0;
+            const discountValue = pricing.discountValue ?? 0;
+
+            const formatDiscountValue = (value, unit) => {
+                if (unit === 'percent') return String(value);
+                if (unit === 'amount') return new Intl.NumberFormat('vi-VN').format(value);
+                return '0';
+            };
+
+            // Map status DB (processing|completed|cancelled) sang form (in_progress|completed|rejected)
+            const formStatus = detailData.status === 'processing' ? 'in_progress'
+                : detailData.status === 'cancelled' ? 'rejected'
+                : (detailData.status || 'completed');
+
+            const detailId = detailData._id ?? detailData.serviceDetailId;
+            const idForForm = detailId != null ? (typeof detailId === 'object' ? String(detailId._id ?? detailId) : String(detailId)) : undefined;
+            if (serviceId || idForForm) {
+                detailForm.reset({
+                    _id: idForForm || '',
+                    status: formStatus,
+                    selectedService: serviceId,
+                    selectedCourseName: courses.some(c => c.name === courseName) ? courseName : courseName,
+                    medicationName: detailData.selectedCourse?.medicationName || '',
+                    medicationDosage: detailData.selectedCourse?.medicationDosage || '',
+                    medicationUnit: detailData.selectedCourse?.medicationUnit || '',
+                    consultantName: detailData.selectedCourse?.consultantName || '',
+                    doctorName: detailData.selectedCourse?.doctorName || '',
+                    notes: detailData.notes || '',
+                    invoiceImage: new DataTransfer().files,
+                    customerPhotos: new DataTransfer().files,
+                    discountType: pricing.discountType || 'none',
+                    discountValue: formatDiscountValue(discountValue, pricing.discountType || 'none'),
+                    adjustmentType: adjustmentType,
+                    adjustmentValue: formatDiscountValue(adjustmentValue, pricing.discountType || 'none'),
+                }, {
+                    keepDefaultValues: false,
+                    keepValues: false,
+                    keepDirty: false,
+                    keepIsSubmitted: false,
+                    keepTouched: false,
+                    keepIsValid: false,
+                    keepSubmitCount: false,
+                });
+            }
+        };
+
+        const fetchFullDetail = async () => {
+            const hasId = detail.serviceDetailId ?? detail._id;
+            const idStr = hasId != null ? (typeof hasId === 'object' ? String(hasId._id ?? hasId) : String(hasId)) : '';
+            if (idStr && !detail.invoiceDriveIds?.length) {
+                try {
+                    const result = await getServiceDetailById(idStr);
+                    if (result?.success && result?.data) {
+                        loadDetailData(result.data);
+                        return;
+                    }
+                } catch (err) {
+                    console.error('Lỗi khi fetch service detail:', err);
+                }
+            }
+            loadDetailData(detail);
+        };
+
+        fetchFullDetail();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [detail, services]);
+
+    return (
+        <Popup
+            open={true}
+            onClose={onClose}
+            widthClass="max-w-5xl"
+            header="Xem Chi Tiết Đơn Chốt Dịch Vụ"
+            footer={
+                <Button type="button" onClick={onClose}>Đóng</Button>
+            }
+        >
+            {(() => {
+                const CloseServiceForm = require('./CloseServiceForm').default;
+                const pricing = detail?.pricing || {};
+                return (
+                    <CloseServiceForm
+                        form={detailForm}
+                        status={detailForm.watch('status') || detail?.status || 'completed'}
+                        services={services ?? []}
+                        availableCourses={availableCourses}
+                        listPrice={pricing.listPrice ?? 0}
+                        finalRevenue={pricing.finalPrice ?? 0}
+                        discountType={pricing.discountType || 'none'}
+                        discountPrograms={discountPrograms ?? []}
+                        currentUserName={detail?.selectedCourse?.consultantName || detailForm.watch('consultantName') || ''}
+                        unitMedicines={unitMedicines}
+                        treatmentDoctors={treatmentDoctors}
+                        fileReg={detailForm.register('invoiceImage')}
+                        onImageChange={() => {}}
+                        existingImageUrls={existingImageUrls}
+                        setExistingImageUrls={setExistingImageUrls}
+                        existingImageIds={existingImageIds}
+                        setExistingImageIds={setExistingImageIds}
+                        newImagePreviews={[]}
+                        onRemoveNewImage={() => {}}
+                        customerPhotoFileReg={detailForm.register('customerPhotos')}
+                        onCustomerPhotoChange={() => {}}
+                        existingCustomerPhotoUrls={existingCustomerPhotoUrls}
+                        setExistingCustomerPhotoUrls={setExistingCustomerPhotoUrls}
+                        existingCustomerPhotoIds={existingCustomerPhotoIds}
+                        setExistingCustomerPhotoIds={setExistingCustomerPhotoIds}
+                        newCustomerPhotoPreviews={[]}
+                        onRemoveCustomerPhoto={() => {}}
+                        onSubmit={() => {}}
+                        readOnly={true}
+                        unifiedInvoiceImages={unifiedInvoiceImages}
+                        setUnifiedInvoiceImages={setUnifiedInvoiceImages}
+                        onReorderInvoiceImages={() => {}}
+                        unifiedCustomerPhotos={unifiedCustomerPhotos}
+                        setUnifiedCustomerPhotos={setUnifiedCustomerPhotos}
+                        onReorderCustomerPhotos={() => {}}
+                        onGetDeletedIds={() => {}}
+                        resetToken={0}
+                    />
+                );
+            })()}
+        </Popup>
     );
 }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { io } from 'socket.io-client';
-import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon, Video as VideoIcon, Play } from 'lucide-react';
+import { Search, Send, Loader2, Check, AlertCircle, ChevronLeft, Tag, ChevronDown, X, Image as ImageIcon, Video as VideoIcon, Play, Inbox, MessageSquare, Plus, Trash2, FileText, RefreshCw, User } from 'lucide-react';
 import { sendMessageAction, uploadImageToPancakeAction, sendImageAction, uploadVideoToPancakeAction, sendVideoAction } from './actions';
 import { toggleLabelForCustomer, getConversationIdsByLabelsAndPage } from '@/app/(setting)/label/actions';
 import { getConversationsFromIds } from '@/lib/pancake-api';
@@ -47,8 +47,28 @@ const fmtDateTimeVN = (dateLike) => {
     }
 };
 
+// Helper: Tính SHA1 hash của file (dùng cho upload ảnh COMMENT)
+const calculateSHA1 = async (file) => {
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-1', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    } catch (e) {
+        console.error('[calculateSHA1] error:', e);
+        return null;
+    }
+};
+
 // ======================= Helper =======================
 const isInbox = (convo) => convo?.type === 'INBOX';
+const isComment = (convo) => convo?.type === 'COMMENT' || convo?.type === 'POST_COMMENT';
+const getConvoType = (convo) => {
+    if (isInbox(convo)) return 'INBOX';
+    if (isComment(convo)) return 'COMMENT';
+    return 'UNKNOWN';
+};
 const getConvoPsid = (convo) => convo?.from_psid || null;
 const getConvoAvatarId = (convo) =>
     convo?.from_psid || convo?.customers?.[0]?.fb_id || convo?.from?.id || null;
@@ -139,8 +159,151 @@ const createAutoCustomer = async (customerName, messageContent, conversationId, 
     }
 };
 
+// Helper: Chuẩn hóa một raw message có thể tạo ra nhiều UI messages
+// (ví dụ: INBOX message có comment attachment -> tạo cả COMMENT message và INBOX message)
+const normalizeMessagesFromRaw = (raw, pageId, convFromName = null, pageName = null) => {
+    const msgType = raw?.type; // 'INBOX' hoặc 'COMMENT'
+    const asArray = (v) => (Array.isArray(v) ? v : []);
+    const atts = [
+        ...asArray(raw.attachments),
+        ...asArray(raw.attachments?.data),
+        ...asArray(raw.message_attachments),
+        ...asArray(raw.data?.attachments),
+        ...(raw.attachment ? [raw.attachment] : []),
+    ];
+    
+    // ✅ Phát hiện COMMENT trong attachments (comment được nhúng trong INBOX messages)
+    // Comment có dạng: attachments[].comment với structure:
+    // { comment: { content, from, msg_id }, post_attachments: [], name: "post text", type: "link" }
+    const commentAttachments = atts.filter(a => a?.comment && typeof a.comment === 'object');
+    
+    const messages = [];
+    
+    // ✅ Nếu có comment attachments trong INBOX message, tạo COMMENT message riêng
+    if (commentAttachments.length > 0 && msgType === 'INBOX') {
+        const commentAtt = commentAttachments[0];
+        const comment = commentAtt.comment || {};
+        const commentContent = comment.content || comment.message || '';
+        const commentAuthor = comment.from?.name || comment.from || 'Khách hàng';
+        const commentMsgId = comment.msg_id || comment.id || '';
+        
+        // Lấy post info
+        const postAttachments = asArray(commentAtt.post_attachments);
+        const postText = commentAtt.name || '';
+        const postUrl = commentAtt.url || '';
+        
+        // ✅ QUAN TRỌNG: Parse ảnh từ comment attachment (ảnh gửi trong comment reply)
+        // Ảnh nằm ở: attachments[].comment.attachment.media.image.src
+        const commentImageUrl = comment.attachment?.media?.image?.src || 
+                                 comment.attachment?.image?.src ||
+                                 comment.attachment?.url ||
+                                 null;
+        const commentImageWidth = comment.attachment?.media?.image?.width ||
+                                  comment.attachment?.image?.width ||
+                                  null;
+        const commentImageHeight = comment.attachment?.media?.image?.height ||
+                                   comment.attachment?.image?.height ||
+                                   null;
+        
+        // Tạo content cho comment message
+        let commentMessageContent = {
+            type: 'text',
+            content: commentContent || postText || '[Bình luận]',
+        };
+        
+        // Nếu có ảnh trong comment attachment (ảnh reply)
+        if (commentImageUrl) {
+            const commentImage = {
+                url: commentImageUrl,
+                width: commentImageWidth,
+                height: commentImageHeight,
+            };
+            
+            if (commentContent && commentContent.trim().length > 0) {
+                commentMessageContent = {
+                    type: 'images_with_text',
+                    images: [commentImage],
+                    text: commentContent,
+                };
+            } else {
+                commentMessageContent = {
+                    type: 'images',
+                    images: [commentImage],
+                };
+            }
+        } else if (postAttachments.length > 0) {
+            // Nếu có post attachments (hình ảnh/video của bài post gốc), thêm vào
+            const postImages = postAttachments
+                .filter(pa => pa?.type === 'video_inline' || pa?.type === 'photo' || pa?.image_data)
+                .map(pa => ({
+                    url: pa?.url || pa?.image_data?.url,
+                    width: pa?.image_data?.width || pa?.width,
+                    height: pa?.image_data?.height || pa?.height,
+                }))
+                .filter(img => img.url);
+            
+            if (postImages.length > 0) {
+                // Nếu có cả text post và hình ảnh
+                if (postText && postText.trim().length > 0) {
+                    commentMessageContent = {
+                        type: 'images_with_text',
+                        images: postImages,
+                        text: postText,
+                    };
+                } else if (commentContent) {
+                    commentMessageContent = {
+                        type: 'images_with_text',
+                        images: postImages,
+                        text: commentContent,
+                    };
+                } else {
+                    commentMessageContent = {
+                        type: 'images',
+                        images: postImages,
+                    };
+                }
+            }
+        }
+        
+        // Tạo metadata cho comment
+        const commentMetadata = {
+            postId: postUrl ? postUrl.split('/').pop() : null,
+            conversationId: raw.conversation_id,
+            author: commentAuthor,
+            commentMsgId: commentMsgId,
+            postUrl: postUrl,
+            hasPostContent: !!(postText && postText.trim().length > 0),
+            hasPostImages: postAttachments.length > 0,
+        };
+        
+        // Thêm COMMENT message
+        messages.push({
+            id: raw.id + '_comment', // Unique ID cho comment message
+            inserted_at: raw.inserted_at,
+            senderType: getSenderType({ from: comment.from }, pageId),
+            status: raw.status || 'sent',
+            channel: 'COMMENT',
+            content: commentMessageContent,
+            metadata: commentMetadata,
+        });
+        
+        // Loại bỏ comment attachments khỏi atts để normalizePancakeMessage không xử lý lại
+        const nonCommentAtts = atts.filter(a => !commentAttachments.includes(a));
+        raw = { ...raw, attachments: nonCommentAtts };
+    }
+    
+    // ✅ Normalize message chính (INBOX hoặc COMMENT)
+    const normalizedMsg = normalizePancakeMessage(raw, pageId, convFromName, pageName);
+    if (normalizedMsg) {
+        messages.push(normalizedMsg);
+    }
+    
+    return messages;
+};
+
 // Chuẩn hoá 1 message của Pancake thành cấu trúc UI bạn dùng
-const normalizePancakeMessage = (raw, pageId) => {
+const normalizePancakeMessage = (raw, pageId, convFromName = null, pageName = null) => {
+    const msgType = raw?.type; // 'INBOX' hoặc 'COMMENT'
     const senderType = getSenderType(raw, pageId);
     const ts = raw.inserted_at;
 
@@ -535,12 +698,27 @@ const normalizePancakeMessage = (raw, pageId) => {
         });
     }
     
+    // ✅ Xác định channel dựa trên message type
+    let channel = 'INBOX';
+    let metadata = null;
+    
+    if (msgType === 'COMMENT' || msgType === 'POST_COMMENT') {
+        channel = 'COMMENT';
+        metadata = {
+            postId: raw.post_id,
+            conversationId: raw.conversation_id,
+            author: raw.from?.name || 'Khách hàng',
+        };
+    }
+    
     return {
         id: raw.id,
         inserted_at: ts,
         senderType,
         status: raw.status || 'sent',
+        channel, // ✅ Thêm channel để phân biệt
         content: normalizedContent,
+        ...(metadata && { metadata }),
     };
 };
 
@@ -620,6 +798,425 @@ const getZaloUidFromConversation = (convo) => {
 };
 
 // ======================= Subcomponents =======================
+const PancakeTagDropdown = ({
+    tags = [],
+    selectedTagIds = [],
+    onTagChange,
+    trigger,
+    style = 'left',
+    pageId,
+    accessToken,
+    onLoadTags,
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isLoadingTags, setIsLoadingTags] = useState(false);
+    const [isCreatingTag, setIsCreatingTag] = useState(false);
+    const [newTagName, setNewTagName] = useState('');
+    const [newTagColor, setNewTagColor] = useState('#6b7280');
+    const [deletingTagId, setDeletingTagId] = useState(null);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const dropdownRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Load tags khi mở dropdown
+    const handleOpen = async () => {
+        setIsOpen(true);
+        
+        // Nếu chưa có tags và có pageId, sync và load tags
+        if (tags.length === 0 && pageId && accessToken) {
+            setIsLoadingTags(true);
+            try {
+                // Sync tags từ Pancake vào MongoDB
+                const syncRes = await fetch('/api/pancake/tags/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pageId, accessToken }),
+                });
+
+                if (syncRes.ok) {
+                    // Lấy tags từ API (DB hoặc fallback Pancake API khi DB trống)
+                    const tagsRes = await fetch(`/api/pancake/tags?pageId=${pageId}`, {
+                        headers: accessToken ? { 'X-Pancake-Access-Token': accessToken } : {},
+                    });
+                    if (tagsRes.ok) {
+                        const data = await tagsRes.json();
+                        if (data.success && Array.isArray(data.data)) {
+                            onLoadTags(data.data);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('[PancakeTagDropdown] Error loading tags:', error);
+            } finally {
+                setIsLoadingTags(false);
+            }
+        }
+    };
+
+    const filteredTags = useMemo(
+        () =>
+            tags.filter((tag) =>
+                (tag?.text || '').toLowerCase().includes(searchTerm.toLowerCase())
+            ),
+        [tags, searchTerm]
+    );
+
+    // Tạo tag mới
+    const handleCreateTag = async () => {
+        if (!newTagName.trim() || !pageId || !accessToken) {
+            toast.error('Vui lòng nhập tên thẻ');
+            return;
+        }
+
+        setIsCreatingTag(true);
+        try {
+            // 1. Lấy settings hiện tại để có current_settings_key
+            const settingsUrl = `https://pancake.vn/api/v1/pages/${pageId}/settings?access_token=${accessToken}`;
+            const settingsResponse = await fetch(settingsUrl, { cache: 'no-store' });
+            
+            if (!settingsResponse.ok) {
+                throw new Error(`Failed to fetch settings: ${settingsResponse.status}`);
+            }
+
+            const settingsData = await settingsResponse.json();
+            const settings = settingsData?.settings || settingsData;
+            const currentSettingsKey = settingsData?.current_settings_key || settings?.current_settings_key || '';
+            const existingTags = Array.isArray(settings?.tags) ? settings.tags : [];
+
+            // 2. Tính lightenColor từ color
+            const hex = newTagColor.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const lightenColor = `rgba(${r},${g},${b},0.4)`;
+
+            // 3. Tạo tag mới với id: null (Pancake sẽ tự tạo ID)
+            const newTag = {
+                id: null,
+                text: newTagName.trim(),
+                color: newTagColor,
+                is_lead_event: false,
+                lighten_color: lightenColor,
+            };
+
+            // 4. Thêm tag mới vào array tags
+            const updatedTags = [...existingTags, newTag];
+
+            // 5. Gọi API POST để cập nhật settings
+            const formData = new FormData();
+            formData.append('changes', JSON.stringify({ tags: updatedTags }));
+            if (currentSettingsKey) {
+                formData.append('current_settings_key', currentSettingsKey);
+            }
+
+            const updateUrl = `https://pancake.vn/api/v1/pages/${pageId}/settings?access_token=${accessToken}`;
+            const updateResponse = await fetch(updateUrl, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!updateResponse.ok) {
+                const errorText = await updateResponse.text().catch(() => '');
+                throw new Error(`Failed to create tag: ${updateResponse.status} - ${errorText}`);
+            }
+
+            // 6. Sync lại tags từ Pancake vào MongoDB
+            const syncRes = await fetch('/api/pancake/tags/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId, accessToken }),
+            });
+
+            if (syncRes.ok) {
+                // Lấy tags mới từ API (DB hoặc Pancake API)
+                const tagsRes = await fetch(`/api/pancake/tags?pageId=${pageId}`, {
+                    headers: accessToken ? { 'X-Pancake-Access-Token': accessToken } : {},
+                });
+                if (tagsRes.ok) {
+                    const data = await tagsRes.json();
+                    if (data.success && Array.isArray(data.data)) {
+                        onLoadTags(data.data);
+                    }
+                }
+            }
+
+            // Reset form
+            setNewTagName('');
+            setNewTagColor('#6b7280');
+            setIsCreatingTag(false);
+            toast.success('Đã tạo thẻ mới thành công');
+        } catch (error) {
+            console.error('[PancakeTagDropdown] Error creating tag:', error);
+            toast.error(`Lỗi khi tạo thẻ: ${error.message}`);
+            setIsCreatingTag(false);
+        }
+    };
+
+    // Xóa tag
+    const handleDeleteTag = async (tagId) => {
+        if (!tagId || !pageId || !accessToken) {
+            toast.error('Thiếu thông tin để xóa thẻ');
+            return;
+        }
+
+        // Xác nhận trước khi xóa
+        if (!confirm(`Bạn có chắc chắn muốn xóa thẻ "${tags.find(t => t.tagId === tagId)?.text || tagId}"?`)) {
+            return;
+        }
+
+        setDeletingTagId(tagId);
+        try {
+            // 1. Lấy settings hiện tại để có current_settings_key
+            const settingsUrl = `https://pancake.vn/api/v1/pages/${pageId}/settings?access_token=${accessToken}`;
+            const settingsResponse = await fetch(settingsUrl, { cache: 'no-store' });
+            
+            if (!settingsResponse.ok) {
+                throw new Error(`Failed to fetch settings: ${settingsResponse.status}`);
+            }
+
+            const settingsData = await settingsResponse.json();
+            const settings = settingsData?.settings || settingsData;
+            const currentSettingsKey = settingsData?.current_settings_key || settings?.current_settings_key || '';
+            const existingTags = Array.isArray(settings?.tags) ? settings.tags : [];
+
+            // 2. Loại bỏ tag cần xóa khỏi array tags
+            const updatedTags = existingTags.filter(tag => String(tag.id) !== String(tagId));
+
+            // 3. Gọi API POST để cập nhật settings
+            const formData = new FormData();
+            formData.append('changes', JSON.stringify({ tags: updatedTags }));
+            if (currentSettingsKey) {
+                formData.append('current_settings_key', currentSettingsKey);
+            }
+
+            const updateUrl = `https://pancake.vn/api/v1/pages/${pageId}/settings?access_token=${accessToken}`;
+            const updateResponse = await fetch(updateUrl, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!updateResponse.ok) {
+                const errorText = await updateResponse.text().catch(() => '');
+                throw new Error(`Failed to delete tag: ${updateResponse.status} - ${errorText}`);
+            }
+
+            // 4. Sync lại tags từ Pancake vào MongoDB
+            const syncRes = await fetch('/api/pancake/tags/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId, accessToken }),
+            });
+
+            if (syncRes.ok) {
+                // Lấy tags mới từ API (DB hoặc Pancake API)
+                const tagsRes = await fetch(`/api/pancake/tags?pageId=${pageId}`, {
+                    headers: accessToken ? { 'X-Pancake-Access-Token': accessToken } : {},
+                });
+                if (tagsRes.ok) {
+                    const data = await tagsRes.json();
+                    if (data.success && Array.isArray(data.data)) {
+                        onLoadTags(data.data);
+                    }
+                }
+            }
+
+            // 5. Nếu tag đang được chọn, bỏ chọn
+            if (selectedTagIds.includes(tagId)) {
+                onTagChange(tagId, false);
+            }
+
+            setDeletingTagId(null);
+            toast.success('Đã xóa thẻ thành công');
+        } catch (error) {
+            console.error('[PancakeTagDropdown] Error deleting tag:', error);
+            toast.error(`Lỗi khi xóa thẻ: ${error.message}`);
+            setDeletingTagId(null);
+        }
+    };
+
+    // Lấy mới nhất từ Pancake và so sánh với DB
+    const handleRefreshTags = async () => {
+        if (!pageId || !accessToken) {
+            toast.error('Thiếu thông tin để lấy mới nhất');
+            return;
+        }
+
+        setIsRefreshing(true);
+        try {
+            // Gọi API sync với so sánh và cập nhật
+            const refreshRes = await fetch('/api/pancake/tags/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId, accessToken }),
+            });
+
+            if (!refreshRes.ok) {
+                const errorData = await refreshRes.json().catch(() => ({}));
+                throw new Error(errorData.error || `Failed to refresh: ${refreshRes.status}`);
+            }
+
+            const data = await refreshRes.json();
+            
+            if (data.success) {
+                // Lấy tags mới từ API (DB hoặc Pancake API)
+                const tagsRes = await fetch(`/api/pancake/tags?pageId=${pageId}`, {
+                    headers: accessToken ? { 'X-Pancake-Access-Token': accessToken } : {},
+                });
+                if (tagsRes.ok) {
+                    const tagsData = await tagsRes.json();
+                    if (tagsData.success && Array.isArray(tagsData.data)) {
+                        onLoadTags(tagsData.data);
+                        toast.success(`Đã cập nhật: ${data.added || 0} thẻ mới, ${data.deleted || 0} thẻ đã xóa, ${data.updated || 0} thẻ đã cập nhật`);
+                    }
+                }
+            } else {
+                throw new Error(data.error || 'Refresh failed');
+            }
+        } catch (error) {
+            console.error('[PancakeTagDropdown] Error refreshing tags:', error);
+            toast.error(`Lỗi khi lấy mới nhất: ${error.message}`);
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
+
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <div onClick={handleOpen}>{trigger}</div>
+            {isOpen && (
+                <div
+                    style={{ right: style === 'right' ? 0 : 'auto', left: style === 'left' ? 0 : 'auto' }}
+                    className="absolute top-full mt-2 w-72 bg-blue-50 text-gray-900 rounded-md border border-gray-200 shadow-lg z-50 overflow-hidden"
+                >
+                    <div className="p-3">
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold text-gray-800">Lọc theo Pancake Tags</h4>
+                            <button
+                                type="button"
+                                onClick={handleRefreshTags}
+                                disabled={isRefreshing || !pageId || !accessToken}
+                                className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title="Lấy mới nhất từ Pancake"
+                            >
+                                {isRefreshing ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                    <RefreshCw className="h-3 w-3" />
+                                )}
+                                <span>Lấy mới nhất</span>
+                            </button>
+                        </div>
+                        <div className="relative mb-2">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="Tìm tag..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full bg-white text-gray-900 rounded-md pl-8 pr-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                        </div>
+                        {/* Form tạo tag mới */}
+                        <div className="border-t border-gray-200 pt-2 mt-2">
+                            <div className="flex items-center gap-2 mb-2">
+                                <input
+                                    type="text"
+                                    placeholder="Tên thẻ mới..."
+                                    value={newTagName}
+                                    onChange={(e) => setNewTagName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !isCreatingTag) {
+                                            handleCreateTag();
+                                        }
+                                    }}
+                                    className="flex-1 bg-white text-gray-900 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <input
+                                    type="color"
+                                    value={newTagColor}
+                                    onChange={(e) => setNewTagColor(e.target.value)}
+                                    className="w-10 h-8 rounded border border-gray-300 cursor-pointer"
+                                    title="Chọn màu"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleCreateTag}
+                                    disabled={isCreatingTag || !newTagName.trim()}
+                                    className="flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    title="Thêm thẻ mới"
+                                >
+                                    {isCreatingTag ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Plus className="h-4 w-4" />
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="max-h-60 overflow-y-auto px-3">
+                        {isLoadingTags ? (
+                            <div className="p-3 text-sm text-gray-500 text-center flex items-center justify-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Đang tải tags...</span>
+                            </div>
+                        ) : filteredTags.length === 0 ? (
+                            <div className="p-3 text-sm text-gray-500 text-center">Không có tag nào</div>
+                        ) : (
+                            filteredTags.map((tag) => (
+                                <div
+                                    key={tag.tagId}
+                                    className="flex items-center gap-3 p-2.5 hover:bg-blue-100 rounded-md group"
+                                >
+                                    <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            checked={selectedTagIds.includes(tag.tagId)}
+                                            onChange={(e) => onTagChange(tag.tagId, e.target.checked)}
+                                        />
+                                        <span
+                                            className="h-4 w-4 rounded-full flex-shrink-0"
+                                            style={{ backgroundColor: tag.color || '#6b7280' }}
+                                        />
+                                        <span className="flex-1">{tag.text}</span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteTag(tag.tagId);
+                                        }}
+                                        disabled={deletingTagId === tag.tagId}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-100 rounded text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Xóa thẻ"
+                                    >
+                                        {deletingTagId === tag.tagId ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Trash2 className="h-4 w-4" />
+                                        )}
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const LabelDropdown = ({
     labels = [],
     selectedLabelIds = [],
@@ -672,21 +1269,25 @@ const LabelDropdown = ({
                         </div>
                     </div>
                     <div className="max-h-60 overflow-y-auto px-3">
-                        {filteredLabels.map((label) => (
-                            <label
-                                key={label._id}
-                                className="flex items-center gap-3 p-2.5 hover:bg-blue-100 rounded-md cursor-pointer"
-                            >
-                                <input
-                                    type="checkbox"
-                                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    checked={selectedLabelIds.includes(label._id)}
-                                    onChange={(e) => onLabelChange(label._id, e.target.checked)}
-                                />
-                                <Tag className="h-4 w-4" style={{ color: label.color }} />
-                                <span className="flex-1">{label.name}</span>
-                            </label>
-                        ))}
+                        {filteredLabels.map((label) => {
+                            // Chỉ thẻ từ hệ thống (manual) mới có chữ màu xanh dương
+                            const isManualLabel = label.from !== 'pancake';
+                            return (
+                                <label
+                                    key={label._id}
+                                    className="flex items-center gap-3 p-2.5 hover:bg-blue-100 rounded-md cursor-pointer"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        checked={selectedLabelIds.includes(label._id)}
+                                        onChange={(e) => onLabelChange(label._id, e.target.checked)}
+                                    />
+                                    <Tag className="h-4 w-4" style={{ color: label.color }} />
+                                    <span className={`flex-1 ${isManualLabel ? 'text-blue-600' : ''}`}>{label.name}</span>
+                                </label>
+                            );
+                        })}
                     </div>
                     <div className="border-t border-gray-200 mt-1">
                         <Link
@@ -957,6 +1558,7 @@ export default function ChatClient({
     label: initialLabels,
     token,
     preselect,
+    preselectConversationId,
     hideSidebar = false,
 }) {
     // 1) State hội thoại
@@ -973,6 +1575,10 @@ export default function ChatClient({
     // 2) Messages detail cho hội thoại đang chọn
     const [messages, setMessages] = useState([]);
     const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+    const [postInfo, setPostInfo] = useState(null); // Thông tin post cho COMMENT conversations
+    const selectedConvoTypeRef = useRef(null); // Lưu type của conversation đang chọn để filter messages
+    const lastCommentMsgIdRef = useRef(null); // Lưu msg_id của comment khách gần nhất (để reply)
+    const lastPostIdRef = useRef(null); // Lưu post_id hiện tại cho COMMENT
 
     // Load older messages (scroll top)
     const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -993,6 +1599,333 @@ export default function ChatClient({
     const [selectedFilterLabelIds, setSelectedFilterLabelIds] = useState([]);
     const [labelFilterConversations, setLabelFilterConversations] = useState([]);
     const [isLoadingLabelFilter, setIsLoadingLabelFilter] = useState(false);
+
+    // 5) Pancake Tags
+    const [pancakeTags, setPancakeTags] = useState([]);
+    const [selectedTagIds, setSelectedTagIds] = useState([]);
+    // Conversations từ API khi filter tag (để lấy conversations cũ)
+    const [tagFilterConversations, setTagFilterConversations] = useState([]);
+    const [isLoadingTagFilter, setIsLoadingTagFilter] = useState(false);
+
+    // 6) Lead Status Modal
+    const [showLeadStatusModal, setShowLeadStatusModal] = useState(false);
+    const [pendingLabelId, setPendingLabelId] = useState(null);
+    const [pendingChecked, setPendingChecked] = useState(false);
+    const [leadStatusNote, setLeadStatusNote] = useState('');
+    const [conversationLeadStatuses, setConversationLeadStatuses] = useState({}); // Map conversationId -> { status, note }
+    const [showNoteTooltip, setShowNoteTooltip] = useState(null); // conversationId đang hiển thị tooltip
+
+    // 7) Phân công nhân viên
+    const [showAssigneesPopup, setShowAssigneesPopup] = useState(false);
+    const [assigneesData, setAssigneesData] = useState([]); // Danh sách nhân viên được phân công
+    const [allUsers, setAllUsers] = useState([]); // Danh sách tất cả nhân viên của page
+    const [isLoadingAssignees, setIsLoadingAssignees] = useState(false);
+    const assigneesPopupRef = useRef(null);
+
+    // Function để load danh sách nhân viên của page
+    const loadPageUsers = useCallback(async () => {
+        try {
+            const url = `https://pancake.vn/api/v1/pages/users_pages?access_token=${pageConfig.accessToken}`;
+            const formData = new FormData();
+            formData.append('page_ids', pageConfig.id);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[Assignees] API users_pages response:', data);
+                console.log('[Assignees] Response type:', typeof data, 'Is array:', Array.isArray(data));
+                console.log('[Assignees] Response keys:', Object.keys(data));
+                
+                // Data trả về có structure: {success: true, users_pages: Array(13)}
+                // Cần lấy data.users_pages
+                let users = [];
+                
+                if (data?.users_pages && Array.isArray(data.users_pages)) {
+                    // Lấy từ users_pages array
+                    users = data.users_pages;
+                    console.log('[Assignees] Found users_pages array, length:', users.length);
+                } else if (Array.isArray(data)) {
+                    // Nếu là array trực tiếp, dùng luôn
+                    users = data;
+                    console.log('[Assignees] Response is array directly, length:', users.length);
+                } else if (typeof data === 'object' && data !== null) {
+                    // Nếu là object với key là số thứ tự (0, 1, 2, ...)
+                    console.log('[Assignees] Response is object, keys:', Object.keys(data));
+                    for (let i = 0; i < 100; i++) { // Giả sử tối đa 100 users
+                        if (data[i]) {
+                            users.push(data[i]);
+                        } else {
+                            // Kiểm tra xem còn key nào khác không (có thể có key không phải số)
+                            const remainingKeys = Object.keys(data).filter(k => !isNaN(parseInt(k)) && parseInt(k) >= i);
+                            if (remainingKeys.length === 0) {
+                                break; // Dừng khi không còn phần tử nào
+                            }
+                        }
+                    }
+                    console.log('[Assignees] Parsed users from object:', users.length);
+                }
+                
+                console.log('[Assignees] Raw users before filtering:', users.length);
+                console.log('[Assignees] Sample user object:', users[0]);
+                
+                // Filter để chỉ lấy users hợp lệ
+                // User object có structure: {fb_id, name, page_id, phone_number, status, user_id, ...}
+                const validUsers = users.filter(user => {
+                    if (!user) {
+                        console.log('[Assignees] Skipping null/undefined user');
+                        return false;
+                    }
+                    
+                    // Kiểm tra xem có user_id không (có thể là user_id hoặc id)
+                    const userId = user.user_id || user.id;
+                    const hasUserId = !!userId;
+                    const hasName = !!user.name;
+                    const isValid = hasUserId && hasName;
+                    
+                    if (!isValid) {
+                        console.log('[Assignees] Invalid user:', {
+                            name: user.name,
+                            user_id: user.user_id,
+                            id: user.id,
+                            hasUserId,
+                            hasName
+                        });
+                    }
+                    return isValid;
+                });
+                
+                console.log('[Assignees] Valid users count:', validUsers.length);
+                console.log('[Assignees] Valid users:', validUsers);
+                
+                // Log chi tiết từng user để debug
+                validUsers.forEach((user, idx) => {
+                    console.log(`[Assignees] User ${idx}:`, {
+                        name: user.name,
+                        user_id: user.user_id,
+                        id: user.id,
+                        fb_id: user.fb_id,
+                        status: user.status
+                    });
+                });
+                
+                setAllUsers(validUsers);
+                return validUsers;
+            } else {
+                const errorText = await response.text().catch(() => '');
+                console.error('Failed to load page users:', response.status, errorText);
+                return [];
+            }
+        } catch (error) {
+            console.error('Error loading page users:', error);
+            return [];
+        }
+    }, [pageConfig.id, pageConfig.accessToken]);
+
+    // Function để load lịch sử phân công của conversation
+    const loadAssigneesHistory = useCallback(async (conversationId) => {
+        if (!conversationId) {
+            console.warn('[Assignees] No conversationId provided');
+            return [];
+        }
+
+        try {
+            setIsLoadingAssignees(true);
+            console.log('[Assignees] Starting to load assignees for conversation:', conversationId);
+            
+            // Bước 1: Gọi API đầu tiên để lấy danh sách users
+            console.log('[Assignees] Step 1: Loading page users...');
+            console.log('[Assignees] Current allUsers cache:', allUsers.length, 'users');
+            
+            // Luôn gọi lại API đầu tiên để đảm bảo có data mới nhất
+            // (có thể cache cũ hoặc chưa được load)
+            console.log('[Assignees] Calling loadPageUsers() to get fresh data...');
+            let users = await loadPageUsers();
+            console.log('[Assignees] loadPageUsers() returned:', users.length, 'users');
+            
+            if (users.length === 0) {
+                console.warn('[Assignees] ⚠️ WARNING: No users returned from API!');
+                console.warn('[Assignees] This might be the reason why no assignees are shown.');
+                console.warn('[Assignees] Please check if API users_pages is returning data correctly.');
+            } else {
+                console.log('[Assignees] ✅ Successfully loaded', users.length, 'users from API');
+            }
+            
+            // Vẫn tiếp tục gọi API thứ hai ngay cả khi users.length === 0
+            // Vì có thể conversation chưa được phân công cho ai
+
+            // Bước 2: Gọi API thứ hai để lấy lịch sử phân công
+            console.log('[Assignees] Step 2: Loading assignees history...');
+            const url = `https://pancake.vn/api/v1/pages/${pageConfig.id}/conversations/${conversationId}/assignees_update_histories?access_token=${pageConfig.accessToken}`;
+            console.log('[Assignees] Calling API:', url);
+            const response = await fetch(url);
+            console.log('[Assignees] API response status:', response.status, response.statusText);
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[Assignees] API assignees_update_histories response:', data);
+                
+                const histories = Array.isArray(data?.data) ? data.data : [];
+                console.log('[Assignees] Histories count:', histories.length);
+                console.log('[Assignees] Histories:', histories);
+                
+                // Lấy danh sách user_id từ lịch sử phân công (từ ins array)
+                const assigneeUserIds = new Set();
+                histories.forEach((history, idx) => {
+                    console.log(`[Assignees] History ${idx}:`, history);
+                    if (history.diff?.ins && Array.isArray(history.diff.ins)) {
+                        console.log(`[Assignees] History ${idx} ins array:`, history.diff.ins);
+                        history.diff.ins.forEach(userId => {
+                            // Normalize userId (có thể là string hoặc number)
+                            const normalizedUserId = String(userId).trim();
+                            if (normalizedUserId) {
+                                assigneeUserIds.add(normalizedUserId);
+                            }
+                        });
+                    }
+                });
+                
+                console.log('[Assignees] Assignee user IDs from history:', Array.from(assigneeUserIds));
+                console.log('[Assignees] All users available:', users.length);
+                console.log('[Assignees] All users:', users);
+
+                // Bước 3: So sánh user_id từ API đầu tiên với các giá trị trong ins
+                // Nếu user_id của user trong API đầu tiên = giá trị trong ins thì lấy name
+                if (users.length === 0) {
+                    console.warn('[Assignees] ⚠️ No users available to match with assignee IDs');
+                    console.warn('[Assignees] This means API users_pages did not return any users or returned empty');
+                    setAssigneesData([]);
+                    return [];
+                }
+
+                console.log('[Assignees] 🔍 Starting to match users...');
+                console.log('[Assignees] Looking for user_ids:', Array.from(assigneeUserIds));
+                console.log('[Assignees] Available users with their user_ids:');
+                users.forEach((user, idx) => {
+                    console.log(`  [${idx}] Name: ${user.name}, user_id: ${user.user_id}, type: ${typeof user.user_id}`);
+                });
+
+                const assignedUsers = users.filter(user => {
+                    if (!user) {
+                        console.log('[Assignees] Skipping null/undefined user');
+                        return false;
+                    }
+                    
+                    if (!user.user_id) {
+                        console.log('[Assignees] Skipping user (no user_id):', user);
+                        return false;
+                    }
+                    
+                    // Normalize user_id để so sánh (loại bỏ khoảng trắng, chuyển sang string)
+                    const userUserId = String(user.user_id).trim();
+                    const isAssigned = assigneeUserIds.has(userUserId);
+                    
+                    // Log chi tiết cho từng user
+                    if (isAssigned) {
+                        console.log('[Assignees] ✅ MATCH FOUND!');
+                        console.log('[Assignees]   User name:', user.name);
+                        console.log('[Assignees]   User user_id:', user.user_id, '(type:', typeof user.user_id, ')');
+                        console.log('[Assignees]   Normalized:', userUserId);
+                        console.log('[Assignees]   Matched with assignee ID:', userUserId);
+                    } else {
+                        // Chỉ log nếu có assignee IDs để tránh spam
+                        if (assigneeUserIds.size > 0) {
+                            console.log('[Assignees] ❌ No match for user:', user.name);
+                            console.log('[Assignees]   User user_id:', user.user_id, '(type:', typeof user.user_id, ')');
+                            console.log('[Assignees]   Normalized:', userUserId);
+                            console.log('[Assignees]   Looking for:', Array.from(assigneeUserIds));
+                            // Kiểm tra xem có khớp không sau khi normalize cả 2 bên
+                            const foundMatch = Array.from(assigneeUserIds).some(assigneeId => {
+                                const normalizedAssigneeId = String(assigneeId).trim();
+                                const match = normalizedAssigneeId === userUserId;
+                                if (match) {
+                                    console.log('[Assignees]   ⚠️ Found match after double normalization!');
+                                }
+                                return match;
+                            });
+                            if (!foundMatch) {
+                                console.log('[Assignees]   No match found even after double normalization');
+                            }
+                        }
+                    }
+                    return isAssigned;
+                });
+
+                console.log('[Assignees] Final assigned users count:', assignedUsers.length);
+                console.log('[Assignees] Final assigned users:', assignedUsers);
+                setAssigneesData(assignedUsers);
+                return assignedUsers;
+            } else {
+                const errorText = await response.text().catch(() => '');
+                console.error('[Assignees] ❌ Failed to load assignees history:', response.status, response.statusText);
+                console.error('[Assignees] Error response:', errorText);
+                setAssigneesData([]);
+                return [];
+            }
+        } catch (error) {
+            console.error('Error loading assignees history:', error);
+            setAssigneesData([]);
+            return [];
+        } finally {
+            setIsLoadingAssignees(false);
+        }
+    }, [pageConfig.id, pageConfig.accessToken, allUsers, loadPageUsers]);
+
+    // Handle click icon phân công nhân viên
+    const handleShowAssignees = useCallback(async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        
+        if (!selectedConvo?.id) {
+            console.warn('[Assignees] No selected conversation');
+            return;
+        }
+
+        console.log('[Assignees] handleShowAssignees called, current popup state:', showAssigneesPopup);
+        console.log('[Assignees] Selected conversation ID:', selectedConvo.id);
+
+        if (!showAssigneesPopup) {
+            // Mở popup và load data
+            console.log('[Assignees] Opening popup and loading data...');
+            setShowAssigneesPopup(true);
+            try {
+                await loadAssigneesHistory(selectedConvo.id);
+            } catch (error) {
+                console.error('[Assignees] Error in loadAssigneesHistory:', error);
+            }
+        } else {
+            // Đóng popup
+            console.log('[Assignees] Closing popup');
+            setShowAssigneesPopup(false);
+        }
+    }, [selectedConvo?.id, showAssigneesPopup, loadAssigneesHistory]);
+
+    // Close popup when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (assigneesPopupRef.current && !assigneesPopupRef.current.contains(event.target)) {
+                // Kiểm tra xem click có phải vào icon không
+                const iconButton = event.target.closest('[data-assignees-icon]');
+                if (!iconButton) {
+                    setShowAssigneesPopup(false);
+                }
+            }
+        };
+
+        if (showAssigneesPopup) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [showAssigneesPopup]);
+
+    // Đóng popup và reset data khi conversation thay đổi
+    useEffect(() => {
+        setShowAssigneesPopup(false);
+        setAssigneesData([]);
+    }, [selectedConvo?.id]);
 
     // 5) Refs UI
     const formRef = useRef(null);
@@ -1033,6 +1966,236 @@ export default function ChatClient({
         setVideoPreview(null);
     }, [selectedConvo?.id]);
 
+    // ===================== Load Lead Statuses =====================
+    // Chỉ gọi API khi tập conversation IDs thực sự thay đổi (tránh gọi liên tục khi socket conv:patch/msg:new đổi reference mảng)
+    const leadStatusIdsKey = useMemo(() => {
+        const fromSocket = conversations.map((c) => c.id).filter(Boolean);
+        const fromLabel = (labelFilterConversations || []).map((c) => c.id).filter(Boolean);
+        const fromTag = (tagFilterConversations || []).map((c) => c.id).filter(Boolean);
+        const allIds = [...new Set([...fromSocket, ...fromLabel, ...fromTag])].sort();
+        return allIds.length === 0 ? '' : allIds.join(',');
+    }, [conversations, labelFilterConversations, tagFilterConversations]);
+
+    useEffect(() => {
+        if (!pageConfig?.id || !leadStatusIdsKey) return;
+
+        const loadLeadStatuses = async () => {
+            try {
+                const res = await fetch(
+                    `/api/conversation-lead-status?conversationIds=${leadStatusIdsKey}&pageId=${pageConfig.id}`
+                );
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.data && typeof data.data === 'object') {
+                        setConversationLeadStatuses((prev) => ({ ...prev, ...data.data }));
+                    }
+                }
+            } catch (error) {
+                console.error('[ChatClient] Error loading lead statuses:', error);
+            }
+        };
+
+        loadLeadStatuses();
+    }, [pageConfig?.id, leadStatusIdsKey]);
+
+    // ===================== Load Pancake tags ngay khi mở page =====================
+    useEffect(() => {
+        // Tự động sync + load tags để:
+        // - Có metadata (text, color) cho việc hiển thị tags dưới mỗi hội thoại
+        // - Cho phép lọc theo tag ngay cả khi user chưa bấm dropdown
+        const loadTags = async () => {
+            if (!pageConfig?.id || !(pageConfig?.accessToken || token)) return;
+            try {
+                // 1) Sync tags từ Pancake vào MongoDB
+                await fetch('/api/pancake/tags/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pageId: pageConfig.id,
+                        accessToken: pageConfig.accessToken || token,
+                    }),
+                }).catch((err) => {
+                    console.warn('[ChatClient] Sync Pancake tags failed (non-blocking):', err);
+                });
+
+                // 2) Lấy danh sách tags: ưu tiên DB, nếu DB trống thì API lấy trực tiếp từ Pancake (gửi token qua header)
+                const tokenToSend = pageConfig.accessToken || token;
+                const res = await fetch(`/api/pancake/tags?pageId=${pageConfig.id}`, {
+                    headers: tokenToSend ? { 'X-Pancake-Access-Token': tokenToSend } : {},
+                });
+                if (!res.ok) {
+                    console.warn('[ChatClient] Fetch Pancake tags failed:', res.status, res.statusText);
+                    return;
+                }
+                const data = await res.json();
+                if (data?.success && Array.isArray(data.data)) {
+                    setPancakeTags(data.data);
+                }
+            } catch (error) {
+                console.warn('[ChatClient] Error loading Pancake tags (non-blocking):', error);
+            }
+        };
+
+        loadTags();
+    }, [pageConfig?.id, pageConfig?.accessToken, token]);
+
+    // ===================== Load conversations từ API khi filter tag =====================
+    // ✅ THEO TÀI LIỆU ChitietLocthe.md: Gọi API CRM thay vì gọi Pancake trực tiếp
+    // API sẽ tự động quyết định có gọi Pancake hay không dựa vào cache (3 phút)
+    const loadConversationsByTag = useCallback(async (tagIds, forceRefresh = false) => {
+        if (!pageConfig?.id || tagIds.length === 0) {
+            setTagFilterConversations([]);
+            return;
+        }
+
+        setIsLoadingTagFilter(true);
+
+        try {
+            // ✅ Gọi API CRM: /api/pancake/conversations/by-label
+            // API sẽ tự động:
+            // - Kiểm tra cache (lastSyncedAt < 3 phút)
+            // - Nếu cần → gọi Pancake và sync DB
+            // - Nếu không → query DB
+            // - Trả về toàn bộ conversations có label đó (bao gồm cả chưa từng load)
+            
+            // Với nhiều tags, gọi API cho từng tag và merge kết quả
+            const allConversations = [];
+            const conversationMap = new Map();
+
+            for (const tagId of tagIds) {
+                try {
+                    const apiUrl = `/api/pancake/conversations/by-label?pageId=${pageConfig.id}&labelId=${tagId}&limit=100&forceRefresh=${forceRefresh}&accessToken=${encodeURIComponent(pageConfig.accessToken || token || '')}`;
+                    console.log(`[ChatClient] 🔍 Fetching conversations for tag ${tagId} from CRM API:`, apiUrl.replace(/accessToken=[^&]+/, 'accessToken=***'));
+                    
+                    const response = await fetch(apiUrl, { cache: 'no-store' });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text().catch(() => '');
+                        console.error(`[ChatClient] ❌ Failed to fetch conversations for tag ${tagId}:`, response.status, errorText);
+                        continue;
+                    }
+
+                    const data = await response.json();
+                    const conversations = Array.isArray(data?.data) ? data.data : [];
+                    const nextCursor = data?.nextCursor || null;
+                    
+                    console.log(`[ChatClient] ✅ Loaded ${conversations.length} conversations for tag ${tagId} (from: ${data.from || 'unknown'})${nextCursor ? `, has nextCursor (need pagination)` : ', no more pages'}`);
+                    if (conversations.length > 0) {
+                        console.log(`[ChatClient] Sample conversation:`, {
+                            id: conversations[0].id,
+                            tags: conversations[0].tags,
+                            name: conversations[0].name || conversations[0].customers?.[0]?.name,
+                        });
+                    }
+                    
+                    // ⚠️ WARNING: Nếu có nextCursor, cần pagination để lấy hết conversations
+                    if (nextCursor) {
+                        console.warn(`[ChatClient] ⚠️ API returned nextCursor for tag ${tagId}, but frontend only loads first page. Total conversations may be incomplete.`);
+                    }
+
+                    // Merge conversations (tránh duplicate)
+                    let addedCount = 0;
+                    let skippedCount = 0;
+                    conversations.forEach((conv) => {
+                        const convId = conv.id || conv.conversationId;
+                        if (!convId) {
+                            console.warn(`[ChatClient] ⚠️ Conversation missing id:`, conv);
+                            skippedCount++;
+                            return;
+                        }
+                        if (!conversationMap.has(convId)) {
+                            conversationMap.set(convId, conv);
+                            addedCount++;
+                        } else {
+                            skippedCount++;
+                        }
+                    });
+                    console.log(`[ChatClient] Merge result for tag ${tagId}: added ${addedCount}, skipped ${skippedCount} (duplicates)`);
+                } catch (error) {
+                    console.error(`[ChatClient] ❌ Error fetching conversations for tag ${tagId}:`, error);
+                }
+            }
+
+            // Convert map to array
+            const mergedConversations = Array.from(conversationMap.values());
+            console.log(`[ChatClient] 📊 After merge: ${mergedConversations.length} unique conversations from ${tagIds.length} tag(s)`);
+
+            // ✅ Enrich với tags metadata và FILTER lại để đảm bảo chỉ có conversations có tag được chọn
+            let filteredCount = 0;
+            let totalCount = mergedConversations.length;
+            
+            const enriched = mergedConversations
+                .map((conv) => {
+                    const rawTags = Array.isArray(conv.tags) ? conv.tags : [];
+                    
+                    // ✅ QUAN TRỌNG: Filter lại ở client-side để đảm bảo chỉ có conversations có tag được chọn
+                    // Vì database có thể có conversations không có tag này (do sync lỗi hoặc cache cũ)
+                    const convoTagIds = rawTags.map(tagId => String(tagId));
+                    const hasSelectedTag = tagIds.some((tagId) => convoTagIds.includes(String(tagId)));
+                    
+                    if (!hasSelectedTag) {
+                        // Conversation không có tag được chọn, bỏ qua
+                        filteredCount++;
+                        console.warn(`[ChatClient] ⚠️ Conversation ${conv.id} does not have selected tags ${tagIds.join(',')}. Tags: [${convoTagIds.join(',')}]`);
+                        return null;
+                    }
+                    
+                    // Nếu chưa có pancakeTags, enrich từ pancakeTags state
+                    if (!conv.pancakeTags || conv.pancakeTags.length === 0) {
+                        const pancakeTagsEnriched = rawTags
+                            .map((tagId) => {
+                                const idStr = String(tagId);
+                                const tag = pancakeTags.find((t) => String(t.tagId) === idStr);
+                                return tag ? {
+                                    tagId: String(tag.tagId),
+                                    text: tag.text || tag.name,
+                                    color: tag.color,
+                                    isLeadEvent: tag.isLeadEvent || false,
+                                } : null;
+                            })
+                            .filter(Boolean);
+                        
+                        return {
+                            ...conv,
+                            pancakeTags: pancakeTagsEnriched,
+                        };
+                    }
+                    
+                    return conv;
+                })
+                .filter(Boolean); // Loại bỏ null (conversations không có tag được chọn)
+
+            // Sort theo updated_at
+            enriched.sort((a, b) => {
+                const timeA = new Date(a.updated_at || 0).getTime();
+                const timeB = new Date(b.updated_at || 0).getTime();
+                return timeB - timeA;
+            });
+
+            if (filteredCount > 0) {
+                console.warn(`[ChatClient] ⚠️ Filtered out ${filteredCount} conversations that don't have selected tags (out of ${totalCount} total)`);
+            }
+            console.log(`[ChatClient] ✅ Total ${enriched.length} conversations loaded for tags: ${tagIds.join(',')} (after filtering)`);
+            
+            // ✅ Cập nhật UI
+            setTagFilterConversations(enriched);
+        } catch (error) {
+            console.error('[ChatClient] Error loading conversations by tag:', error);
+            setTagFilterConversations([]);
+        } finally {
+            setIsLoadingTagFilter(false);
+        }
+    }, [pageConfig?.id, pageConfig?.accessToken, token, pancakeTags]);
+
+    // Load conversations từ API khi filter tag thay đổi
+    useEffect(() => {
+        if (selectedTagIds.length > 0) {
+            loadConversationsByTag(selectedTagIds);
+        } else {
+            setTagFilterConversations([]);
+        }
+    }, [selectedTagIds, loadConversationsByTag]);
+
     // Gán/Bỏ gán nhãn cho hội thoại đang chọn
     const handleToggleLabel = useCallback(
         async (labelId, checked) => {
@@ -1046,6 +2209,157 @@ export default function ChatClient({
                 // Lấy conversation_id từ hội thoại đang chọn
                 const conversationId = selectedConvo.id;
                 const pageId = pageConfig.id;
+                
+                // ✅ Kiểm tra xem label có phải là Pancake tag không
+                // Tìm label trong allLabels hoặc pancakeTags
+                // labelId có thể là _id (MongoDB) hoặc tagId (Pancake)
+                const label = allLabels.find(l => l._id === labelId || (l.from === 'pancake' && String(l.tagId) === String(labelId))) 
+                    || pancakeTags.find(t => t._id === labelId || String(t.tagId) === String(labelId));
+                
+                if (label && label.from === 'pancake') {
+                    // ✅ Đây là Pancake tag, gọi Pancake API toggle_tag
+                    const tagId = label.tagId || labelId;
+                    const psid = selectedConvo.customers?.[0]?.fb_id 
+                        || selectedConvo.from_psid 
+                        || selectedConvo.from?.id 
+                        || conversationId.split('_')[1] // Fallback: lấy phần sau dấu _ trong conversationId
+                        || null;
+                    
+                    if (!psid) {
+                        toast.error('Không thể gán thẻ Pancake: thiếu PSID của khách hàng.');
+                        console.error('[handleToggleLabel] Missing PSID for Pancake tag:', {
+                            conversationId,
+                            selectedConvo: {
+                                customers: selectedConvo.customers,
+                                from_psid: selectedConvo.from_psid,
+                                from: selectedConvo.from
+                            }
+                        });
+                        return;
+                    }
+                    
+                    // Tạo FormData cho Pancake API
+                    const formData = new FormData();
+                    formData.append('tag_id', String(tagId));
+                    formData.append('value', checked ? '1' : '0'); // 1 = thêm, 0 = xóa
+                    formData.append('psid', String(psid));
+                    formData.append('tag[color]', label.color || '#000000');
+                    formData.append('tag[id]', String(tagId));
+                    formData.append('tag[is_lead_event]', label.isLeadEvent ? 'true' : 'false');
+                    
+                    // Tính lightenColor từ color nếu chưa có
+                    let lightenColor = label.lightenColor;
+                    if (!lightenColor && label.color) {
+                        try {
+                            const hex = label.color.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            lightenColor = `rgba(${r},${g},${b},0.4)`;
+                        } catch (e) {
+                            lightenColor = 'rgba(0,0,0,0.4)';
+                        }
+                    }
+                    formData.append('tag[lighten_color]', lightenColor || 'rgba(0,0,0,0.4)');
+                    formData.append('tag[text]', label.name || label.text || '');
+                    
+                    const toggleTagUrl = `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/toggle_tag?access_token=${token}`;
+                    
+                    console.log('📤 [handleToggleLabel] Calling Pancake toggle_tag API:', {
+                        url: toggleTagUrl.replace(/access_token=[^&]+/, 'access_token=***'),
+                        tagId,
+                        psid,
+                        value: checked ? '1' : '0',
+                        conversationId
+                    });
+                    
+                    try {
+                        const response = await fetch(toggleTagUrl, {
+                            method: 'POST',
+                            body: formData,
+                        });
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text().catch(() => '');
+                            console.error('❌ [handleToggleLabel] Pancake API error:', response.status, errorText);
+                            toast.error(`Không thể ${checked ? 'gán' : 'bỏ'} thẻ Pancake: ${response.status}`);
+                            return;
+                        }
+                        
+                        const result = await response.json().catch(() => ({}));
+                        console.log('✅ [handleToggleLabel] Pancake API success:', result);
+                        
+                        // ✅ Cập nhật tags trong selectedConvo để UI phản ánh thay đổi ngay
+                        setSelectedConvo((prev) => {
+                            if (!prev) return prev;
+                            const currentTags = Array.isArray(prev.tags) ? prev.tags : [];
+                            const tagIdNum = Number(tagId);
+                            
+                            if (checked) {
+                                // Thêm tag nếu chưa có
+                                if (!currentTags.includes(tagIdNum)) {
+                                    return {
+                                        ...prev,
+                                        tags: [...currentTags, tagIdNum],
+                                        pancakeTags: prev.pancakeTags || []
+                                    };
+                                }
+                            } else {
+                                // Xóa tag
+                                return {
+                                    ...prev,
+                                    tags: currentTags.filter(t => t !== tagIdNum),
+                                    pancakeTags: prev.pancakeTags || []
+                                };
+                            }
+                            return prev;
+                        });
+                        
+                        // ✅ Cập nhật conversations list để phản ánh thay đổi
+                        setConversations((prev) => 
+                            prev.map((conv) => {
+                                if (conv.id !== conversationId) return conv;
+                                const currentTags = Array.isArray(conv.tags) ? conv.tags : [];
+                                const tagIdNum = Number(tagId);
+                                
+                                if (checked) {
+                                    if (!currentTags.includes(tagIdNum)) {
+                                        return {
+                                            ...conv,
+                                            tags: [...currentTags, tagIdNum]
+                                        };
+                                    }
+                                } else {
+                                    return {
+                                        ...conv,
+                                        tags: currentTags.filter(t => t !== tagIdNum)
+                                    };
+                                }
+                                return conv;
+                            })
+                        );
+                        
+                        toast.success(checked ? 'Đã gán thẻ Pancake' : 'Đã bỏ thẻ Pancake');
+                        return; // ✅ Thoát sớm, không xử lý logic manual label
+                    } catch (error) {
+                        console.error('❌ [handleToggleLabel] Pancake API exception:', error);
+                        toast.error(`Lỗi khi ${checked ? 'gán' : 'bỏ'} thẻ Pancake`);
+                        return;
+                    }
+                }
+                
+                // ✅ Nếu không phải Pancake tag, xử lý như manual label (logic cũ)
+                
+                // ✅ Kiểm tra nếu là label "NOT LEAD" và đang gán (checked = true)
+                const isNotLeadLabel = label && (label.name === 'NOT LEAD' || label.name === 'NOT_LEAD');
+                if (isNotLeadLabel && checked) {
+                    // Hiển thị modal nhập lý do
+                    setPendingLabelId(labelId);
+                    setPendingChecked(checked);
+                    setLeadStatusNote('');
+                    setShowLeadStatusModal(true);
+                    return; // Tạm dừng, chờ user nhập lý do
+                }
                 
                 // Gọi API messages để lấy conversation_id và customer_id từ response
                 let conversationIdFromAPI = conversationId;
@@ -1130,6 +2444,95 @@ export default function ChatClient({
                     return;
                 }
 
+                // ✅ Nếu đang bỏ gán nhãn hệ thống (LEAD hoặc NOT LEAD), xóa lead status và cập nhật state để UI bỏ nhãn ngay
+                const isLeadLabel = label && (label.name === 'LEAD');
+                if ((isNotLeadLabel || isLeadLabel) && !checked) {
+                    try {
+                        const deleteRes = await fetch(`/api/conversation-lead-status?conversationId=${conversationIdFromAPI}&pageId=${pageId}`, {
+                            method: 'DELETE',
+                        });
+                        if (deleteRes.ok) {
+                            setConversationLeadStatuses((prev) => {
+                                const newStatuses = { ...prev };
+                                delete newStatuses[conversationIdFromAPI];
+                                delete newStatuses[extractConvoKey(conversationIdFromAPI)];
+                                return newStatuses;
+                            });
+                            console.log('✅ [handleToggleLabel] Deleted lead status for conversation:', conversationIdFromAPI);
+                        }
+                    } catch (error) {
+                        console.error('[handleToggleLabel] Error deleting lead status:', error);
+                    }
+                }
+
+                // Tên khách hàng và tên page để lưu vào lead status (dùng cho lọc khách hàng theo thẻ)
+                const customerName = selectedConvo.name || selectedConvo.customers?.[0]?.name || '';
+                const platformDisplayName = { facebook: 'Facebook', instagram_official: 'Instagram', personal_zalo: 'Zalo', tiktok_business_messaging: 'TikTok' }[pageConfig?.platform] || pageConfig?.platform || 'Facebook';
+                const pageDisplayName = `Tin nhắn - ${platformDisplayName} - ${pageConfig?.name || 'Page'}`;
+
+                // ✅ Nếu là label "NOT LEAD" và đang gán, lưu lead status với note
+                if (isNotLeadLabel && checked) {
+                    try {
+                        const leadStatusRes = await fetch('/api/conversation-lead-status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                conversationId: conversationIdFromAPI,
+                                pageId,
+                                status: 'NOT_LEAD',
+                                note: leadStatusNote.trim() || '',
+                                labelId,
+                                name: customerName || null,
+                                pageDisplayName: pageDisplayName || null,
+                                idcustomers: customerIdFromAPI || null,
+                            }),
+                        });
+                        if (leadStatusRes.ok) {
+                            const data = await leadStatusRes.json();
+                            setConversationLeadStatuses((prev) => ({
+                                ...prev,
+                                [conversationIdFromAPI]: {
+                                    status: 'NOT_LEAD',
+                                    note: data.data?.note || leadStatusNote.trim() || '',
+                                },
+                            }));
+                        }
+                    } catch (error) {
+                        console.error('[handleToggleLabel] Error saving lead status:', error);
+                    }
+                }
+
+                // ✅ Nếu là label "LEAD" và đang gán, lưu lead status
+                if (isLeadLabel && checked) {
+                    try {
+                        const leadStatusRes = await fetch('/api/conversation-lead-status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                conversationId: conversationIdFromAPI,
+                                pageId,
+                                status: 'LEAD',
+                                note: null,
+                                labelId,
+                                name: customerName || null,
+                                pageDisplayName: pageDisplayName || null,
+                                idcustomers: customerIdFromAPI || null,
+                            }),
+                        });
+                        if (leadStatusRes.ok) {
+                            setConversationLeadStatuses((prev) => ({
+                                ...prev,
+                                [conversationIdFromAPI]: {
+                                    status: 'LEAD',
+                                    note: null,
+                                },
+                            }));
+                        }
+                    } catch (error) {
+                        console.error('[handleToggleLabel] Error saving lead status:', error);
+                    }
+                }
+
                 // Cập nhật lại state allLabels theo kết quả toggle
                 setAllLabels((prev) =>
                     prev.map((l) => {
@@ -1165,8 +2568,101 @@ export default function ChatClient({
                 console.error('[handleToggleLabel] error:', e);
             }
         },
-        [pageConfig.id, token]
+        [pageConfig.id, token, allLabels, pancakeTags, leadStatusNote]
     );
+
+    // Xử lý khi user xác nhận nhập lý do NOT LEAD
+    const handleConfirmNotLead = useCallback(async () => {
+        if (!pendingLabelId || !selectedConvoRef.current) return;
+
+        const note = leadStatusNote.trim();
+        if (!note) {
+            toast.error('Vui lòng nhập lý do');
+            return;
+        }
+
+        const selectedConvo = selectedConvoRef.current;
+        const conversationId = selectedConvo.id;
+        const pageId = pageConfig.id;
+
+        // Lấy conversationId từ API
+        let conversationIdFromAPI = conversationId;
+        try {
+            let customerIdForRequest = selectedConvo.customers?.[0]?.id 
+                || selectedConvo.customers?.[0]?.fb_id 
+                || selectedConvo.from?.id 
+                || null;
+            
+            let messagesUrl = `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?customer_id=${customerIdForRequest || ''}&access_token=${token}&user_view=true&is_new_api=true&separate_pos=true`;
+            let messagesResponse = await fetch(messagesUrl);
+            
+            if (!messagesResponse.ok && messagesResponse.status === 400) {
+                messagesUrl = `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?access_token=${token}&user_view=true&is_new_api=true&separate_pos=true`;
+                messagesResponse = await fetch(messagesUrl);
+            }
+            
+            if (messagesResponse.ok) {
+                const messagesData = await messagesResponse.json();
+                if (messagesData?.messages && Array.isArray(messagesData.messages) && messagesData.messages.length > 0) {
+                    const firstMessage = messagesData.messages[0];
+                    if (firstMessage?.conversation_id) {
+                        conversationIdFromAPI = firstMessage.conversation_id;
+                    } else if (firstMessage?.conversation?.id) {
+                        conversationIdFromAPI = firstMessage.conversation.id;
+                    }
+                } else if (messagesData?.conversation_id) {
+                    conversationIdFromAPI = messagesData.conversation_id;
+                }
+            }
+        } catch (error) {
+            console.warn('[handleConfirmNotLead] Error getting conversationId:', error);
+        }
+
+        // 1. Gán label trước
+        await handleToggleLabel(pendingLabelId, pendingChecked);
+        
+        // 2. Lưu lead status với note (kèm tên khách hàng, tên page, idcustomers)
+        const customerName = selectedConvo.name || selectedConvo.customers?.[0]?.name || '';
+        const platformDisplayName = { facebook: 'Facebook', instagram_official: 'Instagram', personal_zalo: 'Zalo', tiktok_business_messaging: 'TikTok' }[pageConfig?.platform] || pageConfig?.platform || 'Facebook';
+        const pageDisplayName = `Tin nhắn - ${platformDisplayName} - ${pageConfig?.name || 'Page'}`;
+        const idcustomers = selectedConvo.customers?.[0]?.id || selectedConvo.customers?.[0]?.fb_id || null;
+        try {
+            const leadStatusRes = await fetch('/api/conversation-lead-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversationId: conversationIdFromAPI,
+                    pageId,
+                    status: 'NOT_LEAD',
+                    note: note,
+                    labelId: pendingLabelId,
+                    name: customerName || null,
+                    pageDisplayName: pageDisplayName || null,
+                    idcustomers: idcustomers || null,
+                }),
+            });
+            if (leadStatusRes.ok) {
+                const data = await leadStatusRes.json();
+                setConversationLeadStatuses((prev) => ({
+                    ...prev,
+                    [conversationIdFromAPI]: {
+                        status: 'NOT_LEAD',
+                        note: data.data?.note || note,
+                    },
+                }));
+                toast.success('Đã lưu lý do NOT LEAD');
+            }
+        } catch (error) {
+            console.error('[handleConfirmNotLead] Error saving lead status:', error);
+            toast.error('Lỗi khi lưu lý do');
+        }
+        
+        // Đóng modal
+        setShowLeadStatusModal(false);
+        setPendingLabelId(null);
+        setPendingChecked(false);
+        setLeadStatusNote('');
+    }, [pendingLabelId, pendingChecked, leadStatusNote, handleToggleLabel, pageConfig.id, token]);
 
     // 6) Ước lượng “chưa rep” từ hội thoại
     const isLastFromPage = useCallback(
@@ -1252,7 +2748,7 @@ export default function ChatClient({
         if (!patch || !patch.type) return prev;
         if (patch.type === 'replace' && Array.isArray(patch.items)) {
                 // Incoming replace may contain partial items; merge with existing when possible
-                const incoming = (patch.items || []).filter(isInbox);
+                const incoming = (patch.items || []).filter(c => isInbox(c) || isComment(c));
                 // Build map from incoming
                 const incMap = new Map();
                 incoming.forEach((c) => incMap.set(c.id, c));
@@ -1279,7 +2775,7 @@ export default function ChatClient({
                 return result;
         }
         if (patch.type === 'upsert' && Array.isArray(patch.items)) {
-            const incoming = (patch.items || []).filter(isInbox);
+            const incoming = (patch.items || []).filter(c => isInbox(c) || isComment(c));
             return mergeConversations(prev, incoming);
         }
         if (patch.type === 'remove' && Array.isArray(patch.ids)) {
@@ -1318,8 +2814,24 @@ export default function ChatClient({
             const currentKey = current ? extractConvoKey(current.id) : null;
             const targetKey = extractConvoKey(targetId);
             
+            // ✅ Normalize messages (có thể tạo nhiều messages từ 1 raw message)
+            const convFromName = current ? getConvoDisplayName(current) : null;
+            const pageName = pageConfig?.name || 'Page Facebook';
+            const normalizedMsgs = normalizeMessagesFromRaw(msg, pageConfig.id, convFromName, pageName);
+            
+            // ✅ Filter theo conversation type
+            const conversationType = selectedConvoTypeRef.current;
+            const filteredMsgs = normalizedMsgs.filter(normalized => {
+                if (conversationType === 'COMMENT') {
+                    return normalized.channel === 'COMMENT';
+                } else if (conversationType === 'INBOX') {
+                    return normalized.channel === 'INBOX';
+                }
+                return true;
+            });
+            
             // Kiểm tra tin nhắn mới có phải từ khách hàng không và có chứa số điện thoại
-            const normalizedMsg = normalizePancakeMessage(msg, pageConfig.id);
+            const normalizedMsg = filteredMsgs[0] || normalizedMsgs.find(m => m.senderType === 'customer');
             const isFromCustomer = normalizedMsg?.senderType === 'customer';
             
             if (isFromCustomer && normalizedMsg?.content?.type === 'text') {
@@ -1361,18 +2873,17 @@ export default function ChatClient({
                 // Thay vào đó, chỉ thêm tin nhắn mới vào danh sách nếu chưa có
                 // Điều này tránh việc thay thế toàn bộ messages và làm mất tin nhắn cũ đã load
                 
-                const normalizedNewMsg = normalizePancakeMessage(msg, pageConfig.id);
-                
                 setMessages(prevMessages => {
-                    // Kiểm tra xem tin nhắn đã tồn tại chưa
-                    const exists = prevMessages.some(m => m.id === normalizedNewMsg.id);
-                    if (exists) {
-                        // Tin nhắn đã có, không cần thêm lại
-                        return prevMessages;
-                    }
+                    // Thêm tất cả filtered messages mới vào danh sách
+                    const updated = [...prevMessages];
+                    filteredMsgs.forEach(normalizedNewMsg => {
+                        // Kiểm tra xem tin nhắn đã tồn tại chưa
+                        const exists = updated.some(m => m.id === normalizedNewMsg.id);
+                        if (!exists) {
+                            updated.push(normalizedNewMsg);
+                        }
+                    });
                     
-                    // Thêm tin nhắn mới vào cuối danh sách
-                    const updated = [...prevMessages, normalizedNewMsg];
                     // Sắp xếp lại theo thời gian để đảm bảo đúng thứ tự
                     const sorted = sortAscByTime(updated);
                     
@@ -1437,10 +2948,10 @@ export default function ChatClient({
             }
         });
 
-        // Lấy danh sách ban đầu
+        // Lấy danh sách ban đầu - Hỗ trợ cả INBOX và COMMENT
         s.emit('conv:get', { pageId: pageConfig.id, token, current_count: 0 }, (res) => {
             if (res?.ok && Array.isArray(res.items)) {
-                const incoming = res.items.filter(isInbox);
+                const incoming = res.items.filter(c => isInbox(c) || isComment(c));
                 setConversations((prev) => {
                     const merged = mergeConversations(prev, incoming);
                     return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
@@ -1488,7 +2999,7 @@ export default function ChatClient({
                 { pageId: pageConfig.id, token, current_count: nextCount },
                 (ack) => {
                     if (ack?.ok && Array.isArray(ack.items)) {
-                        const incoming = ack.items.filter(isInbox);
+                        const incoming = ack.items.filter(c => isInbox(c) || isComment(c));
                         setConversations((prev) => {
                             const merged = mergeConversations(prev, incoming);
                             return merged.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
@@ -1523,11 +3034,13 @@ export default function ChatClient({
         const prevScrollHeight = scroller ? scroller.scrollHeight : 0;
         const prevScrollTop = scroller ? scroller.scrollTop : 0;
 
-        // ✅ QUAN TRỌNG: Với Zalo (pzl_*), phải giữ nguyên conversation.id GỐC
+        // ✅ QUAN TRỌNG: Xác định conversationIdForRequest
+        const conversationType = selectedConvoTypeRef.current;
+        const isComment = conversationType === 'COMMENT';
         const isZalo = pageConfig?.platform === 'personal_zalo';
-        const conversationIdForRequest = isZalo 
-            ? selectedConvo.id  // ✅ Zalo: giữ nguyên "pzl_12345_67890"
-            : extractConvoKey(selectedConvo.id);  // Facebook/Instagram: extract
+        const conversationIdForRequest = (isComment || isZalo)
+            ? selectedConvo.id  // ✅ COMMENT hoặc Zalo: giữ nguyên ID
+            : extractConvoKey(selectedConvo.id);  // Facebook/Instagram INBOX: extract
         
         // Với một số nền tảng (ví dụ: Zalo cá nhân), conversation có thể không có customers[0].id
         // Fallback lần lượt: customers[0].id -> from.id -> from_psid
@@ -1536,6 +3049,9 @@ export default function ChatClient({
             || selectedConvo?.from_psid
             || null;
         
+        const convFromName = getConvoDisplayName(selectedConvo);
+        const pageName = pageConfig?.name || 'Page Facebook';
+        
         socketRef.current.emit(
             'msg:get',
             { pageId: pageConfig.id, token, conversationId: conversationIdForRequest, customerId: customerId || null, count: currentCount },
@@ -1543,12 +3059,26 @@ export default function ChatClient({
                 if (res?.ok && Array.isArray(res.items)) {
                     const incomingMessages = res.items;
 
+                    // ✅ Normalize messages (có thể tạo nhiều messages từ 1 raw message)
+                    const allNormalized = incomingMessages.flatMap(rawMsg => 
+                        normalizeMessagesFromRaw(rawMsg, pageConfig.id, convFromName, pageName)
+                    );
+                    
+                    // ✅ Filter theo conversation type
+                    const filteredNormalized = allNormalized.filter(normalized => {
+                        if (conversationType === 'COMMENT') {
+                            return normalized.channel === 'COMMENT';
+                        } else if (conversationType === 'INBOX') {
+                            return normalized.channel === 'INBOX';
+                        }
+                        return true;
+                    });
+
                     // Kiểm tra xem có tin nhắn mới không
                     const prevMessageIds = new Set(messages.map(m => m.id));
-                    const newMessages = incomingMessages.filter(rawMsg => {
-                        const normalized = normalizePancakeMessage(rawMsg, pageConfig.id);
-                        return !prevMessageIds.has(normalized.id);
-                    });
+                    const newMessages = filteredNormalized.filter(normalized => 
+                        !prevMessageIds.has(normalized.id)
+                    );
 
                     // Nếu không có tin nhắn mới, đánh dấu hết tin nhắn
                     if (newMessages.length === 0) {
@@ -1561,8 +3091,7 @@ export default function ChatClient({
                     setMessages(prevMessages => {
                         const messageMap = new Map();
                         // Thêm tin nhắn mới tải về (cũ hơn về mặt thời gian)
-                        incomingMessages.forEach(rawMsg => {
-                            const normalized = normalizePancakeMessage(rawMsg, pageConfig.id);
+                        filteredNormalized.forEach(normalized => {
                             messageMap.set(normalized.id, normalized);
                         });
                         // Thêm tin nhắn đã có
@@ -1686,7 +3215,9 @@ export default function ChatClient({
     // ===================== Handlers =====================
     const handleSelectConvo = useCallback(
         async (conversation) => {
-            if (selectedConvo?.id === conversation.id) return;
+            // Với COMMENT type, luôn cho phép reload để lấy dữ liệu mới
+            const isCommentType = conversation?.type === 'COMMENT';
+            if (selectedConvo?.id === conversation.id && !isCommentType) return;
 
             const s = socketRef.current;
             if (!s) return;
@@ -1700,15 +3231,33 @@ export default function ChatClient({
             // Defensive: if conversation lacks customers/from, try to find richer object in current state
             setConversations((prev) => {
                 const richer = prev.find((c) => c.id === conversation.id) || prev.find((c) => extractConvoKey(c.id) === extractConvoKey(conversation.id));
-                if (richer) {
-                    setSelectedConvo({ ...richer, ...conversation });
-                } else {
-                    setSelectedConvo(conversation);
+                let enrichedConvo = richer ? { ...richer, ...conversation } : conversation;
+                
+                // ✅ Enrich với pancakeTags nếu chưa có
+                if (!enrichedConvo.pancakeTags || enrichedConvo.pancakeTags.length === 0) {
+                    const rawTags = Array.isArray(enrichedConvo.tags) ? enrichedConvo.tags : [];
+                    const enrichedTags = rawTags
+                        .map((tagId) => {
+                            const idStr = String(tagId);
+                            return pancakeTags.find((t) => String(t.tagId) === idStr) || null;
+                        })
+                        .filter(Boolean);
+                    if (enrichedTags.length > 0) {
+                        enrichedConvo = { ...enrichedConvo, pancakeTags: enrichedTags };
+                    }
                 }
+                
+                setSelectedConvo(enrichedConvo);
                 return prev;
             });
+            
+            // ✅ Lưu conversation type để filter messages
+            const conversationType = getConvoType(conversation);
+            selectedConvoTypeRef.current = conversationType;
+            
             // Reset tất cả state khi chuyển conversation (giống testpancake)
             setMessages([]); // Clear messages trước
+            setPostInfo(null); // Clear post info
             setHasMore(true); // Reset state load-more
             setIsLoadingOlder(false); // Reset loading older state
             setIsLoadingMessages(true);
@@ -1720,12 +3269,145 @@ export default function ChatClient({
             lastScrollTopRef.current = 0;
             shouldScrollToBottomRef.current = false; // Reset scroll flag - sẽ được set sau khi load xong
 
-            // ✅ QUAN TRỌNG: Với Zalo (pzl_*), phải giữ nguyên conversation.id GỐC
-            // Không được extract vì server sẽ build URL sai
+            // ✅ QUAN TRỌNG: Nếu là COMMENT, không dùng socket msg:get (pipeline INBOX),
+            // mà gọi trực tiếp Pancake REST để lấy đầy đủ post + comments.
+            const isComment = conversationType === 'COMMENT';
+            if (isComment) {
+                try {
+                    const convFromName = getConvoDisplayName(conversation);
+                    const pageName = pageConfig?.name || 'Page Facebook';
+
+                    const conversationPath = conversation.id; // giữ nguyên dạng pageId_postId/commentId
+
+                    // Pancake yêu cầu customer_id cho COMMENT, lấy lần lượt từ customers[0].id, customers[0].fb_id, conv_from.id, from.id
+                    const customerIdForRequest =
+                        conversation?.customers?.[0]?.id ||
+                        conversation?.customers?.[0]?.fb_id ||
+                        conversation?.conv_from?.id ||
+                        conversation?.from?.id ||
+                        null;
+
+                    const url =
+                        `https://pancake.vn/api/v1/pages/${pageConfig.id}` +
+                        `/conversations/${conversationPath}/messages` +
+                        `?access_token=${token}` +
+                        `&user_view=true&is_new_api=true&separate_pos=true` +
+                        (customerIdForRequest ? `&customer_id=${encodeURIComponent(customerIdForRequest)}` : '');
+
+                    console.log('📤 [ChatClient][COMMENT] Fetching conversation via REST:', {
+                        url,
+                        conversationId: conversation.id,
+                    });
+
+                    const resp = await fetch(url, { cache: 'no-store' });
+                    if (!resp.ok) {
+                        const text = await resp.text().catch(() => '');
+                        console.error('❌ [ChatClient][COMMENT] REST error:', resp.status, text);
+                        toast.error('Không thể tải bình luận từ Pancake');
+                        setIsLoadingMessages(false);
+                        return;
+                    }
+
+                    const data = await resp.json();
+
+                    // ----- Post info -----
+                    const postData = data.post || null;
+                    if (postData) {
+                        const atts = Array.isArray(postData.attachments?.data)
+                            ? postData.attachments.data
+                            : [];
+                        const postImages = atts
+                            .filter(a => a?.type === 'photo' || a?.type === 'video_inline' || a?.image_data)
+                            .map(a => ({
+                                url:
+                                    a?.url ||
+                                    a?.media?.image?.src ||
+                                    a?.image_data?.url ||
+                                    a?.preview_url ||
+                                    '',
+                                width: a?.image_data?.width || a?.media?.image?.width,
+                                height: a?.image_data?.height || a?.media?.image?.height,
+                            }))
+                            .filter(img => img.url);
+
+                        const finalPostId = postData.post_id || postData.id || conversation.post_id || null;
+
+                        setPostInfo({
+                            message: postData.message || '',
+                            images: postImages,
+                            postId: finalPostId,
+                            postUrl: postData.permalink_url || postData.url,
+                        });
+                        lastPostIdRef.current = finalPostId;
+                        console.log('🧩 [ChatClient][COMMENT] postInfo resolved:', {
+                            postId: finalPostId,
+                            fromPost: postData.post_id || postData.id,
+                            fromConversation: conversation.post_id,
+                            images: postImages.length,
+                        });
+                    } else {
+                        setPostInfo(null);
+                        lastPostIdRef.current = conversation.post_id || null;
+                        console.log('🧩 [ChatClient][COMMENT] No postData, using conversation.post_id:', {
+                            postId: lastPostIdRef.current,
+                        });
+                    }
+
+                    // ----- Messages / comments -----
+                    const rawItems = Array.isArray(data.messages)
+                        ? data.messages
+                        : Array.isArray(data.items)
+                            ? data.items
+                            : [];
+
+                    console.log('📥 [ChatClient][COMMENT] REST messages count:', rawItems.length);
+
+                    // Tìm commentId (msg_id) gần nhất từ rawItems để dùng cho reply_comment
+                    let lastCommentMsgId = null;
+                    const asArrayLocal = (v) => (Array.isArray(v) ? v : []);
+                    for (const raw of rawItems) {
+                        const atts = [
+                            ...asArrayLocal(raw.attachments),
+                            ...asArrayLocal(raw.attachments?.data),
+                        ];
+                        for (const att of atts) {
+                            if (att?.comment?.msg_id) {
+                                lastCommentMsgId = att.comment.msg_id;
+                            }
+                        }
+                    }
+                    lastCommentMsgIdRef.current = lastCommentMsgId;
+                    console.log('🧩 [ChatClient][COMMENT] lastCommentMsgId extracted from raw:', {
+                        lastCommentMsgId,
+                    });
+
+                    const normalized = sortAscByTime(
+                        rawItems.flatMap(m =>
+                            normalizeMessagesFromRaw(m, pageConfig.id, convFromName, pageName)
+                        )
+                    );
+
+                    // COMMENT: hiển thị tất cả messages (INBOX + COMMENT) để không mất system text.
+                    setMessages(normalized);
+                    setHasMore(rawItems.length > 0);
+                } catch (e) {
+                    console.error('❌ [ChatClient][COMMENT] Unexpected error:', e);
+                    toast.error('Không thể tải bình luận');
+                    setMessages([]);
+                    setPostInfo(null);
+                } finally {
+                    setIsLoadingMessages(false);
+                }
+
+                // Không dùng socket msg:get cho COMMENT (pipeline INBOX không phù hợp)
+                return;
+            }
+
+            // ✅ QUAN TRỌNG: Xác định conversationIdForRequest cho các loại khác (INBOX/Zalo)
             const isZalo = pageConfig?.platform === 'personal_zalo';
-            const conversationIdForRequest = isZalo 
-                ? conversation.id  // ✅ Zalo: giữ nguyên "pzl_12345_67890"
-                : extractConvoKey(conversation.id);  // Facebook/Instagram: extract "123456789"
+            const conversationIdForRequest = isZalo
+                ? conversation.id  // ✅ Zalo: giữ nguyên ID
+                : extractConvoKey(conversation.id);  // Facebook/Instagram INBOX: extract "123456789"
             
             // Với Zalo cá nhân và một số nguồn, không có customers[0].id -> dùng from.id hoặc from_psid
             // Đối với Zalo, có thể không cần customerId để tải tin nhắn
@@ -1754,12 +3436,18 @@ export default function ChatClient({
                 }
             }
             
+            // ✅ Lấy thông tin để normalize messages
+            const convFromName = getConvoDisplayName(conversation);
+            const pageName = pageConfig?.name || 'Page Facebook';
+            
             console.log('📤 [ChatClient] Loading messages:', {
                 platform: pageConfig?.platform,
                 conversationId: conversation.id,
                 conversationIdForRequest,
+                isComment,
                 isZalo,
-                customerId
+                customerId,
+                conversationType
             });
             
             // Tải tin nhắn - với Zalo, customerId có thể là null
@@ -1768,7 +3456,7 @@ export default function ChatClient({
                 { 
                     pageId: pageConfig.id, 
                     token, 
-                    conversationId: conversationIdForRequest,  // ✅ Gửi ID gốc cho Zalo
+                    conversationId: conversationIdForRequest,  // ✅ Gửi ID gốc cho COMMENT/Zalo
                     customerId: customerId || null, 
                     count: 0 
                 },
@@ -1776,15 +3464,98 @@ export default function ChatClient({
                     console.log('📥 [ChatClient] Messages response:', {
                         ok: res?.ok,
                         itemsCount: res?.items?.length || 0,
+                        hasPost: !!res?.post,
                         error: res?.error
                     });
                     
                     if (res?.ok && Array.isArray(res.items)) {
-                        const normalized = sortAscByTime(
-                            res.items.map((m) => normalizePancakeMessage(m, pageConfig.id))
+                        // ✅ Xử lý post info cho COMMENT conversations
+                        if (isComment && res.post) {
+                            const postData = res.post;
+                            const asArrayHelper = (v) => (Array.isArray(v) ? v : []);
+                            const postAttachments = asArrayHelper(postData.attachments || postData.attachment);
+                            const postImages = postAttachments
+                                .filter(pa => pa?.type === 'photo' || pa?.type === 'video_inline' || pa?.image_data)
+                                .map(pa => ({
+                                    url: pa?.url || pa?.image_data?.url || pa?.preview_url,
+                                    width: pa?.image_data?.width || pa?.width,
+                                    height: pa?.image_data?.height || pa?.height,
+                                }))
+                                .filter(img => img.url);
+                            
+                            setPostInfo({
+                                message: postData.message || postData.text || '',
+                                images: postImages,
+                                postId: postData.id || conversation.post_id,
+                                postUrl: postData.permalink_url || postData.url,
+                            });
+                        }
+                        
+                        // ✅ Normalize messages (có thể tạo nhiều messages từ 1 raw message)
+                        console.log('🔍 [ChatClient] Raw messages from API:', {
+                            count: res.items.length,
+                            sample: res.items[0] ? {
+                                id: res.items[0].id,
+                                type: res.items[0].type,
+                                original_message: res.items[0].original_message?.substring(0, 50),
+                            } : null
+                        });
+                        
+                        let normalized = sortAscByTime(
+                            res.items.flatMap((m) => {
+                                const normalizedMsgs = normalizeMessagesFromRaw(m, pageConfig.id, convFromName, pageName);
+                                console.log('🔍 [ChatClient] Normalized from raw:', {
+                                    rawType: m.type,
+                                    rawId: m.id,
+                                    normalizedCount: normalizedMsgs.length,
+                                    channels: normalizedMsgs.map(nm => nm.channel)
+                                });
+                                return normalizedMsgs;
+                            })
                         );
-                        console.log('✅ [ChatClient] Normalized messages:', normalized.length);
-                        setMessages(normalized);
+                        
+                        // ✅ QUAN TRỌNG: Nếu là COMMENT conversation, đảm bảo tất cả messages có channel === 'COMMENT'
+                        // (fallback cho trường hợp messages từ API không có type === 'COMMENT')
+                        if (conversationType === 'COMMENT') {
+                            normalized = normalized.map(msg => {
+                                if (msg.channel !== 'COMMENT') {
+                                    console.warn('⚠️ [ChatClient] Message không có channel === "COMMENT" trong COMMENT conversation, đang sửa:', {
+                                        msgId: msg.id,
+                                        currentChannel: msg.channel
+                                    });
+                                    return {
+                                        ...msg,
+                                        channel: 'COMMENT',
+                                        metadata: msg.metadata || {
+                                            postId: conversation.post_id,
+                                            conversationId: conversation.id,
+                                            author: msg.senderType === 'customer' ? convFromName : pageName,
+                                        }
+                                    };
+                                }
+                                return msg;
+                            });
+                        }
+                        
+                        // ✅ Filter messages theo conversation type
+                        const filteredMessages = normalized.filter(msg => {
+                            if (conversationType === 'COMMENT') {
+                                return msg.channel === 'COMMENT';
+                            } else if (conversationType === 'INBOX') {
+                                return msg.channel === 'INBOX';
+                            }
+                            return true; // Nếu không xác định được, hiển thị tất cả
+                        });
+                        
+                        console.log('✅ [ChatClient] Normalized messages:', {
+                            total: normalized.length,
+                            filtered: filteredMessages.length,
+                            conversationType,
+                            channels: normalized.map(m => ({ id: m.id, channel: m.channel, type: m.content?.type })),
+                            filteredChannels: filteredMessages.map(m => ({ id: m.id, channel: m.channel, type: m.content?.type }))
+                        });
+                        
+                        setMessages(filteredMessages);
                         // Set hasMore dựa trên số lượng tin nhắn (nếu có tin nhắn thì có thể còn tin nhắn cũ hơn)
                         setHasMore(res.items.length > 0);
                         
@@ -1825,7 +3596,7 @@ export default function ChatClient({
                 }
             );
         },
-        [pageConfig.id, token, selectedConvo?.id]
+        [pageConfig.id, token, selectedConvo?.id, pancakeTags]
     );
 
     // ===================== Preselect matching logic =====================
@@ -1970,7 +3741,7 @@ export default function ChatClient({
         
         s.emit('conv:search', { pageId: pageConfig.id, token, q: queries[0] }, (ack) => {
             if (ack?.ok && Array.isArray(ack.items)) {
-                const items = ack.items.filter(isInbox);
+                const items = ack.items.filter(c => isInbox(c) || isComment(c));
                 // pick best by same scoring
                 let b = null; let bs = 0;
                 for (const it of items) {
@@ -1982,6 +3753,27 @@ export default function ChatClient({
             }
         });
     }, [preselect, conversations, pageConfig?.id, pageConfig?.platform, token, handleSelectConvo, extractPhonesFromConvo, stripDiacritics, normalizePhone]);
+
+    // Mở sẵn hội thoại khi vào từ link (vd: /pancake/[pageId]?conversationId=xxx) - dùng khi lọc thẻ LEAD/NOT_LEAD
+    const preselectConversationIdAppliedRef = useRef(false);
+    const lastPreselectIdRef = useRef(null);
+    useEffect(() => {
+        if (preselectConversationId !== lastPreselectIdRef.current) {
+            lastPreselectIdRef.current = preselectConversationId;
+            preselectConversationIdAppliedRef.current = false;
+        }
+    }, [preselectConversationId]);
+    useEffect(() => {
+        if (!preselectConversationId || !conversations.length || preselectConversationIdAppliedRef.current) return;
+        const targetId = String(preselectConversationId).trim();
+        const matched = conversations.find(
+            (c) => c.id === targetId || extractConvoKey(c.id) === extractConvoKey(targetId)
+        );
+        if (matched) {
+            preselectConversationIdAppliedRef.current = true;
+            handleSelectConvo(matched);
+        }
+    }, [preselectConversationId, conversations, handleSelectConvo]);
 
     const triggerPickImage = useCallback(() => {
         if (!selectedConvo) {
@@ -2034,6 +3826,7 @@ export default function ChatClient({
                             size: f.size,
                             width: null,
                             height: null,
+                            file: f, // ✅ Lưu file object để dùng cho tính SHA1 (COMMENT)
                         },
                     ]);
                 } catch (_) {
@@ -2052,6 +3845,7 @@ export default function ChatClient({
                             size: f.size,
                             width: null,
                             height: null,
+                            file: f, // ✅ Lưu file object để dùng cho tính SHA1 (COMMENT)
                         },
                     ]);
                 }
@@ -2260,6 +4054,250 @@ export default function ChatClient({
         if (!text && !hasImages && !hasVideos) {
             console.log('❌ No text or media to send');
             return;
+        }
+
+        // ================== COMMENT conversation: gửi reply_comment + sync_comments ==================
+        if (selectedConvo?.type === 'COMMENT') {
+            // COMMENT conversation: hỗ trợ cả text và ảnh
+            if (!text && !hasImages) {
+                toast.error('Vui lòng nhập nội dung bình luận hoặc chọn ảnh');
+                return;
+            }
+            if (hasVideos) {
+                toast.error('Hiện tại chỉ hỗ trợ gửi bình luận dạng text và ảnh cho COMMENT');
+                return;
+            }
+
+            try {
+                const pageId = pageConfig.id;
+                const accessToken = pageConfig.accessToken || token;
+                const conversationId = selectedConvo.id;
+
+                // Lấy postId và commentId ưu tiên từ ref đã lưu khi load COMMENT
+                const postId =
+                    lastPostIdRef.current ||
+                    postInfo?.postId ||
+                    selectedConvo?.post_id ||
+                    null;
+
+                let commentId = lastCommentMsgIdRef.current || null;
+
+                // Fallback 1: nếu ref chưa có, thử tìm từ messages hiện tại
+                let lastCustomerComment = null;
+                if (!commentId) {
+                    lastCustomerComment = [...messages]
+                        .filter((m) =>
+                            m.channel === 'COMMENT' &&
+                            m.senderType === 'customer' &&
+                            m.metadata?.commentMsgId
+                        )
+                        .sort((a, b) => new Date(b.inserted_at) - new Date(a.inserted_at))[0];
+                    commentId = lastCustomerComment?.metadata?.commentMsgId || null;
+                }
+
+                // Fallback 2: theo spec Pancake, với COMMENT conversation,
+                // conversationId và commentId có thể giống nhau (postId_commentId).
+                if (!commentId && typeof conversationId === 'string') {
+                    commentId = conversationId;
+                }
+
+                console.log('[COMMENT][send] prepared variables:', {
+                    pageId,
+                    conversationId,
+                    postId,
+                    commentId,
+                    lastPostIdRef: lastPostIdRef.current,
+                    lastCommentMsgIdRef: lastCommentMsgIdRef.current,
+                    lastCustomerComment: lastCustomerComment
+                        ? {
+                              id: lastCustomerComment.id,
+                              inserted_at: lastCustomerComment.inserted_at,
+                              metadata: lastCustomerComment.metadata,
+                          }
+                        : null,
+                    accessTokenPreview: accessToken ? accessToken.slice(0, 10) + '...' : null,
+                });
+
+                if (!postId || !commentId) {
+                    toast.error('Không tìm được post/comment để reply');
+                    return;
+                }
+
+                // ========== XỬ LÝ ẢNH CHO COMMENT (nếu có) ==========
+                if (hasImages) {
+                    // Helper: Load ảnh để lấy width/height (fallback nếu chưa có)
+                    const getImageDimensions = (file) => {
+                        return new Promise((resolve) => {
+                            const img = new Image();
+                            const url = URL.createObjectURL(file);
+                            img.onload = () => {
+                                URL.revokeObjectURL(url);
+                                resolve({ width: img.width, height: img.height });
+                            };
+                            img.onerror = () => {
+                                URL.revokeObjectURL(url);
+                                resolve({ width: null, height: null });
+                            };
+                            img.src = url;
+                        });
+                    };
+
+                    // Gửi từng ảnh: ảnh đã được upload sẵn lên Pancake bằng uploadImageToPancakeAction
+                    // => chỉ cần lấy contentUrl đã có và gọi reply_comment
+                    for (let i = 0; i < pendingImages.length; i++) {
+                        const img = pendingImages[i];
+                        const file = img.file; // File object từ onPickImage
+
+                        // Ảnh COMMENT sử dụng chính contentUrl đã được upload bằng uploadImageToPancakeAction
+                        const contentUrl = img.contentUrl || img.remoteUrl;
+
+                        if (!contentUrl) {
+                            console.error('[COMMENT][image] Missing contentUrl for image:', {
+                                index: i,
+                                localId: img.localId,
+                                name: img.name,
+                            });
+                            toast.error(`Ảnh ${i + 1} chưa upload xong, vui lòng chờ rồi thử lại`);
+                            continue;
+                        }
+
+                        try {
+                            // Lấy dimensions nếu chưa có
+                            let imageWidth = img.width;
+                            let imageHeight = img.height;
+                            if ((!imageWidth || !imageHeight) && file) {
+                                const dimensions = await getImageDimensions(file);
+                                imageWidth = dimensions.width;
+                                imageHeight = dimensions.height;
+                            }
+
+                            console.log('[COMMENT][image][reply] using existing contentUrl:', {
+                                index: i,
+                                contentUrl,
+                                imageWidth,
+                                imageHeight,
+                            });
+
+                            // Gửi reply_comment với content_url đã có
+                            const imageMessage = i === 0 ? text : ''; // Chỉ gửi text kèm ảnh đầu tiên
+                            const replyRes = await fetch(
+                                `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?access_token=${accessToken}`,
+                                {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        action: 'reply_comment',
+                                        message: imageMessage,
+                                        content_url: contentUrl,
+                                        image_data: {
+                                            width: imageWidth,
+                                            height: imageHeight,
+                                        },
+                                        message_id: commentId,
+                                        parent_id: commentId,
+                                        post_id: postId,
+                                        send_by_platform: 'web',
+                                    }),
+                                }
+                            );
+
+                            const replyText = await replyRes.text().catch(() => '');
+                            console.log('[COMMENT][image][reply_comment] status:', replyRes.status, 'body:', replyText);
+                            if (!replyRes.ok) {
+                                toast.error(`Không thể gửi ảnh ${i + 1} lên Pancake`);
+                                continue;
+                            }
+
+                        } catch (err) {
+                            console.error(`[COMMENT][image] Error processing image ${i + 1}:`, err);
+                            toast.error(`Lỗi khi xử lý ảnh ${i + 1}: ${err.message}`);
+                        }
+                    }
+
+                    // Bước 5: Sync comments (sau khi gửi tất cả ảnh)
+                    const syncRes = await fetch(
+                        `https://pancake.vn/api/v1/pages/${pageId}/sync_comments?access_token=${accessToken}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({ post_id: postId }),
+                        }
+                    );
+
+                    const syncText = await syncRes.text().catch(() => '');
+                    console.log('[COMMENT][image][sync_comments] status:', syncRes.status, 'body:', syncText);
+                    if (!syncRes.ok) {
+                        toast.error('Không thể đồng bộ bình luận từ Facebook');
+                    }
+
+                    // Reload messages
+                    if (selectedConvoRef.current) {
+                        await handleSelectConvo({ ...selectedConvoRef.current });
+                    } else {
+                        await handleSelectConvo(selectedConvo);
+                    }
+
+                    setPendingImages([]);
+                    formRef.current?.reset();
+                    return;
+                }
+
+                // ========== GỬI TEXT ONLY (không có ảnh) ==========
+                // (1) reply_comment
+                const replyRes = await fetch(
+                    `https://pancake.vn/api/v1/pages/${pageId}/conversations/${conversationId}/messages?access_token=${accessToken}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'reply_comment',
+                            message: text,
+                            message_id: commentId,
+                            parent_id: commentId,
+                            post_id: postId,
+                            send_by_platform: 'web',
+                        }),
+                    }
+                );
+
+                const replyText = await replyRes.text().catch(() => '');
+                console.log('[COMMENT][reply_comment] status:', replyRes.status, 'body:', replyText);
+                if (!replyRes.ok) {
+                    toast.error('Không thể gửi bình luận lên Pancake');
+                    return;
+                }
+
+                // (2) sync_comments
+                const syncRes = await fetch(
+                    `https://pancake.vn/api/v1/pages/${pageId}/sync_comments?access_token=${accessToken}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({ post_id: postId }),
+                    }
+                );
+
+                const syncText = await syncRes.text().catch(() => '');
+                console.log('[COMMENT][sync_comments] status:', syncRes.status, 'body:', syncText);
+                if (!syncRes.ok) {
+                    toast.error('Không thể đồng bộ bình luận từ Facebook');
+                    return;
+                }
+
+                // (3) Lấy lại toàn bộ messages cho COMMENT bằng handleSelectConvo (đã dùng REST)
+                if (selectedConvoRef.current) {
+                    await handleSelectConvo({ ...selectedConvoRef.current });
+                } else {
+                    await handleSelectConvo(selectedConvo);
+                }
+
+                formRef.current?.reset();
+            } catch (e) {
+                console.error('❌ [COMMENT][send] error:', e);
+                toast.error('Gửi bình luận thất bại');
+            }
+
+            return; // Không chạy pipeline INBOX bên dưới
         }
 
         // Optimistic UI - chỉ hiển thị loading state, không tạo tin nhắn tạm
@@ -2471,7 +4509,7 @@ export default function ChatClient({
         setIsSearching(true);
         s.emit('conv:search', { pageId: pageConfig.id, token, q }, (ack) => {
             if (ack?.ok && Array.isArray(ack.items)) {
-                setSearchResults(ack.items.filter(isInbox));
+                setSearchResults(ack.items.filter(c => isInbox(c) || isComment(c)));
             } else if (ack?.error) {
                 toast.error('Tìm kiếm thất bại');
                 console.error('[conv:search] error:', ack.error);
@@ -2560,12 +4598,34 @@ export default function ChatClient({
     const listForSidebar = isSearching ? searchResults : conversations;
 
     const filteredSortedConversations = useMemo(() => {
+        // Helper: map convo.tags (ID) -> full tag objects từ pancakeTags
+        const getConvPancakeTags = (convo) => {
+            if (!convo) return [];
+            const rawTags = Array.isArray(convo.tags) ? convo.tags : [];
+            // Nếu đã là object (đã được enrich ở đâu đó) thì dùng luôn
+            if (rawTags.length > 0 && typeof rawTags[0] === 'object') {
+                return rawTags;
+            }
+            // Pancake API trả về tags dạng number[] -> join với pancakeTags (từ Mongo)
+            return rawTags
+                .map((tagId) => {
+                    const idStr = String(tagId);
+                    return pancakeTags.find((t) => String(t.tagId) === idStr) || null;
+                })
+                .filter(Boolean);
+        };
+        
+        // Debug logging
+        if (selectedTagIds.length > 0) {
+            console.log(`[filteredSortedConversations] 🔍 Filtering with tags: ${selectedTagIds.join(',')}, tagFilterConversations: ${tagFilterConversations.length}, listForSidebar: ${listForSidebar.length}`);
+        }
+
         // Nếu có filter theo label, sử dụng conversations từ label filter
         if (selectedFilterLabelIds.length > 0) {
             // Merge conversations từ label filter với conversations hiện tại
             const merged = [...labelFilterConversations];
-            const existingIds = new Set(merged.map(c => c.id));
-            
+            const existingIds = new Set(merged.map((c) => c.id));
+
             // Thêm các conversations từ listForSidebar nếu chưa có
             listForSidebar.forEach((convo) => {
                 const conversationId = convo?.id;
@@ -2581,9 +4641,14 @@ export default function ChatClient({
                             return false;
                         })
                         .map((label) => label._id);
-                    const hasAll = selectedFilterLabelIds.every((id) => customerLabelIds.includes(id));
+                    const hasAll = selectedFilterLabelIds.every((id) =>
+                        customerLabelIds.includes(id)
+                    );
                     if (hasAll) {
-                        merged.push(convo);
+                        merged.push({
+                            ...convo,
+                            pancakeTags: getConvPancakeTags(convo),
+                        });
                         existingIds.add(conversationId);
                     }
                 }
@@ -2596,26 +4661,83 @@ export default function ChatClient({
             });
         }
 
-        // Nếu không có filter, chỉ filter theo label nếu cần
-        const list = (listForSidebar || []).filter((convo) => {
-            // Không filter gì nếu không chọn label
-            return true;
-        });
-        return list.sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
-    }, [listForSidebar, selectedFilterLabelIds, allLabels, labelFilterConversations]);
+        // ✅ THEO TÀI LIỆU: Khi filter tag, dùng conversations từ API (có conversations cũ)
+        // Merge với conversations từ socket để có realtime updates
+        let list = [];
+        
+        if (selectedTagIds.length > 0) {
+            // ✅ QUAN TRỌNG: Khi filter tag, CHỈ dùng conversations từ API
+            // KHÔNG merge với conversations từ socket để tránh hiển thị tất cả conversations
+            if (tagFilterConversations.length === 0) {
+                // Chưa load xong từ API, trả về rỗng (sẽ hiển thị loading)
+                console.log('[filteredSortedConversations] ⏳ Waiting for tagFilterConversations to load...');
+                return [];
+            }
+            
+            // ✅ CHỈ dùng conversations từ API (đã filter theo tag từ Pancake)
+            // Không merge với socket để tránh hiển thị tất cả conversations
+            list = tagFilterConversations;
+            
+            console.log(`[filteredSortedConversations] ✅ Using ${list.length} conversations from API for tags: ${selectedTagIds.join(',')} (NOT merging with socket)`);
+        } else {
+            // Không filter tag, dùng conversations từ socket
+            list = listForSidebar || [];
+        }
 
-    const assignedLabelsForSelectedConvo = useMemo(() => {
-        if (!selectedConvo || !selectedConvo.id) return [];
-        const conversationId = selectedConvo.id;
-        return allLabels.filter((label) => {
+        // Enrich tất cả conversations với pancakeTags để dùng ở UI (sidebar)
+        const enriched = list.map((convo) => ({
+            ...convo,
+            pancakeTags: getConvPancakeTags(convo),
+        }));
+
+        return enriched.sort(
+            (a, b) =>
+                new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime(),
+        );
+    }, [
+        listForSidebar,
+        selectedFilterLabelIds,
+        allLabels,
+        labelFilterConversations,
+        selectedTagIds,
+        pancakeTags,
+        pageConfig.id,
+        tagFilterConversations,
+    ]);
+
+    // Helper: gộp labels từ Labelfb (customer[pageId].IDconversation) + label từ conversationleadstatuses (LEAD/NOT_LEAD)
+    const getAssignedLabelsForConversation = useCallback((conversationId) => {
+        if (!conversationId) return [];
+        const cidStr = String(conversationId);
+        const labelsFromDB = allLabels.filter((label) => {
             const customerData = label.customer || {};
             const pageData = customerData[pageConfig.id];
             if (pageData && Array.isArray(pageData.IDconversation)) {
-                return pageData.IDconversation.includes(conversationId);
+                return pageData.IDconversation.some((id) => String(id) === cidStr);
             }
             return false;
         });
-    }, [selectedConvo, allLabels, pageConfig.id]);
+        // Tra cứu lead status: thử đúng id và cả extractConvoKey (tránh lệch format sau reload)
+        const leadStatus =
+            conversationLeadStatuses[cidStr] ||
+            conversationLeadStatuses[extractConvoKey(cidStr)];
+        if (!leadStatus) return labelsFromDB;
+        const leadLabel = leadStatus.labelId
+            ? allLabels.find((l) => String(l._id) === String(leadStatus.labelId))
+            : allLabels.find((l) =>
+                (leadStatus.status === 'LEAD' && l.name === 'LEAD') ||
+                ((leadStatus.status === 'NOT_LEAD') && (l.name === 'NOT LEAD' || l.name === 'NOT_LEAD'))
+            );
+        if (leadLabel && !labelsFromDB.some((l) => String(l._id) === String(leadLabel._id))) {
+            return [...labelsFromDB, leadLabel];
+        }
+        return labelsFromDB;
+    }, [allLabels, pageConfig.id, conversationLeadStatuses]);
+
+    const assignedLabelsForSelectedConvo = useMemo(() => {
+        if (!selectedConvo || !selectedConvo.id) return [];
+        return getAssignedLabelsForConversation(selectedConvo.id);
+    }, [selectedConvo, getAssignedLabelsForConversation]);
 
     // ===================== Render =====================
     return (
@@ -2635,8 +4757,34 @@ export default function ChatClient({
                                     <ChevronLeft className="h-5 w-5" />
                                     <span>Quay lại</span>
                                 </Link>
+                                <PancakeTagDropdown
+                                    tags={pancakeTags}
+                                    selectedTagIds={selectedTagIds}
+                                    onTagChange={(tagId, checked) =>
+                                        setSelectedTagIds((prev) =>
+                                            checked ? [...prev, tagId] : prev.filter((id) => id !== tagId)
+                                        )
+                                    }
+                                    pageId={pageConfig.id}
+                                    accessToken={pageConfig.accessToken || token}
+                                    onLoadTags={(tags) => setPancakeTags(tags)}
+                                    style="left"
+                                    trigger={
+                                        <button className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-transparent px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 active:scale-95 cursor-pointer">
+                                            {selectedTagIds.length > 0 ? (
+                                                <span className="bg-green-500 text-white rounded-full px-2 py-0.5 text-xs">
+                                                    {selectedTagIds.length}
+                                                </span>
+                                            ) : (
+                                                <MessageSquare className="h-4 w-4 text-gray-500" />
+                                            )}
+                                            <span>Pancake Tags</span>
+                                            <ChevronDown className="h-4 w-4 text-gray-500" />
+                                        </button>
+                                    }
+                                />
                                 <LabelDropdown
-                                    labels={allLabels}
+                                    labels={allLabels.filter(l => l.from !== 'pancake')}
                                     selectedLabelIds={selectedFilterLabelIds}
                                     onLabelChange={(labelId, checked) =>
                                         setSelectedFilterLabelIds((prev) =>
@@ -2727,6 +4875,14 @@ export default function ChatClient({
                         {isLoadingLabelFilter && (
                             <li className="flex items-center justify-center p-4">
                                 <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                                <span className="ml-2 text-sm text-gray-500">
+                                    {isLoadingLabelFilter ? 'Đang tải hội thoại theo nhãn...' : 'Đang tải hội thoại theo thẻ...'}
+                                </span>
+                            </li>
+                        )}
+                        {(isLoadingTagFilter && !isLoadingLabelFilter) && (
+                            <li className="flex items-center justify-center p-4">
+                                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
                                 <span className="ml-2 text-sm text-gray-500">Đang tải hội thoại theo thẻ...</span>
                             </li>
                         )}
@@ -2737,27 +4893,25 @@ export default function ChatClient({
                             const formattedDateTime = fmtDateTimeVN(convo.updated_at);
 
                             const conversationId = convo?.id;
-                            const assignedLabels = conversationId
-                                ? allLabels.filter((label) => {
-                                    const customerData = label.customer || {};
-                                    const pageData = customerData[pageConfig.id];
-                                    if (pageData && Array.isArray(pageData.IDconversation)) {
-                                        return pageData.IDconversation.includes(conversationId);
-                                    }
-                                    return false;
-                                })
-                                : [];
+                            // Labels hệ thống: từ Labelfb (customer[pageId]) + từ conversationleadstatuses (LEAD/NOT_LEAD)
+                            const assignedLabels = conversationId ? getAssignedLabelsForConversation(conversationId) : [];
+                            const leadStatus = conversationId ? conversationLeadStatuses[conversationId] : null;
 
                             const lastFromPage = isLastFromPage(convo);
                             const snippetPrefix = lastFromPage ? 'Bạn: ' : `${customerName}: `;
                             const unrepliedCount = lastFromPage ? 0 : 1;
+                            
+                            // ✅ Xác định loại conversation và icon tương ứng
+                            const convoType = getConvoType(convo);
+                            const isInboxType = isInbox(convo);
+                            const isCommentType = isComment(convo);
+                            const borderColor = isInboxType ? 'border-l-4 border-l-red-500' : isCommentType ? 'border-l-4 border-l-blue-500' : '';
 
                             return (
                                 <li
                                     key={convo.id}
                                     onClick={() => handleSelectConvo(convo)}
-                                    className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 ${selectedConvo?.id === convo.id ? 'bg-blue-50' : ''
-                                        }`}
+                                    className={`flex items-start p-3 cursor-pointer hover:bg-gray-100 ${selectedConvo?.id === convo.id ? 'bg-blue-50' : ''} ${borderColor}`}
                                 >
                                     <div className="relative mr-3">
                                         <FallbackAvatar
@@ -2779,23 +4933,92 @@ export default function ChatClient({
                                     </div>
 
                                     <div className="flex-1 overflow-hidden">
-                                        <h6 className="font-semibold truncate text-gray-800">{customerName}</h6>
+                                        <div className="flex items-center gap-2">
+                                            <h6 className="font-semibold truncate text-gray-800">{customerName}</h6>
+                                            {/* ✅ Icon hiển thị loại conversation */}
+                                            {isInboxType && (
+                                                <Inbox className="h-4 w-4 text-red-500 flex-shrink-0" title="Tin nhắn" />
+                                            )}
+                                            {isCommentType && (
+                                                <MessageSquare className="h-4 w-4 text-blue-500 flex-shrink-0" title="Bình luận" />
+                                            )}
+                                        </div>
                                         <h6 className="text-sm text-gray-600 truncate">
                                             {snippetPrefix}
                                             {convo.snippet}
                                         </h6>
 
-                                        {assignedLabels.length > 0 && (
+                                        {/* Hiển thị Pancake tags */}
+                                        {Array.isArray(convo.pancakeTags) && convo.pancakeTags.length > 0 && (
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                                {assignedLabels.map((label) => (
-                                                    <span
-                                                        key={label._id}
-                                                        className="rounded-full px-2 py-0.5 text-xs"
-                                                        style={{ backgroundColor: label.color, color: 'white' }}
-                                                    >
-                                                        {label.name}
-                                                    </span>
-                                                ))}
+                                                {convo.pancakeTags.map((tag, idx) => {
+                                                    const tagId = tag.tagId || tag.id || tag._id || idx;
+                                                    const tagText = tag.text || tag.name || '';
+                                                    const tagColor = tag.color || '#6b7280';
+                                                    return (
+                                                        <span
+                                                            key={tagId}
+                                                            className="rounded-full px-2 py-0.5 text-xs font-medium"
+                                                            style={{
+                                                                backgroundColor: tagColor,
+                                                                color: 'white',
+                                                            }}
+                                                            title={tagText}
+                                                        >
+                                                            {tagText}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                        {/* Hiển thị labels (nếu có) - Manual labels: hình chữ nhật, có viền đen */}
+                                        {assignedLabels.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1 items-center relative">
+                                                {assignedLabels.map((label) => {
+                                                    const isNotLeadLabel = label.name === 'NOT LEAD' || label.name === 'NOT_LEAD';
+                                                    const leadStatus = conversationId ? conversationLeadStatuses[conversationId] : null;
+                                                    const hasNote = isNotLeadLabel && leadStatus?.status === 'NOT_LEAD' && leadStatus?.note;
+                                                    return (
+                                                        <span
+                                                            key={label._id}
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs border border-black relative"
+                                                            style={{ backgroundColor: label.color, color: 'white' }}
+                                                            title={hasNote ? `Lý do: ${leadStatus.note}` : label.name}
+                                                        >
+                                                            {label.name}
+                                                            {hasNote && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setShowNoteTooltip(showNoteTooltip === conversationId ? null : conversationId);
+                                                                    }}
+                                                                    className="hover:bg-white/20 rounded p-0.5 flex items-center justify-center"
+                                                                    title={`Lý do: ${leadStatus.note}`}
+                                                                >
+                                                                    <FileText className="h-3 w-3" />
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    );
+                                                })}
+                                                {/* Tooltip hiển thị note trong sidebar */}
+                                                {showNoteTooltip === conversationId && conversationLeadStatuses[conversationId]?.note && (
+                                                    <div className="absolute z-50 bg-gray-900 text-white text-xs rounded-md p-2 max-w-xs mt-1 shadow-lg" style={{ top: '100%', left: 0 }}>
+                                                        <div className="font-semibold mb-1">Lý do NOT LEAD:</div>
+                                                        <div>{conversationLeadStatuses[conversationId].note}</div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setShowNoteTooltip(null);
+                                                            }}
+                                                            className="absolute top-1 right-1 text-white hover:text-gray-300"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -2819,8 +5042,8 @@ export default function ChatClient({
                     {selectedConvo ? (
                         <>
                             <div className="flex items-center p-3 border-b border-gray-200 bg-white justify-between">
-                                <div className="flex items-center">
-                                    <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center font-bold mr-3">
+                                <div className="flex items-center flex-1 min-w-0">
+                                    <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center font-bold mr-3 flex-shrink-0">
                                         <FallbackAvatar
                                             src={avatarUrlFor({
                                                 idpage: pageConfig.id,
@@ -2834,12 +5057,194 @@ export default function ChatClient({
                                             className="rounded-full object-cover"
                                         />
                                     </div>
-                                    <h4 className="font-bold text-lg text-gray-900">
-                                        {getConvoDisplayName(selectedConvo)}
-                                    </h4>
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-lg text-gray-900">
+                                            {getConvoDisplayName(selectedConvo)}
+                                        </h4>
+                                        {/* Hiển thị Pancake tags trong chi tiết conversation */}
+                                        {(() => {
+                                            const rawTags = Array.isArray(selectedConvo.tags) ? selectedConvo.tags : [];
+                                            const selectedConvoPancakeTags = rawTags
+                                                .map((tagId) => {
+                                                    const idStr = String(tagId);
+                                                    return pancakeTags.find((t) => String(t.tagId) === idStr) || null;
+                                                })
+                                                .filter(Boolean);
+                                            
+                                            // Nếu đã có pancakeTags trong selectedConvo (đã được enrich), dùng luôn
+                                            const tagsToDisplay = selectedConvo.pancakeTags && Array.isArray(selectedConvo.pancakeTags) && selectedConvo.pancakeTags.length > 0
+                                                ? selectedConvo.pancakeTags
+                                                : selectedConvoPancakeTags;
+                                            
+                                            if (tagsToDisplay.length === 0) return null;
+                                            
+                                            return (
+                                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                                    {tagsToDisplay.map((tag, idx) => {
+                                                        const tagId = tag.tagId || tag.id || tag._id || idx;
+                                                        const tagText = tag.text || tag.name || '';
+                                                        const tagColor = tag.color || '#6b7280';
+                                                        // Tìm labelId từ tagId để gọi handleToggleLabel
+                                                        const labelId = allLabels.find(l => l.from === 'pancake' && String(l.tagId) === String(tagId))?._id 
+                                                            || pancakeTags.find(t => String(t.tagId) === String(tagId))?._id
+                                                            || tagId;
+                                                        
+                                                        return (
+                                                            <span
+                                                                key={tagId}
+                                                                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium group"
+                                                                style={{
+                                                                    backgroundColor: tagColor,
+                                                                    color: 'white',
+                                                                }}
+                                                                title={tagText}
+                                                            >
+                                                                <span>{tagText}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation(); // Ngăn trigger onClick của parent
+                                                                        handleToggleLabel(labelId, false); // Hủy thẻ
+                                                                    }}
+                                                                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 hover:bg-white/20 rounded-full p-0.5 flex items-center justify-center"
+                                                                    title="Hủy thẻ"
+                                                                >
+                                                                    <X className="h-3 w-3" />
+                                                                </button>
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })()}
+                                        {/* Hiển thị manual labels trong chi tiết conversation */}
+                                        {assignedLabelsForSelectedConvo.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1.5 relative">
+                                                {assignedLabelsForSelectedConvo.map((label) => {
+                                                    const selectedConvoId = selectedConvo?.id;
+                                                    const isNotLeadLabel = label.name === 'NOT LEAD' || label.name === 'NOT_LEAD';
+                                                    const leadStatus = selectedConvoId ? conversationLeadStatuses[selectedConvoId] : null;
+                                                    const hasNote = isNotLeadLabel && leadStatus?.status === 'NOT_LEAD' && leadStatus?.note;
+                                                    return (
+                                                        <span
+                                                            key={label._id}
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium group border border-black"
+                                                            style={{
+                                                                backgroundColor: label.color,
+                                                                color: 'white',
+                                                            }}
+                                                            title={hasNote ? `Lý do: ${leadStatus.note}` : label.name}
+                                                        >
+                                                            <span>{label.name}</span>
+                                                            {hasNote && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setShowNoteTooltip(showNoteTooltip === selectedConvoId ? null : selectedConvoId);
+                                                                    }}
+                                                                    className="hover:bg-white/20 rounded p-0.5 flex items-center justify-center"
+                                                                    title={`Lý do: ${leadStatus.note}`}
+                                                                >
+                                                                    <FileText className="h-3 w-3" />
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleToggleLabel(label._id, false);
+                                                                }}
+                                                                className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 hover:bg-white/20 p-0.5 flex items-center justify-center"
+                                                                title="Hủy nhãn"
+                                                            >
+                                                                <X className="h-3 w-3" />
+                                                            </button>
+                                                        </span>
+                                                    );
+                                                })}
+                                                {/* Tooltip hiển thị note trong chi tiết */}
+                                                {showNoteTooltip === selectedConvo?.id && conversationLeadStatuses[selectedConvo?.id]?.note && (
+                                                    <div className="absolute z-50 bg-gray-900 text-white text-xs rounded-md p-2 max-w-xs mt-1 shadow-lg">
+                                                        <div className="font-semibold mb-1">Lý do NOT LEAD:</div>
+                                                        <div>{conversationLeadStatuses[selectedConvo.id].note}</div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setShowNoteTooltip(null);
+                                                            }}
+                                                            className="absolute top-1 right-1 text-white hover:text-gray-300"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
-                                <div>
+                                <div className="flex-shrink-0 ml-3 flex items-center gap-2">
+                                    {/* Icon Phân công nhân viên */}
+                                    {selectedConvo?.id && (
+                                        <div className="relative" ref={assigneesPopupRef}>
+                                            <button
+                                                data-assignees-icon
+                                                type="button"
+                                                onClick={handleShowAssignees}
+                                                className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-200 bg-transparent hover:bg-gray-100 active:scale-95 cursor-pointer transition-colors"
+                                                title="Phân công nhân viên"
+                                            >
+                                                <User className="h-4 w-4 text-gray-600" />
+                                            </button>
+
+                                            {/* Popup hiển thị danh sách nhân viên được phân công */}
+                                            {showAssigneesPopup && (
+                                                <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                                                    <div className="p-3 border-b border-gray-200">
+                                                        <h3 className="font-semibold text-sm text-gray-900">Phân công nhân viên</h3>
+                                                    </div>
+                                                    <div className="max-h-64 overflow-y-auto">
+                                                        {isLoadingAssignees ? (
+                                                            <div className="p-4 flex items-center justify-center">
+                                                                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                                                                <span className="ml-2 text-sm text-gray-500">Đang tải...</span>
+                                                            </div>
+                                                        ) : assigneesData.length > 0 ? (
+                                                            <div className="p-2">
+                                                                {assigneesData.map((user, idx) => (
+                                                                    <div
+                                                                        key={user.user_id || idx}
+                                                                        className="flex items-center gap-2 p-2 rounded hover:bg-gray-50"
+                                                                    >
+                                                                        <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                                                            <User className="h-4 w-4 text-gray-600" />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="text-sm font-medium text-gray-900 truncate">
+                                                                                {user.name || 'Không tên'}
+                                                                            </div>
+                                                                            {user.phone_number && (
+                                                                                <div className="text-xs text-gray-500 truncate">
+                                                                                    {user.phone_number}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-4 text-center text-sm text-gray-500">
+                                                                Chưa có nhân viên được phân công
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {selectedConvo?.id ? (
                                         <LabelDropdown
                                             labels={allLabels}
@@ -2876,6 +5281,52 @@ export default function ChatClient({
                             </div>
 
                             <div ref={messagesScrollRef} className="flex-1 p-6 space-y-1 overflow-y-auto">
+                                {/* ✅ Hiển thị post info cho COMMENT conversations */}
+                                {!isLoadingMessages && selectedConvo?.type === 'COMMENT' && postInfo && (
+                                    <div className="mb-4 p-4 bg-white rounded-lg border-2 border-blue-200 shadow-sm">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <MessageSquare className="h-5 w-5 text-blue-500" />
+                                            <h5 className="font-semibold text-gray-800">Bài viết gốc</h5>
+                                        </div>
+                                        {postInfo.message && (
+                                            <p className="text-gray-700 mb-3 whitespace-pre-wrap">{postInfo.message}</p>
+                                        )}
+                                        {postInfo.images && postInfo.images.length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mb-3">
+                                                {postInfo.images.map((img, idx) => (
+                                                    <a
+                                                        key={idx}
+                                                        href={img.url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="block"
+                                                    >
+                                                        <img
+                                                            src={img.url}
+                                                            alt={`Post image ${idx + 1}`}
+                                                            className="max-w-[200px] max-h-[200px] rounded-lg object-cover"
+                                                            loading="lazy"
+                                                        />
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {postInfo.postUrl && (
+                                            <a
+                                                href={postInfo.postUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
+                                            >
+                                                Xem bài viết trên Facebook
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                </svg>
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
+                                
                                 {/* Loading more indicator at top - giống testpancake */}
                                 {isLoadingOlder && (
                                     <div className="flex items-center justify-center py-2 mb-2">
@@ -2900,26 +5351,44 @@ export default function ChatClient({
                                 {messages.map((msg, index) => {
                                     if (!msg) return null;
                                     const formattedTime = fmtDateTimeVN(msg.inserted_at);
+                                    const isComment = msg.channel === 'COMMENT';
+                                    const isSystemMessage = msg.content?.type === 'system';
                                     
-                                    
-                                return msg.content?.type === 'system' ? (
-                                    <MessageContent
-                                        key={msg.id || `msg-${index}`}
-                                        content={msg.content}
-                                        onVideoClick={setVideoPreview}
-                                    />
+                                return isSystemMessage ? (
+                                    <div key={msg.id || `msg-${index}`} className="flex items-center justify-center my-2">
+                                        <div className="text-xs text-gray-500 italic bg-gray-100 px-3 py-1 rounded-full">
+                                            <MessageContent
+                                                content={msg.content}
+                                                onVideoClick={setVideoPreview}
+                                            />
+                                        </div>
+                                    </div>
                                     ) : (
                                         <div
                                             key={msg.id || `msg-${index}`}
                                             className={`flex flex-col my-1 ${msg.senderType === 'page' ? 'items-end' : 'items-start'
                                                 }`}
                                         >
+                                            {/* ✅ Icon và label cho COMMENT messages */}
+                                            {isComment && (
+                                                <div className="flex items-center gap-1 mb-1 text-xs text-blue-600">
+                                                    <MessageSquare className="h-3 w-3" />
+                                                    <span>Bình luận</span>
+                                                    {msg.metadata?.author && (
+                                                        <span className="text-gray-500">• {msg.metadata.author}</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            
                                             <div className={`flex flex-col ${msg.senderType === 'page' ? 'items-end' : 'items-start'}`}>
                                                 <div
-                                                    className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${msg.senderType === 'page'
-                                                        ? 'bg-blue-500 text-white items-end'
-                                                        : 'bg-white text-gray-800'
-                                                        }`}
+                                                    className={`max-w-lg p-3 rounded-xl shadow-sm flex flex-col ${
+                                                        isComment
+                                                            ? 'bg-blue-50 border-2 border-blue-300 text-gray-800'
+                                                            : msg.senderType === 'page'
+                                                                ? 'bg-blue-500 text-white items-end'
+                                                                : 'bg-white text-gray-800'
+                                                    }`}
                                                 >
                                                 <MessageContent content={msg.content} onVideoClick={setVideoPreview} isFromPage={msg.senderType === 'page'} />
                                                     <div
@@ -3029,7 +5498,7 @@ export default function ChatClient({
                                     </div>
                                 )}
 
-                                <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2" >
                                     <button
                                         type="button"
                                         className="text-gray-700 hover:text-gray-900 disabled:opacity-60"
@@ -3050,10 +5519,10 @@ export default function ChatClient({
 
                                     <button
                                         type="button"
-                                        className="text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                                        className="text-gray-700 hover:text-gray-900 disabled:opacity-60 disabled:cursor-not-allowed"
                                         onClick={triggerPickVideo}
-                                        disabled={isUploadingVideo}
-                                        title="Đính kèm video"
+                                        disabled={isUploadingVideo || selectedConvo?.type === 'COMMENT'}
+                                        title={selectedConvo?.type === 'COMMENT' ? 'Bạn đang ở bình luận- không thể gửi bằng video' : 'Đính kèm video'}
                                     >
                                         <VideoIcon className="h-5 w-5" />
                                     </button>
@@ -3124,6 +5593,44 @@ export default function ChatClient({
                                     {videoPreview.name}
                                 </div>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal nhập lý do NOT LEAD */}
+            {showLeadStatusModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                        <h3 className="text-lg font-semibold mb-4">Nhập lý do NOT LEAD</h3>
+                        <textarea
+                            value={leadStatusNote}
+                            onChange={(e) => setLeadStatusNote(e.target.value)}
+                            placeholder="Nhập lý do tại sao không phải LEAD..."
+                            className="w-full border border-gray-300 rounded-md p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            rows={4}
+                            autoFocus
+                        />
+                        <div className="flex gap-2 mt-4 justify-end">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowLeadStatusModal(false);
+                                    setPendingLabelId(null);
+                                    setPendingChecked(false);
+                                    setLeadStatusNote('');
+                                }}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmNotLead}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                            >
+                                Xác nhận
+                            </button>
                         </div>
                     </div>
                 </div>

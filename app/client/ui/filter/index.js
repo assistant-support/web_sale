@@ -16,8 +16,11 @@ export default function FilterControls({
     auth = { role: [] },
     areaCustomers = [],
     filterCustomer = {},
+    labels = [],
 }) {
     const services = servicesProp.length ? servicesProp : service;
+    // Chỉ lấy thẻ LEAD / NOT LEAD để lọc khách hàng theo thẻ tin nhắn
+    const leadLabels = useMemo(() => labels.filter((l) => (l.name === 'LEAD' || l.name === 'NOT LEAD' || l.name === 'NOT_LEAD')), [labels]);
     
     // Đảm bảo auth luôn có giá trị hợp lệ, tránh lỗi khi auth là null hoặc undefined
     const safeAuth = auth || { role: [] };
@@ -27,7 +30,7 @@ export default function FilterControls({
     const { replace } = useRouter();
     const searchTimeout = useRef(null);
 
-    // Local state cho bộ lọc ngày; chỉ áp dụng khi người dùng nhấn Enter
+    // Local state cho bộ lọc ngày; thay đổi giá trị là lọc ngay
     const [startDateLocal, setStartDateLocal] = useState(searchParams.get('startDate') || '');
     const [endDateLocal, setEndDateLocal] = useState(searchParams.get('endDate') || new Date().toISOString().split('T')[0]);
 
@@ -37,6 +40,7 @@ export default function FilterControls({
     const [isAssigneeMenuOpen, setIsAssigneeMenuOpen] = useState(false);
     const [isAreaCustomerMenuOpen, setIsAreaCustomerMenuOpen] = useState(false);
     const [isBirthMonthMenuOpen, setIsBirthMonthMenuOpen] = useState(false);
+    const [isLeadTagMenuOpen, setIsLeadTagMenuOpen] = useState(false);
 
     const createURL = useCallback((paramsToUpdate) => {
         const params = new URLSearchParams(searchParams);
@@ -93,20 +97,10 @@ export default function FilterControls({
         ],
     }), []);
 
-    // Nguồn đặc biệt (cố định)
-    const specialSources = useMemo(() => [
-        { _id: 'Trực tiếp', name: 'Trực tiếp', isSpecialSource: true }
-    ], []);
-
     const getSelectedName = useCallback((param, data, defaultText, keyField = '_id', nameField = 'name') => {
         const value = searchParams.get(param);
         if (!value) return defaultText;
         if (param === 'tags' && value === 'null') return 'Chưa xác định';
-        // Kiểm tra nguồn đặc biệt trước
-        if (param === 'source') {
-            const specialSource = specialSources.find((item) => String(item[keyField]) === value);
-            if (specialSource) return specialSource[nameField];
-        }
         // Kiểm tra cả sources thường và messageSources
         let selected = data.find((item) => String(item[keyField]) === value);
         if (!selected && param === 'source') {
@@ -114,7 +108,7 @@ export default function FilterControls({
             selected = messageSources.find((item) => String(item[keyField]) === value);
         }
         return selected ? selected[nameField] : defaultText;
-    }, [searchParams, messageSources, specialSources]);
+    }, [searchParams, messageSources]);
 
     return (
         <div className={styles.wrapper}>
@@ -211,7 +205,7 @@ export default function FilterControls({
                     <Menu
                         isOpen={isSourceMenuOpen}
                         onOpenChange={setIsSourceMenuOpen}
-                        customButton={<div className="input text_6_400">{getSelectedName('source', [...sources, ...specialSources, ...messageSources], 'Tất cả nguồn')}</div>}
+                        customButton={<div className="input text_6_400">{getSelectedName('source', [...sources, ...messageSources], 'Tất cả nguồn')}</div>}
                         menuItems={
                             <div className={`${styles.menulist} scroll`}>
                                 <p className="text_6_400" onClick={() => { createURL({ source: '' }); setIsSourceMenuOpen(false); }}>
@@ -220,15 +214,6 @@ export default function FilterControls({
                                 {sources.length > 0 && (
                                     <>
                                         {sources.map((s) => (
-                                            <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
-                                                {s.name}
-                                            </p>
-                                        ))}
-                                    </>
-                                )}
-                                {specialSources.length > 0 && (
-                                    <>
-                                        {specialSources.map((s) => (
                                             <p key={s._id} className="text_6_400" onClick={() => { createURL({ source: s._id }); setIsSourceMenuOpen(false); }}>
                                                 {s.name}
                                             </p>
@@ -249,6 +234,30 @@ export default function FilterControls({
                         menuPosition="bottom"
                     />
                 </div>
+
+                {/* Thẻ tin nhắn (LEAD / NOT LEAD) - lọc khách hàng theo thẻ đã gán ở hội thoại */}
+                {leadLabels.length > 0 && (
+                    <div style={{ flex: 1 }}>
+                        <Menu
+                            isOpen={isLeadTagMenuOpen}
+                            onOpenChange={setIsLeadTagMenuOpen}
+                            customButton={<div className="input text_6_400">{getSelectedName('leadStatusLabelId', leadLabels, 'Thẻ tin nhắn', '_id', 'name')}</div>}
+                            menuItems={
+                                <div className={styles.menulist}>
+                                    <p className="text_6_400" onClick={() => { createURL({ leadStatusLabelId: '' }); setIsLeadTagMenuOpen(false); }}>
+                                        Tất cả thẻ
+                                    </p>
+                                    {leadLabels.map((l) => (
+                                        <p key={l._id} className="text_6_400" onClick={() => { createURL({ leadStatusLabelId: l._id }); setIsLeadTagMenuOpen(false); }}>
+                                            {l.name}
+                                        </p>
+                                    ))}
+                                </div>
+                            }
+                            menuPosition="bottom"
+                        />
+                    </div>
+                )}
 
                 {/* Dịch vụ quan tâm (tags theo ObjectId) */}
                 <div style={{ flex: 1 }}>
@@ -342,14 +351,17 @@ export default function FilterControls({
                     />
                 </div>
 
-                {/* Khoảng ngày */}
+                {/* Khoảng ngày - thay đổi giá trị là lọc ngay, không cần nhấn Enter */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
                     <input
                         type="date"
                         className="input"
                         value={startDateLocal}
-                        onChange={(e) => setStartDateLocal(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') createURL({ startDate: startDateLocal, endDate: endDateLocal }); }}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            setStartDateLocal(v);
+                            createURL({ startDate: v, endDate: endDateLocal });
+                        }}
                         style={{ flex: 1 }}
                     />
                     <h5>đến</h5>
@@ -357,8 +369,11 @@ export default function FilterControls({
                         type="date"
                         className="input"
                         value={endDateLocal}
-                        onChange={(e) => setEndDateLocal(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') createURL({ startDate: startDateLocal, endDate: endDateLocal }); }}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            setEndDateLocal(v);
+                            createURL({ startDate: startDateLocal, endDate: v });
+                        }}
                         style={{ flex: 1 }}
                     />
                 </div>

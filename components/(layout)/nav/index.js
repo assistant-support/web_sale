@@ -24,6 +24,7 @@ import { driveImage } from '@/function';
 import { FaBusinessTime } from "react-icons/fa6";
 import { IoChatbubbles } from "react-icons/io5";
 import { IoIosSettings } from "react-icons/io";
+import { MdBarChart } from "react-icons/md";
 // Hằng số định nghĩa chiều cao của mỗi mục nav, dùng để tính toán hiệu ứng highlight
 const ITEM_HEIGHT = 82;
 
@@ -46,6 +47,7 @@ const ALL_NAV_ITEMS = [
   },
   { href: '/admin', icon: <Svg_Chart h={20} w={20} c={'var(--text-secondary)'} />, content: 'Thống kê' },
   { href: '/user', icon: <Svg_Profile h={20} w={20} c={'var(--text-secondary)'} />, content: 'Nhân sự' },
+  { href: '/reports/overview', icon: <MdBarChart style={{ width: 20, height: 20, color: 'var(--text-secondary)' }} />, content: 'Báo cáo' },
   { href: '/service', icon: <IoIosSettings style={{ width: 24, height: 24 }} />, content: 'Cài đặt' },
 ];
 

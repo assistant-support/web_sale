@@ -62,6 +62,7 @@ export async function getFormOne(id) {
 }
 
 // Lấy danh sách nguồn tin nhắn và các nguồn khác từ sourceDetails
+// Chỉ lấy các sourceDetails có dạng "Tin nhắn - {Platform} - {Page Name}"
 async function dataMessageSources() {
     try {
         await connectDB()
@@ -69,14 +70,31 @@ async function dataMessageSources() {
         const allSourceDetails = await Customer.distinct('sourceDetails', {
             sourceDetails: { $exists: true, $ne: null, $ne: '' }
         })
+        
+        // Chỉ lấy các sourceDetails có dạng "Tin nhắn - {Platform} - {Page Name}"
+        // Pattern: bắt đầu bằng "Tin nhắn - " và có ít nhất 2 dấu gạch ngang (3 phần)
+        const filteredSourceDetails = allSourceDetails
+            .filter(s => {
+                if (!s || !s.trim()) return false; // Loại bỏ null/empty
+                
+                const trimmed = s.trim();
+                
+                // Chỉ lấy các giá trị có dạng "Tin nhắn - {Platform} - {Page Name}"
+                // Kiểm tra: bắt đầu bằng "Tin nhắn - " và có ít nhất 2 dấu gạch ngang
+                if (trimmed.startsWith('Tin nhắn - ') && trimmed.split(' - ').length >= 3) {
+                    return true;
+                }
+                
+                return false;
+            })
+            .map(s => s.trim());
+        
         // Chuyển đổi thành format giống sources: { _id: sourceDetails, name: sourceDetails }
-        return allSourceDetails
-            .filter(s => s && s.trim()) // Loại bỏ null/empty
-            .map(s => ({
-                _id: s, // Dùng sourceDetails làm _id để filter
-                name: s,
-                isMessageSource: true // Flag để phân biệt với sources thường
-            }))
+        return filteredSourceDetails.map(s => ({
+            _id: s, // Dùng sourceDetails làm _id để filter
+            name: s,
+            isMessageSource: true // Flag để phân biệt với sources thường
+        }))
     } catch (error) {
         console.error('Lỗi trong dataMessageSources:', error)
         return []

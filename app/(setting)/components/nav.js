@@ -14,6 +14,7 @@ export default function SettingsLayout({ children }) {
         { id: 'services', label: 'Quản lý dịch vụ', href: '/service' },
         { id: 'cards', label: 'Quản lý thẻ', href: '/label' },
         { id: 'workflow', label: 'Quản lý Workflow', href: '/workflow' },
+        { id: 'treatment', label: 'Quản lý liệu trình', href: '/treatment' },
     ];
 
     return (
@@ -23,7 +24,9 @@ export default function SettingsLayout({ children }) {
                 <nav className="-mb-px flex space-x-8" aria-label="Tabs">
                     {tabs.map(tab => {
                         // Kiểm tra xem tab có đang được active không
-                        const isActive = pathname === tab.href;
+                        // Trong Next.js App Router với route groups, pathname sẽ không bao gồm tên group
+                        // Vậy nên pathname sẽ là /treatment, /label, etc.
+                        const isActive = pathname === tab.href || pathname?.includes(tab.href);
 
                         return (
                             <Link

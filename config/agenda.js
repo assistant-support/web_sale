@@ -20,6 +20,7 @@ import Appointment from '@/models/appointment.model';
 import { processMessageConversation } from '@/utils/autoMessageCustomer';
 import { getPagesFromAPI } from '@/lib/pancake-api';
 import { validatePipelineStatusUpdate, getCurrentPipelineStatus } from '@/utils/pipelineStatus';
+import { preloadZaloClients } from '@/data/zalo/client/zalo.manager';
 let agendaInstance = null;
 
 // =============================================================
@@ -1389,8 +1390,12 @@ async function autoMessageCustomerProcessor(job) {
         let totalCreated = 0;
         let totalProcessed = 0;
 
-        // Xử lý từng page
-        for (const page of pages) {
+        // Xử lý từng page (delay giữa các page để tránh 429 Too Many Requests)
+        for (let i = 0; i < pages.length; i++) {
+            const page = pages[i];
+            if (i > 0) {
+                await new Promise((r) => setTimeout(r, 2500)); // 2.5s giữa mỗi page
+            }
             try {
                 // Lấy conversations từ Pancake API cho page này
                 // Thử cả unread_first và không có unread_first để lấy tất cả conversations mới nhất
@@ -1491,17 +1496,18 @@ const initAgenda = async () => {
     });
 
     // Định nghĩa tất cả các job
-    agendaInstance.define('message', { priority: 'high', concurrency: 10 }, genericJobProcessor);
-    agendaInstance.define('friendRequest', genericJobProcessor);
-    agendaInstance.define('checkFriend', genericJobProcessor);
-    agendaInstance.define('tag', genericJobProcessor);
-    agendaInstance.define('findUid', genericJobProcessor);
+    // Các job liên quan đến Zalo cần concurrency = 1 để tránh gửi song song
+    agendaInstance.define('message', { priority: 'high', concurrency: 1 }, genericJobProcessor);
+    agendaInstance.define('friendRequest', { concurrency: 1 }, genericJobProcessor);
+    agendaInstance.define('checkFriend', { concurrency: 1 }, genericJobProcessor);
+    agendaInstance.define('tag', { concurrency: 1 }, genericJobProcessor);
+    agendaInstance.define('findUid', { concurrency: 1 }, genericJobProcessor);
     agendaInstance.define('allocation', { concurrency: 10 }, allocationJobProcessor);
     agendaInstance.define('bell', { concurrency: 10 }, bellJobProcessor);
-    agendaInstance.define('appointmentReminder', { priority: 'high', concurrency: 10 }, appointmentReminderProcessor);
-    agendaInstance.define('preSurgeryReminder', { priority: 'normal', concurrency: 10 }, preSurgeryReminderProcessor);
-    agendaInstance.define('postSurgeryMessage', { priority: 'high', concurrency: 10 }, postSurgeryMessageProcessor);
-    agendaInstance.define('servicePreSurgeryMessage', { priority: 'high', concurrency: 10 }, servicePreSurgeryMessageProcessor);
+    agendaInstance.define('appointmentReminder', { priority: 'high', concurrency: 1 }, appointmentReminderProcessor);
+    agendaInstance.define('preSurgeryReminder', { priority: 'normal', concurrency: 1 }, preSurgeryReminderProcessor);
+    agendaInstance.define('postSurgeryMessage', { priority: 'high', concurrency: 1 }, postSurgeryMessageProcessor);
+    agendaInstance.define('servicePreSurgeryMessage', { priority: 'high', concurrency: 1 }, servicePreSurgeryMessageProcessor);
     agendaInstance.define('autoMessageCustomer', { priority: 'normal', concurrency: 1 }, autoMessageCustomerProcessor);
     
     agendaInstance.on('fail', (err, job) => {
@@ -1510,17 +1516,25 @@ const initAgenda = async () => {
 
     await agendaInstance.start();
     console.log('[initAgenda] Agenda đã khởi động thành công.');
+
+  // Preload Zalo Web clients (Puppeteer) để giữ session sống lâu, phù hợp Agenda
+  try {
+      preloadZaloClients().catch((e) => {
+          console.error('[initAgenda] preloadZaloClients error:', e?.message || e);
+      });
+  } catch (e) {
+      console.error('[initAgenda] preloadZaloClients outer error:', e?.message || e);
+  }
     
-    // Schedule job tự động quét tin nhắn mỗi 30 giây
+    // Schedule job tự động quét tin nhắn mỗi 15 phút (tránh 429 Too Many Requests từ Pancake)
     try {
-        // Kiểm tra xem job đã được schedule chưa
         const existingJobs = await agendaInstance.jobs({ name: 'autoMessageCustomer', type: 'single' });
         if (existingJobs.length === 0) {
-            await agendaInstance.every('30 seconds', 'autoMessageCustomer', {}, { 
+            await agendaInstance.every('15 minutes', 'autoMessageCustomer', {}, {
                 timezone: 'Asia/Ho_Chi_Minh',
-                skipImmediate: false // Chạy ngay lần đầu
+                skipImmediate: false,
             });
-            console.log('[initAgenda] ✅ Đã schedule job autoMessageCustomer chạy mỗi 30 giây.');
+            console.log('[initAgenda] ✅ Đã schedule job autoMessageCustomer chạy mỗi 15 phút.');
         } else {
             console.log('[initAgenda] ℹ️ Job autoMessageCustomer đã được schedule.');
         }

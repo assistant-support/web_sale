@@ -4,10 +4,15 @@ import { revalidateTag } from 'next/cache';
 import mongoose from 'mongoose';
 import Customer from '@/models/customer.model';
 import Service from '@/models/services.model';
+import ServiceDetail from '@/models/service_details.model';
+import TreatmentSession from '@/models/treatmentSession.model';
+import Order from '@/models/orders.model';
+import ReportDaily from '@/models/report_daily.model';
 import Logs from '@/models/log.model';
 import Zalo from '@/models/zalo.model';
 import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
 import { uploadFileToDrive } from '@/function/drive/image';
+import { rebuildFinancialReportForMonth } from '@/data/financial/financialReports.db';
 import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
@@ -45,6 +50,71 @@ async function pushCareLog(customerId, content, userId, step = 6) {
             },
         }
     );
+}
+
+/**
+ * Rebuild service_use từ serviceDetails (nguồn đúng theo SuaDonDichVu.md).
+ * Chỉ lấy đơn không bị từ chối (status !== 'rejected').
+ */
+async function rebuildServiceUseForCustomer(customerId) {
+    const customer = await Customer.findById(customerId).select('serviceDetails').lean();
+    if (!customer || !Array.isArray(customer.serviceDetails)) {
+        await Customer.updateOne({ _id: customerId }, { $set: { service_use: [] } });
+        return;
+    }
+    const seen = new Set();
+    const serviceIds = [];
+    for (const sd of customer.serviceDetails) {
+        if (sd.status === 'rejected') continue;
+        const raw = sd.serviceId ?? sd.selectedService;
+        if (!raw) continue;
+        const idStr = typeof raw === 'object' && raw !== null ? String(raw._id ?? raw.$oid ?? raw) : String(raw);
+        if (idStr && isValidObjectId(idStr) && !seen.has(idStr)) {
+            seen.add(idStr);
+            serviceIds.push(new mongoose.Types.ObjectId(idStr));
+        }
+    }
+    await Customer.updateOne({ _id: customerId }, { $set: { service_use: serviceIds } });
+}
+
+/**
+ * Rebuild history_service từ serviceDetails.
+ * Structure (per history_service.md): { "Service Name": ["Course 1", "Course 2", ...] }
+ * Skips incomplete records (missing serviceName or courseName); deduplicates courses per service.
+ */
+async function rebuildHistoryServiceForCustomer(customerId) {
+    const customer = await Customer.findById(customerId).select('serviceDetails').lean();
+    if (!customer || !Array.isArray(customer.serviceDetails) || customer.serviceDetails.length === 0) {
+        await Customer.updateOne({ _id: customerId }, { $set: { history_service: {} } });
+        return;
+    }
+    const serviceIds = new Set();
+    customer.serviceDetails.forEach((sd) => {
+        const raw = sd.serviceId ?? sd.selectedService;
+        if (!raw) return;
+        const idStr = typeof raw === 'object' && raw !== null ? String(raw._id ?? raw.$oid ?? raw) : String(raw);
+        if (idStr && isValidObjectId(idStr)) serviceIds.add(idStr);
+    });
+    const services = await Service.find({ _id: { $in: Array.from(serviceIds).map((id) => new mongoose.Types.ObjectId(id)) } })
+        .select('name')
+        .lean();
+    const serviceMap = new Map(services.map((s) => [String(s._id), (s.name || '').trim()]));
+    const grouped = {};
+    customer.serviceDetails.forEach((detail) => {
+        const raw = detail.serviceId ?? detail.selectedService;
+        const serviceIdStr = raw != null ? (typeof raw === 'object' ? String(raw._id ?? raw.$oid ?? raw) : String(raw)) : null;
+        if (!serviceIdStr) return;
+        const serviceName = serviceMap.get(serviceIdStr) || (detail.selectedService?.name || '').trim();
+        const courseName = (detail.selectedCourse?.name || '').trim();
+        if (!serviceName || !courseName) return;
+        if (!grouped[serviceName]) grouped[serviceName] = new Set();
+        grouped[serviceName].add(courseName);
+    });
+    const history = {};
+    Object.keys(grouped).forEach((serviceName) => {
+        history[serviceName] = Array.from(grouped[serviceName]);
+    });
+    await Customer.updateOne({ _id: customerId }, { $set: { history_service: history } });
 }
 
 const toStringId = (value) => {
@@ -529,6 +599,48 @@ export async function reloadCustomers() {
 }
 
 /* ============================================================
+ * ACTION: LẤY DỮ LIỆU ĐẦY ĐỦ TỪ service_details COLLECTION
+ * ============================================================ */
+export async function getServiceDetailById(serviceDetailId) {
+    const session = await checkAuthToken();
+    if (!session?.id) {
+        return { success: false, error: 'Yêu cầu đăng nhập.' };
+    }
+
+    if (!serviceDetailId || !isValidObjectId(serviceDetailId)) {
+        return { success: false, error: 'serviceDetailId không hợp lệ.' };
+    }
+
+    try {
+        await connectDB();
+        
+        const serviceDetail = await ServiceDetail.findById(serviceDetailId)
+            .populate('customerId', 'name phone email')
+            .populate('serviceId', 'name')
+            .populate('closedBy', 'name avt')
+            .populate('createdBy', 'name avt')
+            .populate('approvedBy', 'name avt')
+            .lean();
+
+        if (!serviceDetail) {
+            return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
+        }
+
+        // Convert dữ liệu thành JSON-safe format (theo cấu trúc database: service_details)
+        const plainData = JSON.parse(JSON.stringify(serviceDetail));
+        // Giữ selectedService trùng với serviceId (đã populate) để view/form dùng chung
+        if (plainData.serviceId && !plainData.selectedService) {
+            plainData.selectedService = plainData.serviceId;
+        }
+
+        return { success: true, data: plainData };
+    } catch (error) {
+        console.error('Lỗi khi lấy service detail:', error);
+        return { success: false, error: 'Đã xảy ra lỗi phía máy chủ.' };
+    }
+}
+
+/* ============================================================
  * ACTION CHO BƯỚC 6 - CHỐT DỊCH VỤ (Chờ duyệt)
  * ============================================================ */
 export async function closeServiceAction(prevState, formData) {
@@ -549,6 +661,8 @@ export async function closeServiceAction(prevState, formData) {
     const discountValue = Number(formData.get('discountValue') || 0);
     const adjustmentType = String(formData.get('adjustmentType') || 'none');
     const adjustmentValue = Number(formData.get('adjustmentValue') || 0);
+    const idCTKM = formData.get('idCTKM') ? String(formData.get('idCTKM')).trim() : null;
+    const name_CTKM = formData.get('name_CTKM') ? String(formData.get('name_CTKM')).trim() : '';
 
     // 2. Validation cơ bản
     if (!customerId || !isValidObjectId(customerId)) {
@@ -614,10 +728,21 @@ export async function closeServiceAction(prevState, formData) {
                 finalPrice = listPrice;
             }
 
+            const medicationName = String(formData.get('medicationName') || '').trim();
+            const medicationDosage = String(formData.get('medicationDosage') || '').trim();
+            const medicationUnit = String(formData.get('medicationUnit') || '').trim();
+            const consultantName = String(formData.get('consultantName') || '').trim();
+            const doctorName = String(formData.get('doctorName') || '').trim();
+            
             courseSnapshot = {
                 name: course.name,
                 description: course.description,
                 costs: course.costs,
+                medicationName: medicationName,
+                medicationDosage: medicationDosage,
+                medicationUnit: medicationUnit,
+                consultantName: consultantName,
+                doctorName: doctorName,
             };
         }
 
@@ -653,21 +778,35 @@ export async function closeServiceAction(prevState, formData) {
         const customerDoc = await Customer.findById(customerId);
         if (!customerDoc) return { success: false, error: 'Không tìm thấy khách hàng.' };
 
-        if (!Array.isArray(customerDoc.serviceDetails)) {
-            customerDoc.serviceDetails = [];
+        // Xử lý serviceId: nếu rejected và không có serviceId, dùng service đầu tiên từ tags làm fallback
+        let finalServiceId = selectedServiceId;
+        if (!finalServiceId || !isValidObjectId(finalServiceId)) {
+            if (status === 'rejected' && customerDoc.tags && customerDoc.tags.length > 0) {
+                finalServiceId = String(customerDoc.tags[0]);
+            } else if (!finalServiceId || !isValidObjectId(finalServiceId)) {
+                return { success: false, error: 'Vui lòng chọn dịch vụ hợp lệ.' };
+            }
         }
 
-        // 6. Tạo object service detail mới
-        const newServiceDetail = {
+        // Map status từ form sang ServiceDetail model
+        // Form: 'completed', 'in_progress', 'rejected'
+        // Model: 'processing', 'completed', 'cancelled'
+        let serviceDetailStatus = 'processing';
+        if (status === 'completed') {
+            serviceDetailStatus = 'completed';
+        } else if (status === 'rejected') {
+            serviceDetailStatus = 'cancelled';
+        }
+
+        // 6. Tạo document trong service_details collection
+        const newServiceDetailDoc = new ServiceDetail({
+            customerId: customerId,
+            serviceId: finalServiceId,
+            sourceId: customerDoc.source || null,
+            sourceDetails: customerDoc.sourceDetails || '',
             approvalStatus: 'pending',
-            status: status,
-            revenue: finalPrice, // Doanh thu chính là giá cuối cùng
-            invoiceDriveIds: uploadedFileIds, // Lưu mảng ID ảnh
-            customerPhotosDriveIds: uploadedCustomerPhotoIds, // Lưu mảng ID ảnh khách hàng
+            status: serviceDetailStatus,
             notes: notes || '',
-            closedAt: new Date(),
-            closedBy: session.id,
-            selectedService: selectedServiceId || null,
             selectedCourse: courseSnapshot,
             pricing: {
                 listPrice: listPrice,
@@ -677,43 +816,132 @@ export async function closeServiceAction(prevState, formData) {
                 adjustmentValue: adjustmentValue,
                 finalPrice: finalPrice,
             },
+            name_CTKM: name_CTKM || '',
+            idCTKM: idCTKM && isValidObjectId(idCTKM) ? idCTKM : null,
+            revenue: finalPrice,
+            invoiceDriveIds: uploadedFileIds,
+            customerPhotosDriveIds: uploadedCustomerPhotoIds,
+            closedAt: new Date(),
+            closedBy: session.id,
+            createdBy: session.id,
+            // Khởi tạo các mảng rỗng
+            payments: [],
+            costs: [],
+            commissions: [],
+            amountReceivedTotal: 0,
+            outstandingAmount: finalPrice, // Công nợ ban đầu = finalPrice
+        });
+
+        // Lưu document vào service_details collection
+        const savedServiceDetail = await newServiceDetailDoc.save();
+        const serviceDetailId = savedServiceDetail._id;
+
+        // 6b. Ngay khi chốt đơn mới (dù còn pending), ghi nhận 1 buổi điều trị vào treatment_sessions
+        // để hệ thống liệu trình có thể hiển thị đúng theo dịch vụ/ liệu trình đã bán cho khách hàng.
+        try {
+            if (status !== 'rejected' && courseSnapshot && courseSnapshot.name && finalServiceId) {
+                const courseNameForSession = courseSnapshot.name;
+                const serviceDocForSession = await Service.findById(finalServiceId)
+                    .select('treatmentCourses')
+                    .lean();
+
+                const matchedCourse =
+                    serviceDocForSession?.treatmentCourses?.find(
+                        (c) => c.name === courseNameForSession
+                    ) || null;
+
+                if (matchedCourse && matchedCourse._id) {
+                    await TreatmentSession.create({
+                        customerId: customerId,
+                        serviceId: finalServiceId,
+                        courseId: matchedCourse._id,
+                        serviceDetailId: serviceDetailId,
+                        performedAt: savedServiceDetail.closedAt || new Date(),
+                    });
+                }
+            }
+        } catch (sessionErr) {
+            console.error('[closeServiceAction] Lỗi khi ghi treatment_session:', sessionErr);
+        }
+
+        // 7. Chuẩn bị các cập nhật cho customer
+        // Sử dụng raw MongoDB collection để bypass Mongoose schema validation
+        const db = mongoose.connection.db;
+        const customersCollection = db.collection(Customer.collection.name);
+        
+        // Xác định customerType: đếm số serviceDetails hiện có (không tính đơn mới đang tạo)
+        // Nếu số đơn = 0 → khách mới, nếu > 0 → khách cũ
+        const existingServiceDetailsCount = customerDoc.serviceDetails?.length || 0;
+        const customerType = existingServiceDetailsCount === 0 ? 'new' : 'old';
+        
+        const snapshotServiceIdOid = new mongoose.Types.ObjectId(finalServiceId);
+        const pushSnapshot = {
+            serviceDetailId: new mongoose.Types.ObjectId(serviceDetailId),
+            serviceId: snapshotServiceIdOid,
+            selectedService: snapshotServiceIdOid,
+            approvalStatus: 'pending',
+            status: status,
+            closedAt: new Date(),
+            amountReceivedTotal: 0,
+            outstandingAmount: finalPrice,
+            pricing: { listPrice, discountType, discountValue, adjustmentType, adjustmentValue, finalPrice },
+            name_CTKM: name_CTKM || '',
+            idCTKM: idCTKM && isValidObjectId(idCTKM) ? new mongoose.Types.ObjectId(idCTKM) : null,
+        };
+        if (courseSnapshot && (courseSnapshot.name || selectedCourseName)) {
+            pushSnapshot.selectedCourse = courseSnapshot && courseSnapshot.name
+                ? courseSnapshot
+                : { name: selectedCourseName || '' };
+        }
+        const updateData = {
+            $push: {
+                serviceDetails: pushSnapshot,
+                care: {
+                    content: `[Chốt dịch vụ] Trạng thái: ${status}. ${selectedCourseName ? `Liệu trình: ${selectedCourseName}. ` : ''}Ghi chú: ${notes || 'Không có'}`,
+                    createBy: new mongoose.Types.ObjectId(session.id),
+                    createAt: new Date(),
+                    step: 6
+                }
+            },
+            // ✅ Cập nhật customerType: nếu đây là đơn đầu tiên → 'new', nếu đã có đơn → 'old'
+            $set: {
+                customerType: customerType,
+            },
         };
 
-        customerDoc.serviceDetails.push(newServiceDetail);
-
-        // 7. Cập nhật pipeline
+        // 8. Cập nhật pipeline nếu cần
         const newPipelineStatus = pipelineFromServiceStatus(status);
         if (newPipelineStatus) {
             // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
             const validatedStatus = validatePipelineStatusUpdate(customerDoc, newPipelineStatus);
             if (validatedStatus) {
-                customerDoc.pipelineStatus = customerDoc.pipelineStatus || [];
-                customerDoc.pipelineStatus[6] = validatedStatus; // Giả sử step 6
+                const pipelineStatus = customerDoc.pipelineStatus || [];
+                pipelineStatus[6] = validatedStatus;
+                // Khởi tạo $set nếu chưa có
+                if (!updateData.$set) {
+                    updateData.$set = {};
+                }
+                updateData.$set.pipelineStatus = pipelineStatus;
             }
         }
 
-        // 8. Ghi care log
-        const logContent = `[Chốt dịch vụ] Trạng thái: ${status}. ${selectedCourseName ? `Liệu trình: ${selectedCourseName}. ` : ''}Ghi chú: ${notes || 'Không có'}`;
-        customerDoc.care = customerDoc.care || [];
-        customerDoc.care.push({ content: logContent, createBy: session.id, createAt: new Date(), step: 6 });
+        // 9. Thêm serviceId vào service_use (không trùng lặp)
+        updateData.$addToSet = {
+            service_use: new mongoose.Types.ObjectId(finalServiceId),
+        };
 
-        // 9. Lưu vào DB
-        await customerDoc.save();
+        // 10. Cập nhật customer với raw MongoDB để tránh schema validation
+        await customersCollection.updateOne(
+            { _id: new mongoose.Types.ObjectId(customerId) },
+            updateData
+        );
 
-        // 10. Schedule gửi tin nhắn trước phẫu thuật (chỉ khi status !== 'rejected' và có selectedService + selectedCourse)
-        if (status !== 'rejected' && selectedServiceId && selectedCourseName) {
+        await rebuildHistoryServiceForCustomer(customerId);
+
+        // 11. Schedule gửi tin nhắn trước phẫu thuật (chỉ khi status !== 'rejected' và có selectedService + selectedCourse)
+        if (status !== 'rejected' && finalServiceId && selectedCourseName) {
             try {
-                console.log(`[closeServiceAction] 🚀 Bắt đầu schedule tin nhắn trước phẫu thuật cho customerId: ${customerId}, selectedServiceId: ${selectedServiceId}, selectedCourseName: ${selectedCourseName}`);
-                
-                // Lấy _id của serviceDetail vừa tạo
-                const savedCustomer = await Customer.findById(customerId);
-                if (!savedCustomer || !savedCustomer.serviceDetails || savedCustomer.serviceDetails.length === 0) {
-                    console.error('[closeServiceAction] ❌ Không tìm thấy serviceDetail vừa tạo');
-                    return { success: true, message: 'Chốt dịch vụ thành công! Đơn đang chờ duyệt.' };
-                }
-                
-                const newDetail = savedCustomer.serviceDetails[savedCustomer.serviceDetails.length - 1];
-                const serviceDetailId = newDetail._id;
+                console.log(`[closeServiceAction] 🚀 Bắt đầu schedule tin nhắn trước phẫu thuật cho customerId: ${customerId}, selectedServiceId: ${finalServiceId}, selectedCourseName: ${selectedCourseName}`);
                 console.log(`[closeServiceAction] ✅ Tìm thấy serviceDetailId: ${serviceDetailId}`);
 
                 const { default: initAgenda } = await import('@/config/agenda');
@@ -736,7 +964,7 @@ export async function closeServiceAction(prevState, formData) {
                 // Không throw error để không ảnh hưởng đến việc tạo đơn
             }
         } else {
-            console.log(`[closeServiceAction] ⏭️ Bỏ qua schedule tin nhắn trước phẫu thuật. status: ${status}, selectedServiceId: ${selectedServiceId}, selectedCourseName: ${selectedCourseName}`);
+            console.log(`[closeServiceAction] ⏭️ Bỏ qua schedule tin nhắn trước phẫu thuật. status: ${status}, selectedServiceId: ${finalServiceId}, selectedCourseName: ${selectedCourseName}`);
         }
 
         revalidateData(); // Hàm revalidate của bạn
@@ -840,6 +1068,12 @@ export async function updateServiceDetailAction(prevState, formData) {
     const notes = formData.get('notes') != null ? String(formData.get('notes')) : undefined;
     const selectedService =
         formData.get('selectedService') != null ? String(formData.get('selectedService')) : undefined;
+    const selectedCourseName = formData.get('selectedCourseName') != null ? String(formData.get('selectedCourseName')) : undefined;
+    const medicationName = formData.get('medicationName') != null ? String(formData.get('medicationName')).trim() : undefined;
+    const medicationDosage = formData.get('medicationDosage') != null ? String(formData.get('medicationDosage')).trim() : undefined;
+    const medicationUnit = formData.get('medicationUnit') != null ? String(formData.get('medicationUnit')).trim() : undefined;
+    const consultantName = formData.get('consultantName') != null ? String(formData.get('consultantName')).trim() : undefined;
+    const doctorName = formData.get('doctorName') != null ? String(formData.get('doctorName')).trim() : undefined;
 
     const listPrice = formData.get('listPrice') != null ? Number(formData.get('listPrice')) : undefined;
     const discountType =
@@ -851,6 +1085,8 @@ export async function updateServiceDetailAction(prevState, formData) {
     const adjustmentValue =
         formData.get('adjustmentValue') != null ? Number(formData.get('adjustmentValue')) : undefined;
     const finalPrice = formData.get('finalPrice') != null ? Number(formData.get('finalPrice')) : undefined;
+    const idCTKMUpdate = formData.get('idCTKM') != null ? String(formData.get('idCTKM')).trim() || null : undefined;
+    const name_CTKMUpdate = formData.get('name_CTKM') != null ? String(formData.get('name_CTKM')).trim() : undefined;
 
     // 🧩 ĐỌC MẢNG FILES ĐÚNG CÁCH
     const invoiceImagesRaw = formData.getAll('invoiceImage') || [];
@@ -876,19 +1112,89 @@ export async function updateServiceDetailAction(prevState, formData) {
     try {
         await connectDB();
 
-        const customer = await Customer.findById(customerId);
-        if (!customer) return { success: false, error: 'Không tìm thấy khách hàng.' };
-
-        const detail = customer.serviceDetails?.id(serviceDetailId);
-        if (!detail) return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
-        if (detail.approvalStatus === 'approved') {
+        // Tìm trong service_details collection
+        const serviceDetail = await ServiceDetail.findById(serviceDetailId);
+        if (!serviceDetail) {
+            return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
+        }
+        
+        // Kiểm tra customerId có khớp không
+        if (String(serviceDetail.customerId) !== String(customerId)) {
+            return { success: false, error: 'Đơn chốt dịch vụ không thuộc khách hàng này.' };
+        }
+        
+        if (serviceDetail.approvalStatus === 'approved') {
             return { success: false, error: 'Đơn đã duyệt. Không thể chỉnh sửa.' };
         }
 
-        // Cập nhật các field cơ bản
-        if (typeof statusRaw !== 'undefined') detail.status = statusRaw;
-        if (typeof notes !== 'undefined') detail.notes = notes;
-        if (typeof selectedService !== 'undefined') detail.selectedService = selectedService;
+        const customer = await Customer.findById(customerId);
+        if (!customer) return { success: false, error: 'Không tìm thấy khách hàng.' };
+
+        // Chỉ sửa đơn chưa duyệt → không đụng lifetime_revenue (chỉ cập nhật khi đơn đã duyệt → sửa giá, hoặc pending→approved)
+
+        // Map status từ form sang ServiceDetail model nếu cần
+        let serviceDetailStatus = serviceDetail.status;
+        if (typeof statusRaw !== 'undefined') {
+            // Form: 'completed', 'in_progress', 'rejected'
+            // Model: 'processing', 'completed', 'cancelled'
+            if (statusRaw === 'completed') {
+                serviceDetailStatus = 'completed';
+            } else if (statusRaw === 'in_progress') {
+                serviceDetailStatus = 'processing';
+            } else if (statusRaw === 'rejected') {
+                serviceDetailStatus = 'cancelled';
+            }
+        }
+
+        // Cập nhật các field cơ bản trong service_details collection
+        if (typeof statusRaw !== 'undefined') serviceDetail.status = serviceDetailStatus;
+        if (typeof notes !== 'undefined') serviceDetail.notes = notes;
+        if (typeof selectedService !== 'undefined') serviceDetail.serviceId = selectedService;
+
+        // Cập nhật selectedCourse nếu có thông tin mới
+        if (typeof selectedCourseName !== 'undefined' || typeof medicationName !== 'undefined' || typeof medicationDosage !== 'undefined' || typeof medicationUnit !== 'undefined' || typeof consultantName !== 'undefined' || typeof doctorName !== 'undefined') {
+            // Nếu có selectedCourseName, cần tìm course từ service để lấy thông tin đầy đủ
+            if (selectedCourseName && selectedService) {
+                try {
+                    const serviceDoc = await Service.findById(selectedService).lean();
+                    if (serviceDoc) {
+                        const course = serviceDoc.treatmentCourses.find(c => c.name === selectedCourseName);
+                        if (course) {
+                            // Cập nhật selectedCourse với thông tin từ service + thông tin thuốc mới
+                            serviceDetail.selectedCourse = {
+                                name: course.name,
+                                description: course.description || serviceDetail.selectedCourse?.description || '',
+                                costs: course.costs || {},
+                                medicationName: typeof medicationName !== 'undefined' ? medicationName : (serviceDetail.selectedCourse?.medicationName || ''),
+                                medicationDosage: typeof medicationDosage !== 'undefined' ? medicationDosage : (serviceDetail.selectedCourse?.medicationDosage || ''),
+                                medicationUnit: typeof medicationUnit !== 'undefined' ? medicationUnit : (serviceDetail.selectedCourse?.medicationUnit || ''),
+                                consultantName: typeof consultantName !== 'undefined' ? consultantName : (serviceDetail.selectedCourse?.consultantName || ''),
+                                doctorName: typeof doctorName !== 'undefined' ? doctorName : (serviceDetail.selectedCourse?.doctorName || ''),
+                            };
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error updating selectedCourse:', err);
+                }
+            } else if (serviceDetail.selectedCourse) {
+                // Chỉ cập nhật các trường mới nếu không có selectedCourseName mới
+                if (typeof medicationName !== 'undefined') {
+                    serviceDetail.selectedCourse.medicationName = medicationName;
+                }
+                if (typeof medicationDosage !== 'undefined') {
+                    serviceDetail.selectedCourse.medicationDosage = medicationDosage;
+                }
+                if (typeof medicationUnit !== 'undefined') {
+                    serviceDetail.selectedCourse.medicationUnit = medicationUnit;
+                }
+                if (typeof consultantName !== 'undefined') {
+                    serviceDetail.selectedCourse.consultantName = consultantName;
+                }
+                if (typeof doctorName !== 'undefined') {
+                    serviceDetail.selectedCourse.doctorName = doctorName;
+                }
+            }
+        }
 
         // Cập nhật pricing nếu có
         if (
@@ -899,7 +1205,7 @@ export async function updateServiceDetailAction(prevState, formData) {
             typeof adjustmentValue !== 'undefined' ||
             typeof finalPrice !== 'undefined'
         ) {
-            const current = detail.pricing || {};
+            const current = serviceDetail.pricing || {};
             const next = { ...current };
 
             if (typeof listPrice === 'number' && Number.isFinite(listPrice)) next.listPrice = listPrice;
@@ -924,7 +1230,19 @@ export async function updateServiceDetailAction(prevState, formData) {
 
             if (typeof finalPrice === 'number' && Number.isFinite(finalPrice)) next.finalPrice = finalPrice;
 
-            detail.pricing = next;
+            serviceDetail.pricing = next;
+            // Cập nhật revenue nếu có finalPrice
+            if (next.finalPrice !== undefined) {
+                serviceDetail.revenue = next.finalPrice;
+            }
+        }
+
+        // Chương trình khuyến mãi
+        if (typeof idCTKMUpdate !== 'undefined') {
+            serviceDetail.idCTKM = idCTKMUpdate && isValidObjectId(idCTKMUpdate) ? idCTKMUpdate : null;
+        }
+        if (typeof name_CTKMUpdate !== 'undefined') {
+            serviceDetail.name_CTKM = name_CTKMUpdate || '';
         }
 
         // 📸 Xử lý xóa ảnh và cập nhật danh sách ảnh
@@ -954,20 +1272,20 @@ export async function updateServiceDetailAction(prevState, formData) {
             
             // Gán lại với existingIds đã được lọc (đã xóa ID cần xóa) + ảnh mới
             if (existingIds.length > 0) {
-                detail.invoiceDriveIds = [...existingIds, ...uploaded];
+                serviceDetail.invoiceDriveIds = [...existingIds, ...uploaded];
             } else {
-                // Nếu không có existingIds, lấy từ detail hiện tại và lọc bỏ ID đã xóa
-                const currentIds = (detail.invoiceDriveIds || []).filter(id => !deletedImageIds.includes(id));
-                detail.invoiceDriveIds = [...currentIds, ...uploaded];
+                // Nếu không có existingIds, lấy từ serviceDetail hiện tại và lọc bỏ ID đã xóa
+                const currentIds = (serviceDetail.invoiceDriveIds || []).filter(id => !deletedImageIds.includes(id));
+                serviceDetail.invoiceDriveIds = [...currentIds, ...uploaded];
             }
         } else {
             // Chỉ sắp xếp lại mà không thêm ảnh mới
             if (existingIds.length > 0) {
                 // Có existingIds: dùng danh sách đã được lọc (đã xóa ID cần xóa)
-                detail.invoiceDriveIds = existingIds;
+                serviceDetail.invoiceDriveIds = existingIds;
             } else if (deletedImageIds.length > 0) {
                 // Không có existingIds nhưng có ID cần xóa: xóa khỏi danh sách hiện tại
-                detail.invoiceDriveIds = (detail.invoiceDriveIds || []).filter(id => !deletedImageIds.includes(id));
+                serviceDetail.invoiceDriveIds = (serviceDetail.invoiceDriveIds || []).filter(id => !deletedImageIds.includes(id));
             }
             // Nếu không có existingIds và không có ID cần xóa: giữ nguyên
         }
@@ -996,30 +1314,70 @@ export async function updateServiceDetailAction(prevState, formData) {
             if (uploaded.length > 0) {
                 // Gán lại với existingCustomerPhotoIds đã được lọc (đã xóa ID cần xóa) + ảnh mới
                 if (existingCustomerPhotoIds.length > 0) {
-                    detail.customerPhotosDriveIds = [...existingCustomerPhotoIds, ...uploaded];
+                    serviceDetail.customerPhotosDriveIds = [...existingCustomerPhotoIds, ...uploaded];
                 } else {
-                    // Nếu không có existingCustomerPhotoIds, lấy từ detail hiện tại và lọc bỏ ID đã xóa
-                    const currentIds = (detail.customerPhotosDriveIds || []).filter(id => !deletedCustomerPhotoIds.includes(id));
-                    detail.customerPhotosDriveIds = [...currentIds, ...uploaded];
+                    // Nếu không có existingCustomerPhotoIds, lấy từ serviceDetail hiện tại và lọc bỏ ID đã xóa
+                    const currentIds = (serviceDetail.customerPhotosDriveIds || []).filter(id => !deletedCustomerPhotoIds.includes(id));
+                    serviceDetail.customerPhotosDriveIds = [...currentIds, ...uploaded];
                 }
             }
         } else {
             // Chỉ sắp xếp lại mà không thêm ảnh mới
             if (existingCustomerPhotoIds.length > 0) {
                 // Có existingCustomerPhotoIds: dùng danh sách đã được lọc (đã xóa ID cần xóa)
-                detail.customerPhotosDriveIds = existingCustomerPhotoIds;
+                serviceDetail.customerPhotosDriveIds = existingCustomerPhotoIds;
             } else if (deletedCustomerPhotoIds.length > 0) {
                 // Không có existingCustomerPhotoIds nhưng có ID cần xóa: xóa khỏi danh sách hiện tại
-                detail.customerPhotosDriveIds = (detail.customerPhotosDriveIds || []).filter(id => !deletedCustomerPhotoIds.includes(id));
+                serviceDetail.customerPhotosDriveIds = (serviceDetail.customerPhotosDriveIds || []).filter(id => !deletedCustomerPhotoIds.includes(id));
             }
             // Nếu không có existingCustomerPhotoIds và không có ID cần xóa: giữ nguyên
         }
 
-        // Lưu subdoc
-        await customer.save();
+        // Lưu serviceDetail vào service_details collection
+        await serviceDetail.save();
 
-        // Cập nhật pipeline theo status hiện tại của detail
-        const finalStatus = detail.status;
+        // Cập nhật snapshot trong customers.serviceDetails[] (không đụng lifetime_revenue)
+        // Cập nhật cả serviceId để giao diện nhóm/tên dịch vụ hiển thị đúng sau khi sửa đơn
+        const newFinalPrice = Number(serviceDetail.pricing?.finalPrice ?? serviceDetail.revenue ?? 0) || 0;
+        const newServiceId = serviceDetail.serviceId;
+        const db = mongoose.connection.db;
+        const customersCollection = db.collection(Customer.collection.name);
+        const statusForSnapshot = typeof statusRaw !== 'undefined'
+            ? statusRaw
+            : (serviceDetail.status === 'processing' ? 'in_progress' : serviceDetail.status === 'cancelled' ? 'rejected' : serviceDetail.status);
+        const pricing = serviceDetail.pricing || {};
+        const snapshotSet = {
+            'serviceDetails.$.status': statusForSnapshot,
+            'serviceDetails.$.pricing.listPrice': Number(pricing.listPrice ?? 0) || 0,
+            'serviceDetails.$.pricing.discountType': pricing.discountType || 'none',
+            'serviceDetails.$.pricing.discountValue': Number(pricing.discountValue ?? 0) || 0,
+            'serviceDetails.$.pricing.adjustmentType': pricing.adjustmentType || 'none',
+            'serviceDetails.$.pricing.adjustmentValue': Number(pricing.adjustmentValue ?? 0) || 0,
+            'serviceDetails.$.pricing.finalPrice': newFinalPrice,
+            'serviceDetails.$.amountReceivedTotal': serviceDetail.amountReceivedTotal ?? 0,
+            'serviceDetails.$.outstandingAmount': serviceDetail.outstandingAmount ?? 0,
+            'serviceDetails.$.name_CTKM': serviceDetail.name_CTKM ?? '',
+            'serviceDetails.$.idCTKM': serviceDetail.idCTKM || null,
+        };
+        if (newServiceId) {
+            const oid = new mongoose.Types.ObjectId(newServiceId);
+            snapshotSet['serviceDetails.$.serviceId'] = oid;
+            snapshotSet['serviceDetails.$.selectedService'] = oid;
+        }
+        await customersCollection.updateOne(
+            {
+                _id: new mongoose.Types.ObjectId(customerId),
+                'serviceDetails.serviceDetailId': new mongoose.Types.ObjectId(serviceDetailId)
+            },
+            { $set: snapshotSet }
+        );
+
+        // Rebuild service_use từ serviceDetails (sửa dịch vụ A→B: thêm B, bỏ A nếu không còn đơn nào dùng A)
+        await rebuildServiceUseForCustomer(customerId);
+        await rebuildHistoryServiceForCustomer(customerId);
+
+        // Cập nhật pipeline theo status hiện tại của serviceDetail
+        const finalStatus = serviceDetailStatus;
         const newPipeline = pipelineFromServiceStatus(finalStatus);
         // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
         // Convert customer document sang plain object để validate
@@ -1039,8 +1397,7 @@ export async function updateServiceDetailAction(prevState, formData) {
 
         await pushCareLog(
             customerId,
-            `[Sửa đơn chốt] #${serviceDetailId} ${statusRaw ? `(status → ${finalStatus})` : ''}${notes ? ` | Ghi chú: ${notes}` : ''
-            }`,
+            `[Sửa đơn chốt] #${serviceDetailId} ${statusRaw ? `(status → ${statusRaw})` : ''}${notes ? ` | Ghi chú: ${notes}` : ''}`,
             session.id
         );
 
@@ -1069,25 +1426,45 @@ export async function deleteServiceDetailAction(prevState, formData) {
     try {
         await connectDB();
 
+        // Tìm trong service_details collection để kiểm tra approvalStatus
+        const serviceDetail = await ServiceDetail.findById(serviceDetailId);
+        if (!serviceDetail) {
+            return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
+        }
+        
+        // Kiểm tra customerId có khớp không
+        if (String(serviceDetail.customerId) !== String(customerId)) {
+            return { success: false, error: 'Đơn chốt dịch vụ không thuộc khách hàng này.' };
+        }
+        
         // Chỉ xóa khi approvalStatus = 'pending'
-        const res = await Customer.updateOne(
-            { _id: customerId },
-            {
-                $pull: {
-                    serviceDetails: {
-                        _id: new mongoose.Types.ObjectId(serviceDetailId),
-                        approvalStatus: 'pending',
-                    },
-                },
-            }
-        );
-
-        if (res.modifiedCount === 0) {
+        if (serviceDetail.approvalStatus !== 'pending') {
             return {
                 success: false,
                 error: 'Không thể xóa: đơn không ở trạng thái pending hoặc không tồn tại.',
             };
         }
+
+        // Xóa trong service_details collection
+        await ServiceDetail.deleteOne({ _id: serviceDetailId });
+
+        // Chỉ xóa đơn chưa duyệt → không trừ lifetime_revenue (đơn chưa duyệt chưa từng cộng vào)
+        const db = mongoose.connection.db;
+        const customersCollection = db.collection(Customer.collection.name);
+        await customersCollection.updateOne(
+            { _id: new mongoose.Types.ObjectId(customerId) },
+            {
+                $pull: {
+                    serviceDetails: {
+                        serviceDetailId: new mongoose.Types.ObjectId(serviceDetailId),
+                    },
+                },
+            }
+        );
+
+        // Rebuild service_use từ serviceDetails (xóa đơn: bỏ id dịch vụ nếu không còn đơn nào dùng)
+        await rebuildServiceUseForCustomer(customerId);
+        await rebuildHistoryServiceForCustomer(customerId);
 
         await pushCareLog(customerId, `[Xóa đơn chốt] #${serviceDetailId}`, session.id);
 
@@ -1115,21 +1492,53 @@ export async function approveServiceDetailAction(prevState, formData) {
 
     try {
         await connectDB();
+        
+        // Tìm trong service_details collection
+        const serviceDetail = await ServiceDetail.findById(serviceDetailId);
+        if (!serviceDetail) {
+            return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
+        }
+        
+        // Kiểm tra customerId có khớp không
+        if (String(serviceDetail.customerId) !== String(customerId)) {
+            return { success: false, error: 'Đơn chốt dịch vụ không thuộc khách hàng này.' };
+        }
+        
+        if (serviceDetail.approvalStatus === 'approved') {
+            return { success: false, error: 'Đơn đã duyệt trước đó.' };
+        }
+
+        // Cập nhật trong service_details collection
+        serviceDetail.approvalStatus = 'approved';
+        serviceDetail.approvedBy = session.id;
+        serviceDetail.approvedAt = new Date();
+        await serviceDetail.save();
+
+        const orderTotal = Number(serviceDetail.revenue ?? serviceDetail.pricing?.finalPrice ?? 0) || 0;
+
+        // Cập nhật reference trong customers.serviceDetails[] và lifetime_revenue (1️⃣ đơn chưa duyệt → đã duyệt: lifetime_revenue += order.total)
+        const db = mongoose.connection.db;
+        const customersCollection = db.collection(Customer.collection.name);
+        const approveUpdate = {
+            $set: {
+                'serviceDetails.$.approvalStatus': 'approved'
+            }
+        };
+        if (orderTotal > 0) {
+            approveUpdate.$inc = { lifetime_revenue: orderTotal };
+        }
+        await customersCollection.updateOne(
+            { 
+                _id: new mongoose.Types.ObjectId(customerId),
+                'serviceDetails.serviceDetailId': new mongoose.Types.ObjectId(serviceDetailId)
+            },
+            approveUpdate
+        );
+
         const customer = await Customer.findById(customerId);
         if (!customer) return { success: false, error: 'Không tìm thấy khách hàng.' };
 
-        const detail = customer.serviceDetails?.id(serviceDetailId);
-        if (!detail) return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
-        if (detail.approvalStatus === 'approved')
-            return { success: false, error: 'Đơn đã duyệt trước đó.' };
-
-        detail.approvalStatus = 'approved';
-        detail.approvedBy = session.id;
-        detail.approvedAt = new Date();
-
-        await customer.save();
-
-        const newPipeline = pipelineFromServiceStatus(detail.status);
+        const newPipeline = pipelineFromServiceStatus(serviceDetail.status);
         await Customer.updateOne(
             { _id: customerId },
             {
@@ -1142,7 +1551,7 @@ export async function approveServiceDetailAction(prevState, formData) {
 
         await pushCareLog(
             customerId,
-            `[Duyệt đơn chốt] #${serviceDetailId} (status: ${detail.status})`,
+            `[Duyệt đơn chốt] #${serviceDetailId} (status: ${serviceDetail.status})`,
             session.id
         );
 
@@ -1184,44 +1593,218 @@ export async function approveServiceDealAction(prevState, formData) {
 
     try {
         await connectDB();
-        const customer = await Customer.findById(customerId);
-        if (!customer) return { success: false, error: 'Không tìm thấy khách hàng.' };
-
-        const detail = customer.serviceDetails?.id(serviceDetailId);
-        if (!detail) return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
-        if (detail.approvalStatus === 'approved')
+        
+        // Tìm trong service_details collection
+        const serviceDetail = await ServiceDetail.findById(serviceDetailId);
+        if (!serviceDetail) {
+            return { success: false, error: 'Không tìm thấy đơn chốt dịch vụ.' };
+        }
+        
+        // Kiểm tra customerId có khớp không
+        if (String(serviceDetail.customerId) !== String(customerId)) {
+            return { success: false, error: 'Đơn chốt dịch vụ không thuộc khách hàng này.' };
+        }
+        
+        if (serviceDetail.approvalStatus === 'approved') {
             return { success: false, error: 'Đơn đã duyệt trước đó.' };
+        }
 
-        // cập nhật pricing theo form duyệt
-        detail.notes = notes;
-        detail.revenue = Number.isFinite(revenue) ? revenue : 0;
-        detail.pricing = {
+        // Cập nhật pricing theo form duyệt trong service_details collection
+        serviceDetail.notes = notes;
+        
+        // ✅ Revenue: Ưu tiên giá từ form, nhưng nếu revenue = listPrice (giá gốc) thì dùng finalPrice (giá sau giảm)
+        // Đảm bảo revenue = giá sau giảm, không phải giá gốc
+        let revenueValue = 0;
+        if (Number.isFinite(revenue) && revenue > 0) {
+            // Nếu revenue từ form = listPrice (có thể là giá gốc), thì dùng finalPrice thay thế
+            if (Number(revenue) === Number(listPrice) && Number(finalPrice) > 0 && Number(finalPrice) !== Number(listPrice)) {
+                revenueValue = finalPrice;
+            } else {
+                revenueValue = revenue;
+            }
+        } else if (Number.isFinite(finalPrice) && finalPrice > 0) {
+            revenueValue = finalPrice;
+        } else {
+            revenueValue = listPrice;
+        }
+        serviceDetail.revenue = revenueValue;
+        
+        serviceDetail.pricing = {
             listPrice,
             discountType: ['none', 'amount', 'percent'].includes(discountType) ? discountType : 'none',
             discountValue,
+            adjustmentType: serviceDetail.pricing?.adjustmentType || 'none',
+            adjustmentValue: serviceDetail.pricing?.adjustmentValue || 0,
             finalPrice,
         };
-        detail.commissions = (Array.isArray(commissions) ? commissions : []).map((x) => ({
+        serviceDetail.commissions = (Array.isArray(commissions) ? commissions : []).map((x) => ({
             user: x.user,
             role: x.role,
             percent: Number(x.percent) || 0,
             amount: Number(x.amount) || 0,
         }));
-        detail.costs = (Array.isArray(costs) ? costs : []).map((x) => ({
-            label: x.label,
-            amount: Number(x.amount) || 0,
-        }));
+        
+        // ✅ Costs: Chỉ lưu nếu có dữ liệu, nếu không thì để mảng rỗng (không lưu undefined)
+        if (Array.isArray(costs) && costs.length > 0) {
+            serviceDetail.costs = costs.map((x) => ({
+                label: x.label || '',
+                amount: Number(x.amount) || 0,
+                createdAt: x.createdAt || new Date(),
+                createdBy: x.createdBy || session.id,
+            }));
+        } else {
+            serviceDetail.costs = []; // Đảm bảo là mảng rỗng, không phải undefined
+        }
+        
+        // ✅ Loại bỏ các thuộc tính không cần thiết nếu rỗng để giảm kích thước document
+        // payments: Chỉ giữ nếu có dữ liệu
+        if (!serviceDetail.payments || !Array.isArray(serviceDetail.payments) || serviceDetail.payments.length === 0) {
+            serviceDetail.payments = [];
+        }
+        
+        // interestedServices: Chỉ giữ nếu có dữ liệu
+        if (!serviceDetail.interestedServices || !Array.isArray(serviceDetail.interestedServices) || serviceDetail.interestedServices.length === 0) {
+            serviceDetail.interestedServices = [];
+        }
 
-        // Approve
-        detail.approvalStatus = 'approved';
-        detail.approvedBy = session.id;
-        detail.approvedAt = new Date();
+        // Approve - đảm bảo status là 'completed' khi approve
+        serviceDetail.approvalStatus = 'approved';
+        serviceDetail.status = 'completed'; // Đảm bảo status là completed khi approve
+        serviceDetail.approvedBy = session.id;
+        serviceDetail.approvedAt = new Date();
+        const approvedAt = new Date();
 
-        const detailSnapshot = detail.toObject ? detail.toObject() : JSON.parse(JSON.stringify(detail));
+        await serviceDetail.save();
 
-        await customer.save();
+        // Cập nhật reference trong customers.serviceDetails[]
+        const db = mongoose.connection.db;
+        const customersCollection = db.collection(Customer.collection.name);
+        await customersCollection.updateOne(
+            { 
+                _id: new mongoose.Types.ObjectId(customerId),
+                'serviceDetails.serviceDetailId': new mongoose.Types.ObjectId(serviceDetailId)
+            },
+            {
+                $set: {
+                    'serviceDetails.$.approvalStatus': 'approved'
+                }
+            }
+        );
 
-        const newPipeline = pipelineFromServiceStatus(detail.status);
+        const customer = await Customer.findById(customerId);
+        if (!customer) return { success: false, error: 'Không tìm thấy khách hàng.' };
+
+        // ========== XỬ LÝ THEO THIẾT KẾ MỚI: orders + report_daily ==========
+        // Tính toán cost và profit
+        const totalCost = (Array.isArray(serviceDetail.costs) ? serviceDetail.costs : []).reduce(
+            (sum, c) => sum + (Number(c.amount) || 0),
+            0
+        );
+        const profit = Math.max(0, revenue - totalCost);
+
+        // Bước 1: Xác định new/old customer (atomic)
+        // Nếu update thành công với điều kiện total_completed_orders = 0 → khách mới
+        // Nếu không match → khách cũ
+        const isNewCustomerResult = await customersCollection.findOneAndUpdate(
+            {
+                _id: new mongoose.Types.ObjectId(customerId),
+                total_completed_orders: 0
+            },
+            {
+                $inc: { total_completed_orders: 1 }
+            },
+            { returnDocument: 'after' }
+        );
+        
+        const isNewCustomer = !!isNewCustomerResult;
+        
+        // Nếu không phải khách mới, update total_completed_orders
+        if (!isNewCustomer) {
+            await customersCollection.updateOne(
+                { _id: new mongoose.Types.ObjectId(customerId) },
+                { $inc: { total_completed_orders: 1 } }
+            );
+        }
+
+        // Bước 2: Cập nhật lifetime_revenue
+        // ✅ Sử dụng revenueValue (đã được tính đúng) thay vì revenue từ form
+        await customersCollection.updateOne(
+            { _id: new mongoose.Types.ObjectId(customerId) },
+            { $inc: { lifetime_revenue: revenueValue } }
+        );
+
+        // Bước 3: Tạo order trong collection orders
+        // ✅ Sử dụng revenueValue (đã được tính đúng ở trên) thay vì revenue từ form
+        const order = new Order({
+            customerId: new mongoose.Types.ObjectId(customerId),
+            serviceId: serviceDetail.serviceId,
+            serviceDetailId: new mongoose.Types.ObjectId(serviceDetailId),
+            sourceId: serviceDetail.sourceId,
+            sourceDetails: serviceDetail.sourceDetails || '',
+            price: finalPrice, // Giá sau giảm
+            revenue: revenueValue, // Doanh thu ghi nhận (ưu tiên từ form, nếu không thì dùng finalPrice)
+            cost: totalCost,
+            profit: profit,
+            status: 'completed',
+            completedAt: approvedAt,
+            createdAt: serviceDetail.createdAt || new Date(),
+            approvedBy: session.id,
+            approvedAt: approvedAt,
+        });
+        await order.save();
+
+        // Sau khi đơn chuyển sang completed/approved → tính lại báo cáo tài chính cho tháng tương ứng
+        try {
+            const year = approvedAt.getFullYear();
+            const month = approvedAt.getMonth() + 1;
+            await rebuildFinancialReportForMonth(year, month);
+        } catch (e) {
+            console.error('[financialReports] rebuild after approve failed:', e?.message || e);
+        }
+
+        // Bước 4: Update report_daily (atomic với $inc)
+        // Format date string: "YYYY-MM-DD"
+        const dateStr = approvedAt.toISOString().split('T')[0];
+        const dateObj = new Date(approvedAt);
+        dateObj.setUTCHours(0, 0, 0, 0);
+
+        // Build update object với $inc
+        // ✅ Sử dụng revenueValue (đã được tính đúng) thay vì revenue từ form
+        const updateFields = {
+            $inc: {
+                total_completed_orders: 1,
+                total_revenue: revenueValue,
+                total_cost: totalCost,
+                total_profit: profit,
+                total_new_customers: isNewCustomer ? 1 : 0,
+                total_old_customers: isNewCustomer ? 0 : 1,
+            }
+        };
+
+        // Thêm revenue_by_source nếu có sourceId (dùng dot notation cho Map)
+        if (serviceDetail.sourceId) {
+            const sourceIdStr = String(serviceDetail.sourceId);
+            updateFields.$inc[`revenue_by_source.${sourceIdStr}`] = revenueValue;
+        }
+
+        // Thêm revenue_by_service (dùng dot notation cho Map)
+        if (serviceDetail.serviceId) {
+            const serviceIdStr = String(serviceDetail.serviceId);
+            updateFields.$inc[`revenue_by_service.${serviceIdStr}`] = revenueValue;
+        }
+
+        // Update report_daily với upsert
+        // Sử dụng findOneAndUpdate với upsert để đảm bảo tạo document mới nếu chưa có
+        await ReportDaily.findOneAndUpdate(
+            { _id: dateStr },
+            {
+                $set: { date: dateObj },
+                $inc: updateFields.$inc
+            },
+            { upsert: true, new: true }
+        );
+
+        const newPipeline = pipelineFromServiceStatus(serviceDetail.status);
         // Kiểm tra xem có nên cập nhật không (chỉ cập nhật nếu step mới > step hiện tại)
         const validatedPipeline = validatePipelineStatusUpdate(customer, newPipeline);
         if (validatedPipeline) {

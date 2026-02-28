@@ -123,6 +123,16 @@ export default function CalendarView({ initialAppointments, currentUser, isAdmin
             prev.map(app => app._id === updatedAppointment._id ? updatedAppointment : app)
         );
         setSelectedAppointment(null);
+        setSelectedDay(prevDay =>
+            prevDay
+                ? {
+                    ...prevDay,
+                    appointments: prevDay.appointments.map(app =>
+                        app._id === updatedAppointment._id ? updatedAppointment : app
+                    ),
+                }
+                : prevDay
+        );
     };
 
 

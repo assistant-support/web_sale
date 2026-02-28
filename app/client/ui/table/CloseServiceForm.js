@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useWatch } from 'react-hook-form';
+import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw, Loader2 } from 'lucide-react';
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +21,10 @@ export default function CloseServiceForm({
     listPrice,
     finalRevenue,
     discountType,
+    discountPrograms = [],
+    currentUserName = '',
+    unitMedicines = [],
+    treatmentDoctors = [],
     fileReg,                 // form.register('invoiceImage')
     onImageChange,
     existingImageUrls = [],
@@ -50,6 +55,16 @@ export default function CloseServiceForm({
     if (!form) return null;
 
     const currencyVN = (n) => new Intl.NumberFormat('vi-VN').format(Number(n || 0));
+
+    // State cho autocomplete tên thuốc
+    const [medicineInputValue, setMedicineInputValue] = useState(''); // Giá trị hiển thị trong input
+    const [medicineSearchValue, setMedicineSearchValue] = useState(''); // Giá trị dùng để search
+    const [medicineSearchResults, setMedicineSearchResults] = useState([]);
+    const [isSearchingMedicine, setIsSearchingMedicine] = useState(false);
+    const [showMedicineDropdown, setShowMedicineDropdown] = useState(false);
+    const medicineSearchTimeoutRef = useRef(null);
+    const medicineInputRef = useRef(null);
+    const medicineDropdownRef = useRef(null);
 
     // State cho checkbox trong chế độ xem - ảnh minh chứng (readOnly để download)
     const [selectedImageIndices, setSelectedImageIndices] = useState(() => {
@@ -398,6 +413,108 @@ export default function CloseServiceForm({
         e.target.value = '';
     };
 
+    // Hàm search thuốc với debounce
+    const searchMedicines = useCallback(async (query) => {
+        if (!query || query.length < 2) {
+            setMedicineSearchResults([]);
+            setShowMedicineDropdown(false);
+            return;
+        }
+
+        setIsSearchingMedicine(true);
+        try {
+            const response = await fetch(`/api/medicines/search?q=${encodeURIComponent(query)}`);
+            if (response.ok) {
+                const data = await response.json();
+                setMedicineSearchResults(data || []);
+                setShowMedicineDropdown(true);
+            }
+        } catch (error) {
+            console.error('Error searching medicines:', error);
+            setMedicineSearchResults([]);
+        } finally {
+            setIsSearchingMedicine(false);
+        }
+    }, []);
+
+    // Debounce search - chỉ search khi searchValue thay đổi
+    useEffect(() => {
+        if (medicineSearchTimeoutRef.current) {
+            clearTimeout(medicineSearchTimeoutRef.current);
+        }
+
+        if (!medicineSearchValue || medicineSearchValue.length < 2) {
+            setMedicineSearchResults([]);
+            setShowMedicineDropdown(false);
+            return;
+        }
+
+        medicineSearchTimeoutRef.current = setTimeout(() => {
+            searchMedicines(medicineSearchValue);
+        }, 300);
+
+        return () => {
+            if (medicineSearchTimeoutRef.current) {
+                clearTimeout(medicineSearchTimeoutRef.current);
+            }
+        };
+    }, [medicineSearchValue, searchMedicines]);
+
+    // Đóng dropdown khi click outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (
+                medicineInputRef.current &&
+                !medicineInputRef.current.contains(event.target) &&
+                medicineDropdownRef.current &&
+                !medicineDropdownRef.current.contains(event.target)
+            ) {
+                setShowMedicineDropdown(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
+    // Chọn thuốc từ dropdown
+    const handleSelectMedicine = (medicine, e) => {
+        e?.preventDefault();
+        e?.stopPropagation();
+        
+        // Clear timeout để không trigger search lại
+        if (medicineSearchTimeoutRef.current) {
+            clearTimeout(medicineSearchTimeoutRef.current);
+            medicineSearchTimeoutRef.current = null;
+        }
+        
+        // Đóng dropdown và clear results
+        setShowMedicineDropdown(false);
+        setMedicineSearchResults([]);
+        setIsSearchingMedicine(false);
+        
+        // Chỉ update inputValue để hiển thị, KHÔNG update searchValue để tránh trigger search
+        setMedicineInputValue(medicine.name);
+        setMedicineSearchValue(''); // Clear searchValue để không search
+        form.setValue('medicationName', medicine.name);
+    };
+
+    // Watch medicationName để sync với medicineInputValue khi form value thay đổi (khi load dữ liệu cũ)
+    const watchedMedicationName = useWatch({
+        control: form.control,
+        name: 'medicationName',
+        defaultValue: ''
+    });
+
+    // Sync medicineInputValue với field value khi load dữ liệu cũ hoặc khi field value thay đổi từ bên ngoài
+    useEffect(() => {
+        if (watchedMedicationName !== undefined && watchedMedicationName !== null && watchedMedicationName !== medicineInputValue) {
+            setMedicineInputValue(watchedMedicationName);
+        }
+    }, [watchedMedicationName, medicineInputValue]);
+
     return (
         <Form {...form}>
             <form
@@ -410,19 +527,19 @@ export default function CloseServiceForm({
                     }
                     e.preventDefault(); // Prevent default để kiểm tra validation trước
                     
-                    // Cập nhật deleted IDs trước khi submit
+                    // Cập nhật deleted IDs ở parent (để đồng bộ UI)
                     if (onGetDeletedIds) {
                         onGetDeletedIds({
                             deletedImageIds,
                             deletedCustomerPhotoIds,
                         });
                     }
-                    
-                    // Kiểm tra validation trước khi submit
+                    const deletedForSubmit = { deletedImageIds, deletedCustomerPhotoIds };
+                    // Kiểm tra validation trước khi submit — truyền luôn deleted IDs vào onSubmit để tránh dùng state cũ (setState bất đồng bộ)
                     form.handleSubmit(
                         (values) => {
                             console.log('✅ Form validation passed, submitting...', values);
-                            onSubmit(values);
+                            onSubmit(values, deletedForSubmit);
                         },
                         (errors) => {
                             console.error('❌ Form validation failed:', errors);
@@ -511,17 +628,185 @@ export default function CloseServiceForm({
                     )
                 }} />
 
+                {/* Thông tin liệu trình */}
+                <div className="space-y-3">
+                    <FormLabel>Thông tin liệu trình</FormLabel>
+                    <div className="p-4 border rounded-md bg-muted/50 mt-3 space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <FormField control={form.control} name="medicationName" render={({ field }) => (
+                                <FormItem className="relative">
+                                    <FormLabel className="text-xs">Tên thuốc</FormLabel>
+                                    <FormControl>
+                                        <div ref={medicineInputRef} className="relative">
+                                            <Input
+                                                type="text"
+                                                placeholder="Nhập tên thuốc"
+                                                value={medicineInputValue || field.value || ''}
+                                                onChange={(e) => {
+                                                    if (readOnly || status === 'rejected') return;
+                                                    const value = e.target.value;
+                                                    // Update cả inputValue (hiển thị) và searchValue (để search)
+                                                    setMedicineInputValue(value);
+                                                    setMedicineSearchValue(value);
+                                                    field.onChange(value);
+                                                }}
+                                                onFocus={() => {
+                                                    if (medicineSearchValue.length >= 2 && medicineSearchResults.length > 0) {
+                                                        setShowMedicineDropdown(true);
+                                                    }
+                                                }}
+                                                onBlur={(e) => {
+                                                    // Delay onBlur để cho phép click vào dropdown item
+                                                    setTimeout(() => {
+                                                        if (!medicineDropdownRef.current?.contains(document.activeElement)) {
+                                                            setShowMedicineDropdown(false);
+                                                            if (readOnly) return;
+                                                            field.onBlur();
+                                                        }
+                                                    }, 200);
+                                                }}
+                                                disabled={readOnly || status === 'rejected'}
+                                            />
+                                            {isSearchingMedicine && (
+                                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                                </div>
+                                            )}
+                                            {showMedicineDropdown && medicineSearchResults.length > 0 && (
+                                                <div
+                                                    ref={medicineDropdownRef}
+                                                    className="absolute z-50 w-full mt-1 border rounded-md bg-background shadow-md max-h-60 overflow-auto"
+                                                >
+                                                    {medicineSearchResults.map((medicine) => (
+                                                        <div
+                                                            key={medicine._id}
+                                                            className="p-2 hover:bg-accent cursor-pointer"
+                                                            onMouseDown={(e) => {
+                                                                e.preventDefault();
+                                                                handleSelectMedicine(medicine, e);
+                                                            }}
+                                                        >
+                                                            <div className="text-sm">{medicine.name}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {showMedicineDropdown && medicineSearchValue.length >= 2 && medicineSearchResults.length === 0 && !isSearchingMedicine && (
+                                                <div
+                                                    ref={medicineDropdownRef}
+                                                    className="absolute z-50 w-full mt-1 border rounded-md bg-background shadow-md p-2"
+                                                >
+                                                    <div className="text-sm text-muted-foreground">Không có tên thuốc trong hệ thống</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+
+                            <FormField control={form.control} name="medicationDosage" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel className="text-xs">Liều lượng thuốc</FormLabel>
+                                    <FormControl>
+                                        <Input
+                                            type="text"
+                                            placeholder="Nhập liều lượng"
+                                            value={field.value ?? ''}
+                                            onChange={readOnly ? undefined : field.onChange}
+                                            onBlur={readOnly ? undefined : field.onBlur}
+                                            disabled={readOnly || status === 'rejected'}
+                                        />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+
+                            <FormField control={form.control} name="medicationUnit" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel className="text-xs">Đơn vị thuốc</FormLabel>
+                                    <Select
+                                        onValueChange={readOnly ? undefined : field.onChange}
+                                        value={field.value ?? ''}
+                                        disabled={readOnly || status === 'rejected'}
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="-- Chọn đơn vị --" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {unitMedicines.map((unit) => (
+                                                <SelectItem key={unit._id} value={unit.name}>
+                                                    {unit.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FormItem>
+                                <FormLabel className="text-xs">Tư vấn viên</FormLabel>
+                                <Input
+                                    type="text"
+                                    value={currentUserName || ''}
+                                    disabled
+                                    className="bg-muted"
+                                />
+                            </FormItem>
+
+                            <FormField control={form.control} name="doctorName" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel className="text-xs">Bác sĩ Tư vấn</FormLabel>
+                                    <Select
+                                        onValueChange={readOnly ? undefined : field.onChange}
+                                        value={field.value ?? ''}
+                                        disabled={readOnly || status === 'rejected'}
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="-- Chọn bác sĩ --" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {treatmentDoctors.map((doctor) => (
+                                                <SelectItem key={doctor._id} value={doctor.name}>
+                                                    {doctor.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
+                        </div>
+                    </div>
+                </div>
+
                 {/* -------- Giá & điều chỉnh -------- */}
                 <div className="space-y-3">
                     <FormLabel>Giá &amp; Giảm giá</FormLabel>
                     <div className="p-4 border rounded-md bg-muted/50 mt-3 space-y-4">
-                        {/* Hàng 1: Giá gốc và Radio buttons */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Hàng 1: Giá gốc, Loại điều chỉnh, Chương trình khuyến mãi */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <FormItem>
                                 <FormLabel className="text-xs">Giá gốc (VND)</FormLabel>
-                                <div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground">
-                                    {currencyVN(listPrice)}
-                                </div>
+                                <Input
+                                    type="text"
+                                    value={currencyVN(listPrice)}
+                                    onChange={(e) => {
+                                        if (readOnly || status === 'rejected') return;
+                                        const digits = e.target.value.replace(/\D/g, '');
+                                        const numValue = Number(digits) || 0;
+                                        setListPrice(numValue);
+                                    }}
+                                    disabled={readOnly || status === 'rejected'}
+                                    className="bg-muted"
+                                />
                             </FormItem>
 
                             <FormField control={form.control} name="adjustmentType" render={({ field }) => (
@@ -547,6 +832,55 @@ export default function CloseServiceForm({
                                     <FormMessage />
                                 </FormItem>
                             )} />
+
+                            <FormField
+                                control={form.control}
+                                name="discountProgramId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className="text-xs">Chương trình khuyến mãi</FormLabel>
+                                        <Select
+                                            value={field.value || ''}
+                                            onValueChange={(value) => {
+                                                if (readOnly || status === 'rejected') return;
+                                                field.onChange(value || '');
+                                                const selectedProgram = discountPrograms.find(p => p._id === value);
+                                                if (selectedProgram) {
+                                                    form.setValue('discountProgramName', selectedProgram.name || '');
+                                                    form.setValue('adjustmentType', 'discount');
+                                                    form.setValue('discountValue', selectedProgram.discount_unit === 'percent'
+                                                        ? selectedProgram.discount_value.toString()
+                                                        : currencyVN(selectedProgram.discount_value));
+                                                    form.setValue('discountType', selectedProgram.discount_unit);
+                                                }
+                                            }}
+                                            disabled={readOnly || status === 'rejected'}
+                                        >
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="-- Chọn chương trình --" />
+                                            </SelectTrigger>
+                                            <SelectContent className={discountPrograms.length > 4 ? "max-h-[200px] overflow-y-auto" : ""}>
+                                                {discountPrograms.map((program) => {
+                                                    const formatValue = () => {
+                                                        if (program.discount_unit === 'percent') {
+                                                            return `${program.discount_value}%`;
+                                                        } else if (program.discount_unit === 'amount') {
+                                                            return currencyVN(program.discount_value) + ' đ';
+                                                        }
+                                                        return program.discount_value;
+                                                    };
+                                                    return (
+                                                        <SelectItem key={program._id} value={program._id}>
+                                                            {program.name} - {formatValue()}
+                                                        </SelectItem>
+                                                    );
+                                                })}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                         </div>
 
                         {/* Hàng 2: Giá trị giảm, Giá trị tăng, Đơn vị */}
