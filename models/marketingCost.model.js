@@ -21,5 +21,11 @@ const MarketingCostSchema = new Schema(
     { timestamps: true }
 );
 
+// Index phục vụ báo cáo marketing & financial:
+// - Lọc và aggregate theo kênh form (source) + khoảng ngày [startDate, endDate]
+MarketingCostSchema.index({ source: 1, startDate: 1, endDate: 1 });
+// - Tối ưu cho rebuild financial_reports_daily: tìm mọi cost áp dụng cho một ngày bất kỳ
+MarketingCostSchema.index({ startDate: 1, endDate: 1 });
+
 export default models?.MarketingCost || model('MarketingCost', MarketingCostSchema);
 

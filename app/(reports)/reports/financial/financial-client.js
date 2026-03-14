@@ -5,7 +5,7 @@ import ExcelJS from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { DollarSign, RefreshCw, Download, Plus } from 'lucide-react';
+import { DollarSign, RefreshCw, Download, Plus, BookOpenText } from 'lucide-react';
 import Popup from '@/components/ui/popup';
 
 function Listbox({ label, options, value, onChange, placeholder = 'Chọn...' }) {
@@ -79,7 +79,7 @@ const StatCard = ({ title, value, icon: Icon, color }) => (
 
 function DevManualTriggerModal({ open, onClose }) {
     const [step, setStep] = useState('options'); // 'options' | 'password'
-    const [selectedMode, setSelectedMode] = useState(null); // 'rebuild_all' | 'current_month' | null
+    const [selectedMode, setSelectedMode] = useState(null); // 'rebuild_all' | 'current_month' | 'rebuild_daily_all' | 'rebuild_daily_range' | null
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -97,10 +97,11 @@ function DevManualTriggerModal({ open, onClose }) {
         if (!selectedMode) return;
         setLoading(true);
         try {
+            const body = { mode: selectedMode };
             const res = await fetch('/api/reports/financial/manual-trigger', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: selectedMode }),
+                body: JSON.stringify(body),
             });
             const data = await res.json();
             if (!res.ok || !data.success) {
@@ -181,6 +182,14 @@ function DevManualTriggerModal({ open, onClose }) {
                                 style={{ borderColor: 'var(--border)' }}
                             >
                                 Chỉ tính lại tháng hiện tại
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSelectMode('rebuild_daily_all')}
+                                className="w-full text-left px-3 py-2 rounded border hover:bg-muted text-sm"
+                                style={{ borderColor: 'var(--border)' }}
+                            >
+                                Rebuild toàn bộ báo cáo theo ngày (financial_reports_daily)
                             </button>
                         </div>
                     </>
@@ -363,6 +372,10 @@ export default function FinancialReportClient({ customers = [], services = [], s
     const [serviceFilter, setServiceFilter] = useState('all');
     const [startDate, setStartDate] = useState(defaultRange.from);
     const [endDate, setEndDate] = useState(defaultRange.to);
+    /** true = lọc theo khoảng ngày (Từ ngày / Đến ngày); false = hiển thị theo tháng (mặc định) */
+    const [useDateRangeFilter, setUseDateRangeFilter] = useState(false);
+    const [refreshKey, setRefreshKey] = useState(0);
+    const [docOpen, setDocOpen] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [marketingCosts, setMarketingCosts] = useState([]);
     const [operationalCosts, setOperationalCosts] = useState([]);
@@ -370,6 +383,7 @@ export default function FinancialReportClient({ customers = [], services = [], s
     const [marketingCostFromReport, setMarketingCostFromReport] = useState(0);
     const [devTriggerOpen, setDevTriggerOpen] = useState(false);
     const [financialRows, setFinancialRows] = useState([]);
+    const [financialSummary, setFinancialSummary] = useState(null);
 
     const sourceOptions = useMemo(() => {
         const opts = [{ value: 'all', label: 'Tất cả nguồn' }];
@@ -425,37 +439,65 @@ export default function FinancialReportClient({ customers = [], services = [], s
                     setMarketingCostFromReport(0);
                 }
 
-                // Đọc dữ liệu bảng tài chính từ financial_reports (theo tháng của startDate hoặc tháng hiện tại)
-                let year;
-                let month;
-                if (startDate) {
-                    const d = new Date(startDate + 'T00:00:00');
-                    year = d.getFullYear();
-                    month = d.getMonth() + 1;
+                // Bảng tài chính: Clear Từ/Đến ngày → all-time (tất cả tháng); có Từ+Đến → from+to; không thì year+month (tháng).
+                const frParams = new URLSearchParams();
+                if (useDateRangeFilter && startDate && endDate) {
+                    frParams.append('from', startDate);
+                    frParams.append('to', endDate);
+                } else if (!startDate && !endDate) {
+                    // Không gửi year/month/from/to → API trả về tổng tất cả tháng
                 } else {
-                    const now = new Date();
-                    year = now.getFullYear();
-                    month = now.getMonth() + 1;
+                    const d = startDate ? new Date(startDate + 'T00:00:00') : new Date();
+                    const y = d.getFullYear();
+                    const m = d.getMonth() + 1;
+                    frParams.append('year', String(y));
+                    frParams.append('month', String(m));
                 }
-                const frParams = new URLSearchParams({ year: String(year), month: String(month) });
-                const frRes = await fetch(`/api/reports/financial?${frParams}`);
+                const frQuery = frParams.toString() ? `?${frParams}` : '';
+                const frRes = await fetch(`/api/reports/financial${frQuery}`);
                 const frData = await frRes.json();
                 if (frRes.ok && frData.success) {
                     setFinancialRows(frData.rows || []);
+                    setFinancialSummary(frData.summary || null);
                 } else {
                     setFinancialRows([]);
+                    setFinancialSummary(null);
                 }
             } catch (error) {
                 console.error('Lỗi khi tải chi phí:', error);
             }
         };
         loadCosts();
-    }, [startDate, endDate]);
+    }, [startDate, endDate, useDateRangeFilter, refreshKey]);
 
-    // Tính toán dữ liệu tài chính
+    // Hiển thị theo database: ưu tiên summary từ financial API (financialreports / financial_reports_daily), không tính lại
     const financialData = useMemo(() => {
-        let filteredCustomers = [...customers];
+        if (financialSummary) {
+            // Chi phí marketing: ưu tiên theo báo cáo marketing để đồng nhất 2 tab
+            const mkCost = Number(
+                (marketingCostFromReport && marketingCostFromReport > 0
+                    ? marketingCostFromReport
+                    : financialSummary.marketingCost) ?? 0
+            );
+            return {
+                totalRevenue: Number(financialSummary.totalRevenue ?? 0),
+                marketingCost: mkCost,
+                operationalCost: Number(financialSummary.operationalCost ?? 0),
+                totalCost: mkCost + Number(financialSummary.operationalCost ?? 0),
+                profit:
+                    Number(financialSummary.totalRevenue ?? 0) -
+                    (mkCost + Number(financialSummary.operationalCost ?? 0)),
+                profitMargin: (() => {
+                    const revenue = Number(financialSummary.totalRevenue ?? 0);
+                    const profit =
+                        revenue - (mkCost + Number(financialSummary.operationalCost ?? 0));
+                    return revenue > 0 ? ((profit / revenue) * 100).toFixed(2) : '0.00';
+                })(),
+                serviceGroupData: [],
+            };
+        }
 
+        let filteredCustomers = [...customers];
         if (startDate) {
             const start = new Date(startDate + 'T00:00:00');
             filteredCustomers = filteredCustomers.filter(c => new Date(c.createAt) >= start);
@@ -464,7 +506,6 @@ export default function FinancialReportClient({ customers = [], services = [], s
             const end = new Date(endDate + 'T23:59:59.999');
             filteredCustomers = filteredCustomers.filter(c => new Date(c.createAt) <= end);
         }
-
         if (sourceFilter !== 'all') {
             filteredCustomers = filteredCustomers.filter(c => {
                 const sourceId = c.source ? String(c.source._id || c.source) : '';
@@ -472,10 +513,7 @@ export default function FinancialReportClient({ customers = [], services = [], s
             });
         }
 
-        // Tổng doanh thu: ưu tiên lấy từ API báo cáo doanh thu (service_details)
         let totalRevenue = totalRevenueFromReport || 0;
-
-        // Fallback: nếu API không trả về, tạm tính từ snapshot customers (ít chính xác hơn)
         if (totalRevenue === 0) {
             filteredCustomers.forEach(c => {
                 if (c.serviceDetails && Array.isArray(c.serviceDetails)) {
@@ -487,23 +525,13 @@ export default function FinancialReportClient({ customers = [], services = [], s
                 }
             });
         }
-
-        // Tính chi phí marketing: ưu tiên lấy từ báo cáo marketing (summary.totalCost)
         let marketingCost = marketingCostFromReport || 0;
         if (marketingCost === 0 && marketingCosts.length > 0) {
             marketingCost = marketingCosts.reduce((sum, cost) => sum + (cost.amount || 0), 0);
         }
-
-        // Tính chi phí vận hành
         const operationalCost = operationalCosts.reduce((sum, cost) => sum + (cost.amount || 0), 0);
-
-        // Tổng chi phí
         const totalCost = marketingCost + operationalCost;
-
-        // Lợi nhuận
         const profit = totalRevenue - totalCost;
-
-        // Biên lợi nhuận %
         const profitMargin = totalRevenue > 0 ? ((profit / totalRevenue) * 100).toFixed(2) : 0;
 
         // Bảng theo nhóm dịch vụ
@@ -540,8 +568,6 @@ export default function FinancialReportClient({ customers = [], services = [], s
             totalCost,
             profit,
             profitMargin,
-            // Nếu đã có dữ liệu từ financial_reports thì ưu tiên dùng cho bảng chi tiết,
-            // còn serviceGroupData giữ lại làm fallback.
             serviceGroupData: Object.values(serviceGroupData).map(group => ({
                 service: group.service?.name || 'Không xác định',
                 revenue: group.revenue,
@@ -550,7 +576,7 @@ export default function FinancialReportClient({ customers = [], services = [], s
                 margin: group.revenue > 0 ? (((group.revenue - group.cost) / group.revenue) * 100).toFixed(2) : 0,
             })),
         };
-    }, [customers, startDate, endDate, sourceFilter, serviceFilter, marketingCosts, operationalCosts, totalRevenueFromReport, marketingCostFromReport]);
+    }, [financialSummary, customers, startDate, endDate, sourceFilter, serviceFilter, marketingCosts, operationalCosts, totalRevenueFromReport, marketingCostFromReport]);
 
     const handleDownload = async () => {
         const workbook = new ExcelJS.Workbook();
@@ -610,9 +636,19 @@ export default function FinancialReportClient({ customers = [], services = [], s
                     <div className="flex gap-2">
                         <button
                             type="button"
+                            title="Mô tả chức năng"
+                            onClick={() => setDocOpen(true)}
+                            className="inline-flex items-center justify-center rounded-[6px] border px-2 py-2 text-xs"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        >
+                            <BookOpenText className="w-4 h-4" style={{ color: '#f97316' }} />
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => {
                                 setSourceFilter('all');
                                 setServiceFilter('all');
+                                setUseDateRangeFilter(false);
                                 const { from, to } = getDefaultMonthRange();
                                 setStartDate(from);
                                 setEndDate(to);
@@ -640,7 +676,10 @@ export default function FinancialReportClient({ customers = [], services = [], s
                         <input
                             type="date"
                             value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
+                            onChange={(e) => {
+                                setStartDate(e.target.value);
+                                setUseDateRangeFilter(true);
+                            }}
                             className="w-full rounded-[6px] border px-3 py-2 text-sm"
                             style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                         />
@@ -650,7 +689,10 @@ export default function FinancialReportClient({ customers = [], services = [], s
                         <input
                             type="date"
                             value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
+                            onChange={(e) => {
+                                setEndDate(e.target.value);
+                                setUseDateRangeFilter(true);
+                            }}
                             className="w-full rounded-[6px] border px-3 py-2 text-sm"
                             style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
                         />
@@ -766,28 +808,11 @@ export default function FinancialReportClient({ customers = [], services = [], s
                 open={modalOpen}
                 onClose={() => setModalOpen(false)}
                 onSave={() => {
-                    // Reload costs
-                    const loadCosts = async () => {
-                        try {
-                            const params = new URLSearchParams();
-                            if (startDate) params.append('startDate', startDate);
-                            if (endDate) params.append('endDate', endDate);
-                            
-                            const [marketingRes, operationalRes] = await Promise.all([
-                                fetch(`/api/reports/marketing-cost?${params}`),
-                                fetch(`/api/reports/operational-cost?${params}`),
-                            ]);
-
-                            const marketingData = await marketingRes.json();
-                            const operationalData = await operationalRes.json();
-
-                            if (marketingData.success) setMarketingCosts(marketingData.data || []);
-                            if (operationalData.success) setOperationalCosts(operationalData.data || []);
-                        } catch (error) {
-                            console.error('Lỗi khi tải chi phí:', error);
-                        }
-                    };
-                    loadCosts();
+                    setUseDateRangeFilter(false);
+                    const { from, to } = getDefaultMonthRange();
+                    setStartDate(from);
+                    setEndDate(to);
+                    setRefreshKey((k) => k + 1);
                 }}
                 services={services}
             />
@@ -796,6 +821,53 @@ export default function FinancialReportClient({ customers = [], services = [], s
                 open={devTriggerOpen}
                 onClose={() => setDevTriggerOpen(false)}
             />
+
+            {/* <Popup
+                open={docOpen}
+                onClose={() => setDocOpen(false)}
+                header="Mô tả chức năng - Báo cáo tài chính"
+            >
+                <div className="space-y-2 text-sm">
+                    <p>Hiển thị tổng doanh thu, chi phí marketing, chi phí vận hành, tổng chi phí, lợi nhuận và biên lợi nhuận theo thời gian.</p>
+                    <p>Bảng Tài chính cho biết doanh thu, chi phí, lợi nhuận và biên % của từng nhóm dịch vụ.</p>
+                    <p>Bộ lọc cho phép xem theo tháng hiện tại hoặc theo một khoảng ngày cụ thể.</p>
+                </div>
+            </Popup> */}
+            <Popup
+                open={docOpen}
+                onClose={() => setDocOpen(false)}
+                header="Mô tả chức năng - Báo cáo tài chính"
+            >
+                <div className="space-y-3 text-sm">
+                    <p>
+                        Báo cáo tài chính hiển thị hiệu quả hoạt động theo khoảng thời gian được chọn.
+                    </p>
+
+                    <div>
+                        <p className="font-medium">Các chỉ số tổng:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Tổng doanh thu:</b> Tổng tiền từ các đơn đã hoàn thành.</li>
+                            <li><b>Chi phí marketing:</b> Tổng chi phí quảng cáo đã nhập bên báo cáo marketing.</li>
+                            <li><b>Chi phí vận hành:</b> Chi phí nội bộ như lương, mặt bằng, vật tư... ở phần Nhập chi phí vận hành</li>
+                            <li><b>Tổng chi phí:</b> = Marketing + Vận hành.</li>
+                            <li><b>Lợi nhuận:</b> = Doanh thu - Tổng chi phí.</li>
+                            <li><b>Biên lợi nhuận:</b> = (Lợi nhuận / Doanh thu) × 100%.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng tài chính theo nhóm dịch vụ:</p>
+                        <p>
+                            Hiển thị doanh thu, chi phí vận hành, lợi nhuận và biên lợi nhuận của từng nhóm dịch vụ.
+                        </p>
+                    </div>
+
+                    <p className="text-gray-500">
+                        Lưu ý: Nếu doanh thu bằng 0, biên lợi nhuận sẽ hiển thị 0% để tránh lỗi chia cho 0.
+                        <b>Nút Dev Manual Trigger</b> chỉ dùng để xử lý vấn đề dữ liệu, không thể tự sử dụng thao tác.
+                    </p>
+                </div>
+            </Popup>
         </div>
     );
 }

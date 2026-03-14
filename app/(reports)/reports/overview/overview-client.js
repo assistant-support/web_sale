@@ -5,7 +5,8 @@ import ExcelJS from 'exceljs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Users, Calendar, RefreshCw, Download, DollarSign } from 'lucide-react';
+import { Users, Calendar, RefreshCw, Download, DollarSign, BookOpenText } from 'lucide-react';
+import Popup from '@/components/ui/popup';
 
 // Listbox component (từ appointment-stats)
 function Listbox({ label, options, value, onChange, placeholder = 'Chọn...' }) {
@@ -87,6 +88,7 @@ export default function OverviewReportClient({ customers = [], appointments = []
     const [customerTypeFilter, setCustomerTypeFilter] = useState('all');
     const [appointmentTypeFilter, setAppointmentTypeFilter] = useState('all');
     const [conversationTypeFilter, setConversationTypeFilter] = useState('all'); // 'all' | 'lead' | 'not_lead'
+    const [docOpen, setDocOpen] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
@@ -502,22 +504,33 @@ export default function OverviewReportClient({ customers = [], appointments = []
             <Card className="shadow-md">
                 <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle>Bộ lọc</CardTitle>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setSourceFilter('all');
-                            setServiceFilter('all');
-                            setCustomerTypeFilter('all');
-                            setAppointmentTypeFilter('all');
-                            setConversationTypeFilter('all');
-                            setStartDate('');
-                            setEndDate('');
-                        }}
-                        className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
-                        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                    >
-                        <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            title="Mô tả chức năng"
+                            onClick={() => setDocOpen(true)}
+                            className="inline-flex items-center justify-center rounded-[6px] border px-2 py-2 text-xs"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        >
+                            <BookOpenText className="w-4 h-4" style={{ color: '#f97316' }} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSourceFilter('all');
+                                setServiceFilter('all');
+                                setCustomerTypeFilter('all');
+                                setAppointmentTypeFilter('all');
+                                setConversationTypeFilter('all');
+                                setStartDate('');
+                                setEndDate('');
+                            }}
+                            className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        >
+                            <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
+                        </button>
+                    </div>
                 </CardHeader>
                 <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-6">
                     <Listbox
@@ -586,6 +599,63 @@ export default function OverviewReportClient({ customers = [], appointments = []
                     />
                 </CardContent>
             </Card>
+
+            <Popup
+                open={docOpen}
+                onClose={() => setDocOpen(false)}
+                header="Mô tả chức năng - Báo cáo tổng quan"
+            >
+                <div className="space-y-3 text-sm">
+
+                    <p>
+                        Báo cáo tổng quan cung cấp cái nhìn toàn diện về khách hàng, lịch hẹn, dịch vụ và hội thoại trong khoảng thời gian được chọn.
+                    </p>
+
+                    <div>
+                        <p className="font-medium">Phân loại khách hàng:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Khách mới:</b> Khách chưa phát sinh bất kỳ đơn nào.</li>
+                            <li><b>Khách cũ:</b> Khách đã có ít nhất một đơn dịch vụ.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Phân loại lịch hẹn:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Hoàn thành:</b> Lịch hẹn đã thực hiện xong.</li>
+                            <li><b>Chờ xử lý:</b> Lịch hẹn đang chờ xác nhận hoặc thực hiện.</li>
+                            <li><b>Đã hủy:</b> Lịch hẹn đã bị hủy.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng Khách hàng:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Dịch vụ sử dụng:</b> Các dịch vụ mà khách đã tạo đơn.</li>
+                            <li><b>Số lượng đơn:</b> Tổng số đơn khách đã thực hiện.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng Dịch vụ:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Giá (Tổng các liệu trình):</b> Tổng giá của tất cả các liệu trình thuộc dịch vụ đó.</li>
+                            <li><b>Số lượng người quan tâm:</b> Số khách hàng thể hiện sự quan tâm đến dịch vụ.</li>
+                            <li><b>Số lượng người sử dụng:</b> Số khách hàng thực tế đã phát sinh đơn với dịch vụ đó.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng Hội thoại tin nhắn:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><b>Tên khách hàng:</b> Tên Facebook của khách hàng từ hệ thống nhắn tin.</li>
+                            <li><b>Nguồn:</b> Nơi tiếp nhận khách hàng (kênh nhắn tin).</li>
+                            <li><b>Trạng thái:</b> Lead hoặc NotLead, dựa trên thẻ do nhân viên gắn.</li>
+                        </ul>
+                    </div>
+
+                </div>
+            </Popup>
 
             {/* Cards */}
             <div className="grid gap-4 md:grid-cols-2">

@@ -5,14 +5,16 @@ import mongoose from 'mongoose';
 import Customer from '@/models/customer.model';
 import Service from '@/models/services.model';
 import ServiceDetail from '@/models/service_details.model';
-import TreatmentSession from '@/models/treatmentSession.model';
 import Order from '@/models/orders.model';
 import ReportDaily from '@/models/report_daily.model';
 import Logs from '@/models/log.model';
 import Zalo from '@/models/zalo.model';
 import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
 import { uploadFileToDrive } from '@/function/drive/image';
-import { rebuildFinancialReportForMonth } from '@/data/financial/financialReports.db';
+import {
+    rebuildFinancialReportForMonth,
+    rebuildFinancialReportDailyForDateRange,
+} from '@/data/financial/financialReports.db';
 import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
@@ -836,32 +838,17 @@ export async function closeServiceAction(prevState, formData) {
         const savedServiceDetail = await newServiceDetailDoc.save();
         const serviceDetailId = savedServiceDetail._id;
 
-        // 6b. Ngay khi chốt đơn mới (dù còn pending), ghi nhận 1 buổi điều trị vào treatment_sessions
-        // để hệ thống liệu trình có thể hiển thị đúng theo dịch vụ/ liệu trình đã bán cho khách hàng.
-        try {
-            if (status !== 'rejected' && courseSnapshot && courseSnapshot.name && finalServiceId) {
-                const courseNameForSession = courseSnapshot.name;
-                const serviceDocForSession = await Service.findById(finalServiceId)
-                    .select('treatmentCourses')
-                    .lean();
+        // 6b. Không tạo treatment_session khi chốt đơn. "Lần sử dụng" sẽ là 1 khi nhấn Thực hiện liệu trình
+        // lần đầu; nếu tạo sẵn 1 session thì nextUsageIndex thành 2 sai với mong đợi.
 
-                const matchedCourse =
-                    serviceDocForSession?.treatmentCourses?.find(
-                        (c) => c.name === courseNameForSession
-                    ) || null;
-
-                if (matchedCourse && matchedCourse._id) {
-                    await TreatmentSession.create({
-                        customerId: customerId,
-                        serviceId: finalServiceId,
-                        courseId: matchedCourse._id,
-                        serviceDetailId: serviceDetailId,
-                        performedAt: savedServiceDetail.closedAt || new Date(),
-                    });
-                }
+        if (serviceDetailStatus === 'completed' && savedServiceDetail?.closedAt) {
+            try {
+                const d = new Date(savedServiceDetail.closedAt);
+                const dateStr = d.toISOString().slice(0, 10);
+                await rebuildFinancialReportDailyForDateRange(dateStr, dateStr);
+            } catch (e) {
+                console.error('[closeServiceAction] Rebuild financial daily failed:', e?.message || e);
             }
-        } catch (sessionErr) {
-            console.error('[closeServiceAction] Lỗi khi ghi treatment_session:', sessionErr);
         }
 
         // 7. Chuẩn bị các cập nhật cho customer
@@ -1753,11 +1740,13 @@ export async function approveServiceDealAction(prevState, formData) {
         });
         await order.save();
 
-        // Sau khi đơn chuyển sang completed/approved → tính lại báo cáo tài chính cho tháng tương ứng
+        // Sau khi đơn chuyển sang completed/approved → tính lại báo cáo tài chính (tháng + daily)
         try {
             const year = approvedAt.getFullYear();
             const month = approvedAt.getMonth() + 1;
             await rebuildFinancialReportForMonth(year, month);
+            const dateStr = approvedAt.toISOString().slice(0, 10);
+            await rebuildFinancialReportDailyForDateRange(dateStr, dateStr);
         } catch (e) {
             console.error('[financialReports] rebuild after approve failed:', e?.message || e);
         }

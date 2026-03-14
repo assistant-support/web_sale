@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
 import OperationalCost from '@/models/operationalCost.model';
-import { rebuildFinancialReportForMonth } from '@/data/financial/financialReports.db';
+import {
+    rebuildFinancialReportForMonth,
+    rebuildFinancialReportDailyForDateRange,
+} from '@/data/financial/financialReports.db';
 import checkAuthToken from '@/utils/checktoken';
 
 export async function POST(req) {
@@ -18,9 +21,15 @@ export async function POST(req) {
         if (!startDate || !endDate || !costType || !amount) {
             return NextResponse.json({ success: false, error: 'Thiếu thông tin bắt buộc' }, { status: 400 });
         }
-        
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+
+        const start = new Date(String(startDate).trim() + 'T12:00:00.000Z');
+        const end = new Date(String(endDate).trim() + 'T12:00:00.000Z');
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+            return NextResponse.json({ success: false, error: 'Ngày không hợp lệ' }, { status: 400 });
+        }
+
+        const now = new Date();
+        const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
 
         const doc = {
             startDate: start,
@@ -29,8 +38,7 @@ export async function POST(req) {
             amount: Number(amount),
             note: note || '',
             createdBy: user.id,
-            // date chuẩn hoá: dùng startDate làm đại diện để dễ index theo tháng/ngày
-            date: start,
+            date: todayStart,
         };
         if (serviceId) {
             doc.serviceId = serviceId;
@@ -38,10 +46,17 @@ export async function POST(req) {
 
         const cost = await OperationalCost.create(doc);
 
-        // Sau khi thêm chi phí vận hành, tính lại báo cáo tài chính cho tháng tương ứng
-        const year = start.getFullYear();
-        const month = start.getMonth() + 1;
+        const year = todayStart.getUTCFullYear();
+        const month = todayStart.getUTCMonth() + 1;
         await rebuildFinancialReportForMonth(year, month);
+        const fromStr = todayStart.toISOString().slice(0, 10);
+        const lastDay = new Date(Date.UTC(year, month, 0));
+        const toStr = lastDay.toISOString().slice(0, 10);
+        try {
+            await rebuildFinancialReportDailyForDateRange(fromStr, toStr);
+        } catch (e) {
+            console.error('Lỗi rebuild daily sau khi thêm chi phí vận hành:', e?.message || e);
+        }
 
         return NextResponse.json({ success: true, data: cost }, { status: 201 });
     } catch (error) {
@@ -64,10 +79,11 @@ export async function GET(req) {
 
         let query = {};
         if (startDate && endDate) {
+            const rangeStart = new Date(String(startDate).trim() + 'T00:00:00.000Z');
+            const rangeEnd = new Date(String(endDate).trim() + 'T23:59:59.999Z');
             query = {
-                $or: [
-                    { startDate: { $lte: new Date(endDate) }, endDate: { $gte: new Date(startDate) } }
-                ]
+                startDate: { $lte: rangeEnd },
+                endDate: { $gte: rangeStart },
             };
         }
 

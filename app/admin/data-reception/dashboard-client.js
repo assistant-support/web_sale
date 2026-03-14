@@ -466,17 +466,26 @@ function ReceptionLogTable({ logs, visibleCount, onReachEnd, onRowClick }) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {rows.length > 0 ? rows.map((log) => (
-                                <TableRow
-                                    key={log.id}
-                                    onClick={() => onRowClick(log.id)}
-                                    className="cursor-pointer hover:bg-muted/60"
-                                >
-                                    <TableCell className="font-medium text-[12px]">{log.customerName}</TableCell>
-                                    <TableCell className="text-[12px]"><Badge variant="outline" className="text-[10px]">{log.source}</Badge></TableCell>
-                                    <TableCell className="text-right text-[11px] text-muted-foreground">{new Date(log.createdAt).toLocaleString('vi-VN')}</TableCell>
-                                </TableRow>
-                            )) : (
+                            {rows.length > 0 ? rows.map((log) => {
+                                const displaySource = log.sourceDetails || log.source || 'N/A';
+                                return (
+                                    <TableRow
+                                        key={log.id}
+                                        onClick={() => onRowClick(log.id)}
+                                        className="cursor-pointer hover:bg-muted/60"
+                                    >
+                                        <TableCell className="font-medium text-[12px]">{log.customerName}</TableCell>
+                                        <TableCell className="text-[12px]">
+                                            <Badge variant="outline" className="text-[10px]">
+                                                {displaySource}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right text-[11px] text-muted-foreground">
+                                            {new Date(log.createdAt).toLocaleString('vi-VN')}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            }) : (
                                 <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground text-sm">Chưa có dữ liệu.</TableCell></TableRow>
                             )}
                         </TableBody>
@@ -913,10 +922,19 @@ export default function DataReceptionClient({ initialData, service = [], sources
                 leadsWithResponse++;
             }
 
+            // Ưu tiên hiển thị sourceDetails nếu có, sau đó mới tới source.name
+            const rawSourceDetails = customer.sourceDetails ? String(customer.sourceDetails).trim() : '';
+            const sourceDetailsDisplay = rawSourceDetails.startsWith('Tin nhắn - ')
+                ? rawSourceDetails.replace('Tin nhắn - ', '')
+                : rawSourceDetails;
+            const fallbackSourceName = customer.source?.name || 'N/A';
+            const displaySource = sourceDetailsDisplay || fallbackSourceName;
+
             return {
                 id: customer._id,
                 customerName: customer.name || 'N/A',
-                source: customer.source?.name || 'N/A',
+                source: displaySource,
+                sourceDetails: sourceDetailsDisplay || null,
                 createdAt: customer.createAt,
             };
         }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));

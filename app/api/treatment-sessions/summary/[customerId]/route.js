@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import connectDB from '@/config/connectDB';
 import TreatmentSession from '@/models/treatmentSession.model';
+import ServiceDetail from '@/models/service_details.model';
 import Service from '@/models/services.model';
 
 export async function GET(request, context) {
@@ -15,104 +16,156 @@ export async function GET(request, context) {
     try {
         await connectDB();
 
-        // Lấy toàn bộ thống kê session theo serviceId + courseId của khách hàng
+        const customerOid = new mongoose.Types.ObjectId(customerId);
+
+        // Lấy thống kê session theo (serviceId, courseId, serviceDetailId) — mỗi ĐƠN một entry
         const sessions = await TreatmentSession.aggregate([
-            {
-                $match: {
-                    customerId: new mongoose.Types.ObjectId(customerId),
-                },
-            },
-            // Sắp xếp theo thời gian để lấy đúng serviceDetailId cuối cùng
-            {
-                $sort: {
-                    performedAt: 1,
-                },
-            },
+            { $match: { customerId: customerOid } },
+            { $sort: { performedAt: 1 } },
             {
                 $group: {
                     _id: {
                         serviceId: '$serviceId',
                         courseId: '$courseId',
+                        serviceDetailId: { $ifNull: ['$serviceDetailId', null] },
                     },
                     firstTime: { $first: '$performedAt' },
                     lastTime: { $last: '$performedAt' },
                     total: { $sum: 1 },
-                    lastServiceDetailId: { $last: '$serviceDetailId' },
                 },
             },
         ]);
 
-        // Build map để tra cứu nhanh theo serviceId + courseId
-        const statsByServiceAndCourse = {};
+        // Nhóm theo serviceId; mỗi service có mảng "done" entries (mỗi entry = 1 đơn + 1 liệu trình)
+        const byServiceId = new Map();
         for (const row of sessions) {
-            const serviceId = String(row._id.serviceId);
-            const courseId = String(row._id.courseId);
-            if (!statsByServiceAndCourse[serviceId]) {
-                statsByServiceAndCourse[serviceId] = {};
+            const serviceIdStr = String(row._id.serviceId);
+            const courseIdStr = String(row._id.courseId);
+            const serviceDetailId = row._id.serviceDetailId
+                ? String(row._id.serviceDetailId)
+                : null;
+
+            if (!byServiceId.has(serviceIdStr)) {
+                byServiceId.set(serviceIdStr, []);
             }
-            statsByServiceAndCourse[serviceId][courseId] = {
+            byServiceId.get(serviceIdStr).push({
+                courseId: courseIdStr,
                 firstTime: row.firstTime,
                 lastTime: row.lastTime,
                 total: row.total,
-                serviceDetailId: row.lastServiceDetailId || null,
-            };
+                serviceDetailId,
+            });
         }
 
-        // Lấy danh sách services mà khách đã có session
-        const uniqueServiceIds = Object.keys(statsByServiceAndCourse).map((id) => new mongoose.Types.ObjectId(id));
+        // Gộp đơn có 0 session từ service_details (đơn mới chốt chưa thực hiện lần nào)
+        const detailsWithCourse = await ServiceDetail.find({
+            customerId: customerOid,
+            'selectedCourse.name': { $exists: true, $ne: '' },
+        })
+            .select('_id serviceId selectedCourse')
+            .lean();
 
+        const detailServiceIds = [
+            ...new Set(
+                detailsWithCourse
+                    .map((d) => (d.serviceId ? String(d.serviceId) : null))
+                    .filter(Boolean)
+            ),
+        ];
+        const servicesForDetail =
+            detailServiceIds.length > 0
+                ? await Service.find({ _id: { $in: detailServiceIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+                    .select('treatmentCourses')
+                    .lean()
+                : [];
+        const serviceDocByStr = new Map();
+        servicesForDetail.forEach((s) => serviceDocByStr.set(String(s._id), s));
+
+        for (const detail of detailsWithCourse) {
+            const serviceIdStr = detail.serviceId ? String(detail.serviceId) : null;
+            const courseName = detail.selectedCourse?.name;
+            if (!serviceIdStr || !courseName) continue;
+
+            const serviceDetailIdStr = String(detail._id);
+            const existing = byServiceId.get(serviceIdStr) || [];
+            const alreadyHas = existing.some(
+                (e) => e.serviceDetailId === serviceDetailIdStr
+            );
+            if (alreadyHas) continue;
+
+            const serviceDoc = serviceDocByStr.get(serviceIdStr);
+            const matched = serviceDoc?.treatmentCourses?.find(
+                (c) => (c?.name || '') === courseName
+            );
+            const courseIdStr = matched?._id ? String(matched._id) : null;
+            if (!courseIdStr) continue;
+
+            if (!byServiceId.has(serviceIdStr)) {
+                byServiceId.set(serviceIdStr, []);
+            }
+            byServiceId.get(serviceIdStr).push({
+                courseId: courseIdStr,
+                firstTime: null,
+                lastTime: null,
+                total: 0,
+                serviceDetailId: serviceDetailIdStr,
+            });
+        }
+
+        const uniqueServiceIds = Array.from(byServiceId.keys()).map((id) => new mongoose.Types.ObjectId(id));
         const services = await Service.find({ _id: { $in: uniqueServiceIds } })
             .select('name treatmentCourses')
             .lean();
 
-        // Map serviceId -> service document
         const serviceMap = new Map();
-        services.forEach((s) => {
-            serviceMap.set(String(s._id), s);
-        });
+        services.forEach((s) => serviceMap.set(String(s._id), s));
 
-        // Tạo dữ liệu trả về cho frontend: mỗi service gồm toàn bộ course (đã làm / chưa làm)
         const result = [];
 
-        for (const [serviceIdStr, perCourse] of Object.entries(statsByServiceAndCourse)) {
+        for (const [serviceIdStr, doneEntries] of byServiceId) {
             const serviceDoc = serviceMap.get(serviceIdStr);
             if (!serviceDoc) continue;
 
-            const serviceItem = {
-                serviceId: serviceIdStr,
-                serviceName: serviceDoc.name || 'Không rõ dịch vụ',
-                courses: [],
-            };
+            const treatmentCourses = Array.isArray(serviceDoc.treatmentCourses) ? serviceDoc.treatmentCourses : [];
+            const courseNameById = new Map();
+            treatmentCourses.forEach((c) => {
+                if (c._id) courseNameById.set(String(c._id), c.name || 'Liệu trình');
+            });
 
-            const courses = Array.isArray(serviceDoc.treatmentCourses) ? serviceDoc.treatmentCourses : [];
-
-            for (const course of courses) {
+            const courses = [];
+            // Mỗi đơn (serviceDetailId) + liệu trình (courseId) = 1 entry "done"
+            for (const entry of doneEntries) {
+                const courseName = courseNameById.get(entry.courseId) || 'Liệu trình';
+                courses.push({
+                    courseId: entry.courseId,
+                    courseName,
+                    status: 'done',
+                    firstTime: entry.firstTime,
+                    lastTime: entry.lastTime,
+                    total: entry.total,
+                    serviceDetailId: entry.serviceDetailId,
+                });
+            }
+            // Liệu trình chưa làm: course có trong treatmentCourses nhưng chưa có trong doneEntries (theo courseId)
+            const doneCourseIds = new Set(doneEntries.map((e) => e.courseId));
+            for (const course of treatmentCourses) {
                 const courseIdStr = String(course._id);
-                const stats = perCourse[courseIdStr];
-
-                if (stats) {
-                    serviceItem.courses.push({
-                        courseId: courseIdStr,
-                        courseName: course.name || 'Liệu trình',
-                        status: 'done',
-                        firstTime: stats.firstTime,
-                        lastTime: stats.lastTime,
-                        total: stats.total,
-                        serviceDetailId: stats.serviceDetailId ? String(stats.serviceDetailId) : null,
-                    });
-                } else {
-                    serviceItem.courses.push({
-                        courseId: courseIdStr,
-                        courseName: course.name || 'Liệu trình',
-                        status: 'not_done',
-                        firstTime: null,
-                        lastTime: null,
-                        total: 0,
-                    });
-                }
+                if (doneCourseIds.has(courseIdStr)) continue;
+                courses.push({
+                    courseId: courseIdStr,
+                    courseName: course.name || 'Liệu trình',
+                    status: 'not_done',
+                    firstTime: null,
+                    lastTime: null,
+                    total: 0,
+                });
             }
 
-            result.push(serviceItem);
+            result.push({
+                serviceId: serviceIdStr,
+                serviceName: serviceDoc.name || 'Không rõ dịch vụ',
+                courses,
+            });
         }
 
         return NextResponse.json({ success: true, data: result });

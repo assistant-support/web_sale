@@ -31,6 +31,110 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+
+function TreatmentDoseAccordion({ item }) {
+    const [open, setOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [doseInfo, setDoseInfo] = useState(null);
+
+    const formatDate = (date) => {
+        if (!date) return '';
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+        });
+    };
+
+    const handleToggle = async () => {
+        const next = !open;
+        setOpen(next);
+        if (!next || doseInfo || loading) return;
+        const sourceId = item.sourceId;
+        if (!sourceId) return;
+        try {
+            setLoading(true);
+            setError('');
+            const res = await fetch(
+                `/api/treatment-sessions/usage?serviceDetailId=${encodeURIComponent(String(sourceId))}`
+            );
+            const json = await res.json();
+            if (!res.ok || !json?.success) {
+                setError(json?.error || 'Không lấy được dữ liệu liệu trình.');
+                return;
+            }
+            const data = json.data || {};
+            const totalDose = typeof data.totalDose === 'number' ? data.totalDose : null;
+            const usedDose = typeof data.usedDose === 'number' ? data.usedDose : 0;
+            const unit = data.medicationUnit || '';
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            setDoseInfo({ totalDose, usedDose, unit, sessions });
+        } catch (err) {
+            console.error('[TreatmentDoseAccordion] error:', err);
+            setError('Lỗi khi tải dữ liệu liệu trình.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const headerTitle = doseInfo
+        ? `${item.courseName || 'Liệu trình'} - Tổng: ${doseInfo.totalDose ?? '—'} ${
+              doseInfo.unit || ''
+          } / Đã dùng: ${doseInfo.usedDose ?? 0} ${doseInfo.unit || ''}`
+        : `${item.courseName || 'Liệu trình'}`;
+
+    return (
+        <div className="border rounded-md bg-muted/30">
+            <button
+                type="button"
+                onClick={handleToggle}
+                className="w-full flex items-center justify-between px-3 py-2 text-left"
+            >
+                <span className="text-sm font-medium">{headerTitle}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                    {open ? 'Thu gọn' : 'Xem chi tiết'}
+                </span>
+            </button>
+            {open && (
+                <div className="border-t px-3 py-2 space-y-2">
+                    <p className="text-xs text-muted-foreground" style={{ fontSize: '12px' }}>
+                        Ngày làm liệu trình lần cuối: <b>{formatDate(item.doneAt)}</b>
+                    </p>
+                    {loading ? (
+                        <p className="text-xs text-muted-foreground">Đang tải...</p>
+                    ) : error ? (
+                        <p className="text-xs text-destructive">{error}</p>
+                    ) : doseInfo && doseInfo.sessions.length > 0 ? (
+                        <div className="space-y-1">
+                            {doseInfo.sessions.map((s, idx) => {
+                                const dose = s.medicationDose ?? 0;
+                                const unit = s.medicationUnit || doseInfo.unit || '';
+                                const start = s.startDate ? formatDate(s.startDate) : '—';
+                                return (
+                                    <div
+                                        key={s._id || `${idx}`}
+                                        className="text-xs text-muted-foreground"
+                                    >
+                                        {`${item.courseName || 'Liệu trình'} - ${dose} ${
+                                            unit || ''
+                                        } - ${start}`}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">
+                            Chưa có dữ liệu lượng thuốc cho liệu trình này.
+                        </p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 import Popup from '@/components/ui/popup';
 import CloseServiceForm from './CloseServiceForm';
 
@@ -1615,32 +1719,10 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                                         <h6 className="font-semibold mb-2 text-sm">Liệu trình đã làm:</h6>
                                                         <div className="space-y-2">
                                                             {treatment.done.map((item, idx) => (
-                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-muted/30">
-                                                                    <span className="text-sm">
-                                                                        {item.courseName || 'Liệu trình'} - ngày làm {formatDate(item.doneAt)}
-                                                                    </span>
-                                                                    <Button 
-                                                                        type="button"
-                                                                        size="sm" 
-                                                                        variant="outline"
-                                                                        onClick={(e) => {
-                                                                            e.preventDefault();
-                                                                            e.stopPropagation();
-                                                                            // Tìm serviceDetail từ customer.serviceDetails
-                                                                            const detail = customer.serviceDetails?.find(sd => {
-                                                                                const id = sd.serviceDetailId ?? sd._id;
-                                                                                const idStr = id != null ? (typeof id === 'object' ? String(id._id ?? id) : String(id)) : '';
-                                                                                return idStr === String(item.sourceId);
-                                                                            });
-                                                                            if (detail) {
-                                                                                setViewingDetail(detail);
-                                                                                setIsViewDetailOpen(true);
-                                                                            }
-                                                                        }}
-                                                                    >
-                                                                        Xem chi tiết
-                                                                    </Button>
-                                                                </div>
+                                                                <TreatmentDoseAccordion
+                                                                    key={item.sourceId || `done-${idx}`}
+                                                                    item={item}
+                                                                />
                                                             ))}
                                                         </div>
                                                     </div>

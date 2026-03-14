@@ -197,8 +197,19 @@ export async function POST(request) {
                     upserted: result.upsertedCount,
                 });
             } catch (bulkError) {
-                console.error('[PancakeTag][refresh] ❌ BulkWrite error:', bulkError);
-                if (bulkError.code !== 11000) {
+                // Duplicate key (E11000) thường xảy ra khi có label khác (không phải từ Pancake)
+                // dùng cùng tên với tag Pancake. Đây là lỗi "trùng tên" ở mức DB, 
+                // nhưng không ảnh hưởng đến hoạt động đồng bộ tags nên mình chỉ log cảnh báo nhẹ.
+                if (bulkError?.code === 11000) {
+                    console.warn('[PancakeTag][refresh] ⚠️ Duplicate key when writing tags (E11000).', {
+                        message: bulkError.message,
+                    });
+                    // Không throw để quá trình refresh vẫn thành công
+                } else {
+                    console.error('[PancakeTag][refresh] ❌ BulkWrite error (non-duplicate):', {
+                        code: bulkError.code,
+                        message: bulkError.message,
+                    });
                     throw bulkError;
                 }
             }

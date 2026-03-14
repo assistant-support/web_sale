@@ -132,6 +132,8 @@ const ServiceDetailSchema = new Schema(
 
 // Indexes để tối ưu query
 ServiceDetailSchema.index({ approvalStatus: 1, closedAt: 1 });
+// Tối ưu cho các báo cáo tài chính/marketing lọc theo closedAt + status
+ServiceDetailSchema.index({ closedAt: 1, status: 1 });
 ServiceDetailSchema.index({ customerId: 1, createdAt: -1 });
 ServiceDetailSchema.index({ createdAt: -1 });
 ServiceDetailSchema.index({ closedAt: -1 });

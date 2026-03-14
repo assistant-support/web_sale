@@ -196,7 +196,7 @@ const closeServiceSchema = z.object({
 });
 
 /* ===================== Bước 6: ServiceDetailsSection ===================== */
-function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup }) {
+function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
     const { run: runAction } = useAction();
 
     const details = useMemo(() => {
@@ -385,6 +385,40 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                                             >
                                                 <Trash2 className="h-4 w-4 mr-1" />Xóa
                                             </Button>
+                                            {(onOpenTreatmentPopup || onOpenTreatmentHistory) && (
+                                                <>
+                                                    {onOpenTreatmentPopup && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() =>
+                                                                onOpenTreatmentPopup({
+                                                                    detail: d,
+                                                                    serviceName,
+                                                                    courseName,
+                                                                })
+                                                            }
+                                                        >
+                                                            Thực hiện liệu trình
+                                                        </Button>
+                                                    )}
+                                                    {onOpenTreatmentHistory && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() =>
+                                                                onOpenTreatmentHistory({
+                                                                    detail: d,
+                                                                    serviceName,
+                                                                    courseName,
+                                                                })
+                                                            }
+                                                        >
+                                                            Xem liệu trình
+                                                        </Button>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </CardContent>
@@ -437,6 +471,16 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
     const [finalRevenue, setFinalRevenue] = useState(0);
     const { run: runFormAction, loading: isFormSubmitting } = useAction();
     const [isPending, startTransition] = useTransition();
+    // Popup thực hiện liệu trình
+    const [isTreatmentOpen, setIsTreatmentOpen] = useState(false);
+    const [treatmentContext, setTreatmentContext] = useState(null);
+    const [treatmentLoading, setTreatmentLoading] = useState(false);
+    const [treatmentError, setTreatmentError] = useState('');
+    // Popup xem lịch sử liệu trình
+    const [isTreatmentHistoryOpen, setIsTreatmentHistoryOpen] = useState(false);
+    const [treatmentHistory, setTreatmentHistory] = useState(null);
+    const [treatmentHistoryLoading, setTreatmentHistoryLoading] = useState(false);
+    const [treatmentHistoryError, setTreatmentHistoryError] = useState('');
 
     // Chỉ hiển thị dịch vụ mà khách hàng quan tâm (có trong customer.tags) khi chốt đơn
     const services = useMemo(() => {
@@ -840,6 +884,167 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         }
     };
 
+    const openTreatmentPopup = async ({ detail, serviceName, courseName }) => {
+        try {
+            setTreatmentError('');
+            setTreatmentLoading(true);
+            const sdId = detail.serviceDetailId || detail._id;
+            if (!sdId) {
+                setTreatmentError('Không xác định được đơn dịch vụ.');
+                setTreatmentLoading(false);
+                return;
+            }
+            const res = await fetch(`/api/treatment-sessions/usage?serviceDetailId=${encodeURIComponent(String(sdId))}`);
+            const json = await res.json();
+            if (!res.ok || !json?.success) {
+                setTreatmentError(json?.error || 'Không lấy được dữ liệu liệu trình.');
+                setTreatmentLoading(false);
+                return;
+            }
+            const data = json.data || {};
+            const totalDose = typeof data.totalDose === 'number' ? data.totalDose : null;
+            const usedDose = typeof data.usedDose === 'number' ? data.usedDose : 0;
+            const remainingDose = typeof data.remainingDose === 'number' ? data.remainingDose : null;
+
+            if (totalDose != null && remainingDose != null && remainingDose <= 0) {
+                setTreatmentError('Lượng thuốc của liệu trình đã hết.');
+                try {
+                    if (typeof window !== 'undefined') {
+                        window.alert('lượng thuốc của liệu trình đã hết');
+                    }
+                } catch (_err) {
+                    // ignore
+                }
+                setTreatmentLoading(false);
+                return;
+            }
+
+            const now = new Date();
+            const isoDate = now.toISOString().slice(0, 10);
+
+            setTreatmentContext({
+                serviceDetailId: sdId,
+                serviceName: serviceName || data.serviceName || 'Dịch vụ',
+                courseName: courseName || data.courseName || 'Liệu trình',
+                medicationUnit: data.medicationUnit || detail.selectedCourse?.medicationUnit || '',
+                totalDose,
+                usedDose,
+                remainingDose,
+                nextUsageIndex: data.nextUsageIndex || 1,
+                startDate: isoDate,
+                endDate: isoDate,
+            });
+            setIsTreatmentOpen(true);
+        } catch (err) {
+            console.error('[openTreatmentPopup] error:', err);
+            setTreatmentError('Lỗi khi mở popup liệu trình.');
+        } finally {
+            setTreatmentLoading(false);
+        }
+    };
+
+    const openTreatmentHistory = async ({ detail, serviceName, courseName }) => {
+        try {
+            setTreatmentHistoryError('');
+            setTreatmentHistoryLoading(true);
+            const sdId = detail.serviceDetailId || detail._id;
+            if (!sdId) {
+                setTreatmentHistoryError('Không xác định được đơn dịch vụ.');
+                setTreatmentHistoryLoading(false);
+                return;
+            }
+            const res = await fetch(`/api/treatment-sessions/usage?serviceDetailId=${encodeURIComponent(String(sdId))}`);
+            const json = await res.json();
+            if (!res.ok || !json?.success) {
+                setTreatmentHistoryError(json?.error || 'Không lấy được dữ liệu liệu trình.');
+                setTreatmentHistoryLoading(false);
+                return;
+            }
+            const data = json.data || {};
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            if (!sessions.length) {
+                try {
+                    if (typeof window !== 'undefined') {
+                        window.alert('Không có lịch sử liệu trình');
+                    }
+                } catch (_err) {
+                    // ignore
+                }
+                setTreatmentHistoryLoading(false);
+                return;
+            }
+            setTreatmentHistory({
+                serviceName: serviceName || data.serviceName || 'Dịch vụ',
+                courseName: courseName || data.courseName || 'Liệu trình',
+                medicationUnit: data.medicationUnit || detail.selectedCourse?.medicationUnit || '',
+                sessions,
+            });
+            setIsTreatmentHistoryOpen(true);
+        } catch (err) {
+            console.error('[openTreatmentHistory] error:', err);
+            setTreatmentHistoryError('Lỗi khi mở xem liệu trình.');
+        } finally {
+            setTreatmentHistoryLoading(false);
+        }
+    };
+
+    const handleSubmitTreatment = async (event) => {
+        event.preventDefault();
+        if (!treatmentContext) return;
+        const formData = new FormData(event.currentTarget);
+        const doseStr = formData.get('medicationDose');
+        const startDate = formData.get('startDate');
+        const endDate = formData.get('endDate');
+        const dose = Number(doseStr);
+
+        if (!Number.isFinite(dose) || dose <= 0) {
+            setTreatmentError('Liều lượng thuốc phải lớn hơn 0.');
+            return;
+        }
+
+        if (treatmentContext.remainingDose != null && dose - treatmentContext.remainingDose > 1e-6) {
+            setTreatmentError(`Liều nhập phải nhỏ hơn hoặc bằng ${treatmentContext.remainingDose}.`);
+            return;
+        }
+
+        try {
+            setTreatmentLoading(true);
+            setTreatmentError('');
+            const res = await fetch('/api/treatment-sessions/usage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    serviceDetailId: treatmentContext.serviceDetailId,
+                    medicationDose: dose,
+                    medicationUnit: treatmentContext.medicationUnit,
+                    startDate,
+                    endDate,
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json?.success) {
+                setTreatmentError(json?.error || 'Lưu liệu trình thất bại.');
+                return;
+            }
+            const data = json.data || {};
+            setTreatmentContext((prev) => ({
+                ...prev,
+                totalDose: data.totalDose ?? prev.totalDose,
+                usedDose: data.usedDose ?? prev.usedDose + dose,
+                remainingDose: data.remainingDose ?? (data.totalDose != null && data.usedDose != null ? data.totalDose - data.usedDose : prev.remainingDose - dose),
+                nextUsageIndex: (data.nextUsageIndex || prev.nextUsageIndex + 1),
+            }));
+            if (data.remainingDose != null && data.remainingDose <= 0) {
+                setIsTreatmentOpen(false);
+            }
+        } catch (err) {
+            console.error('[handleSubmitTreatment] error:', err);
+            setTreatmentError('Lỗi khi lưu liệu trình.');
+        } finally {
+            setTreatmentLoading(false);
+        }
+    };
+
     const fileReg = form.register('invoiceImage');
 
     // thêm/xóa ảnh mới
@@ -1046,6 +1251,8 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                             onOpenCreatePopup={openCreatePopup}
                                             onOpenEditPopup={openEditPopup}
                                             onOpenViewPopup={openViewPopup}
+                                            onOpenTreatmentPopup={openTreatmentPopup}
+                                            onOpenTreatmentHistory={openTreatmentHistory}
                                         />
                                     ) : (
                                         <>
@@ -1131,6 +1338,382 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                     }}
                     resetToken={formResetToken}
                 />
+            </Popup>
+
+            {/* <Popup
+                open={isTreatmentOpen}
+                onClose={() => setIsTreatmentOpen(false)}
+                widthClass="max-w-xl"
+                header="Liệu trình cho đơn"
+                footer={
+                    <Button
+                        type="submit"
+                        form="treatment-session-form"
+                        disabled={treatmentLoading}
+                    >
+                        {treatmentLoading && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        Lưu liệu trình
+                    </Button>
+                }
+            >
+                {treatmentContext ? (
+                    <form
+                        id="treatment-session-form"
+                        className="space-y-4"
+                        onSubmit={handleSubmitTreatment}
+                    >
+                        <div className="space-y-2">
+                            <h5 className="font-semibold">
+                                {treatmentContext.serviceName}
+                            </h5>
+                            <p className="text-sm text-muted-foreground">
+                                Liệu trình: {treatmentContext.courseName}
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    Lần sử dụng
+                                </p>
+                                <p className="font-medium">
+                                    {treatmentContext.nextUsageIndex}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    Đơn vị thuốc
+                                </p>
+                                <p className="font-medium">
+                                    {treatmentContext.medicationUnit || '—'}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    Tổng liều của đơn
+                                </p>
+                                <p className="font-medium">
+                                    {treatmentContext.totalDose ?? 'Chưa cấu hình'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    Đã dùng
+                                </p>
+                                <p className="font-medium">
+                                    {treatmentContext.usedDose ?? 0}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    Còn lại
+                                </p>
+                                <p className="font-medium">
+                                    {treatmentContext.remainingDose ?? 'Không giới hạn'}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-sm font-medium">
+                                    Liều lượng thuốc *
+                                </label>
+                                <input
+                                    type="number"
+                                    name="medicationDose"
+                                    min={0}
+                                    step="0.01"
+                                    className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                                    required
+                                />
+                                {treatmentContext.remainingDose != null && (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Liều tối đa cho lần này: {treatmentContext.remainingDose}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="grid grid-cols-1 gap-4">
+                                <div>
+                                    <label className="text-sm font-medium">
+                                        Ngày bắt đầu sử dụng
+                                    </label>
+                                    <input
+                                        type="date"
+                                        name="startDate"
+                                        defaultValue={treatmentContext.startDate}
+                                        className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium">
+                                        Ngày kết thúc sử dụng
+                                    </label>
+                                    <input
+                                        type="date"
+                                        name="endDate"
+                                        defaultValue={treatmentContext.endDate}
+                                        className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        {treatmentError && (
+                            <p className="text-sm text-destructive">{treatmentError}</p>
+                        )}
+                    </form>
+                ) : (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                        {treatmentLoading
+                            ? 'Đang tải dữ liệu liệu trình...'
+                            : 'Không có dữ liệu liệu trình.'}
+                    </div>
+                )}
+            </Popup> */}
+            <Popup
+                    open={isTreatmentOpen}
+                    onClose={() => setIsTreatmentOpen(false)}
+                    widthClass="max-w-xl"
+                    header="Liệu trình cho đơn"
+                    footer={
+                        <Button
+                            type="submit"
+                            form="treatment-session-form"
+                            disabled={treatmentLoading}
+                            className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 transition"
+                        >
+                            {treatmentLoading ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                            )}
+                            Lưu liệu trình
+                        </Button>
+                    }
+                >
+                    {treatmentContext ? (
+                        <form
+                            id="treatment-session-form"
+                            className="space-y-5"
+                            onSubmit={handleSubmitTreatment}
+                        >
+                            {/* Service Info */}
+                            <div className="space-y-1">
+                                <h5 className="text-base font-semibold text-gray-900" style={{ fontSize: '16px', fontWeight: 'bold' }}>
+                                   Dịch vụ: {treatmentContext.serviceName}
+                                </h5>
+                                <p className="text-gray-500" style={{ fontSize: '14px', fontWeight: 'bold', color: 'blue' }}>
+                                    Liệu trình: {treatmentContext.courseName}
+                                </p>
+                            </div>
+
+                            {/* Thông tin liệu trình – bordered section like image */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-4">
+                                <p className="font-semibold uppercase tracking-wide text-gray-400" style={{ fontSize: '14px' }}>
+                                    Thông tin liệu trình
+                                </p>
+
+                                {/* Row 1: Lần sử dụng + Đơn vị thuốc */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <p className="text-gray-400" style={{ fontSize: '12px' }}>Lần sử dụng</p>
+                                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800">
+                                            {treatmentContext.nextUsageIndex}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-gray-400" style={{ fontSize: '12px' }}>Đơn vị thuốc</p>
+                                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800">
+                                            {treatmentContext.medicationUnit || '—'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Row 2: Tổng liều / Đã dùng / Còn lại */}
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="space-y-1">
+                                        <p className="text-gray-400" style={{ fontSize: '12px' }}>Tổng liều của đơn</p>
+                                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800">
+                                            {treatmentContext.totalDose ?? 'Chưa cấu hình'}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-gray-400" style={{ fontSize: '12px' }}>Đã dùng</p>
+                                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800">
+                                            {treatmentContext.usedDose ?? 0}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-gray-400" style={{ fontSize: '12px' }}>Còn lại</p>
+                                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800">
+                                            {treatmentContext.remainingDose ?? 'Không giới hạn'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Inputs section */}
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                                    Nhập thông tin
+                                </p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Liều lượng thuốc */}
+                                    <div className="space-y-1">
+                                        <label className="text-sm font-medium text-gray-700">
+                                            Liều lượng thuốc <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            name="medicationDose"
+                                            min={0}
+                                            step="0.01"
+                                            placeholder="Nhập liều lượng"
+                                            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder:text-gray-300 focus:border-gray-400 focus:outline-none focus:ring-0 transition"
+                                            required
+                                        />
+                                        {treatmentContext.remainingDose != null && (
+                                            <p className="text-gray-400" style={{ fontSize: '12px', color: 'red' }}>
+                                                🔴Tối đa: {treatmentContext.remainingDose} liều lượng thuốc
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Ngày bắt đầu + kết thúc */}
+                                    <div className="space-y-3">
+                                        <div className="space-y-1">
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Ngày bắt đầu sử dụng <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="date"
+                                                name="startDate"
+                                                defaultValue={treatmentContext.startDate}
+                                                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-0 transition"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-sm font-medium text-gray-700">
+                                                Ngày kết thúc sử dụng <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="date"
+                                                name="endDate"
+                                                defaultValue={treatmentContext.endDate}
+                                                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-0 transition"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {treatmentError && (
+                                <p className="text-sm text-red-500">{treatmentError}</p>
+                            )}
+                        </form>
+                    ) : (
+                        <div className="py-10 text-center text-sm text-gray-400">
+                            {treatmentLoading
+                                ? 'Đang tải dữ liệu liệu trình...'
+                                : 'Không có dữ liệu liệu trình.'}
+                        </div>
+                    )}
+            </Popup>
+            <Popup
+                open={isTreatmentHistoryOpen}
+                onClose={() => setIsTreatmentHistoryOpen(false)}
+                widthClass="max-w-xl"
+                header="Lịch sử thực hiện liệu trình"
+                footer={
+                    <Button type="button" onClick={() => setIsTreatmentHistoryOpen(false)}>
+                        Đóng
+                    </Button>
+                }
+            >
+                {treatmentHistoryLoading ? (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                        Đang tải dữ liệu liệu trình...
+                    </div>
+                ) : treatmentHistory ? (
+                    <div className="space-y-4">
+                        <div className="space-y-1">
+                            <h5 className="font-semibold">{treatmentHistory.serviceName}</h5>
+                            <p className="text-sm text-muted-foreground">
+                                Liệu trình: {treatmentHistory.courseName}
+                            </p>
+                            {treatmentHistory.medicationUnit && (
+                                <p className="text-xs text-muted-foreground">
+                                    Đơn vị thuốc: {treatmentHistory.medicationUnit}
+                                </p>
+                            )}
+                        </div>
+                        {Array.isArray(treatmentHistory.sessions) && treatmentHistory.sessions.length > 0 ? (
+                            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                                {treatmentHistory.sessions.map((s, idx) => {
+                                    const usage = s.usageIndex ?? idx + 1;
+                                    const dose = s.medicationDose ?? 0;
+                                    const unit = s.medicationUnit || treatmentHistory.medicationUnit || '';
+                                    const start = s.startDate ? new Date(s.startDate).toLocaleDateString('vi-VN') : '—';
+                                    const end = s.endDate ? new Date(s.endDate).toLocaleDateString('vi-VN') : '—';
+                                    const performed = s.performedAt
+                                        ? new Date(s.performedAt).toLocaleString('vi-VN')
+                                        : null;
+                                    return (
+                                        <div
+                                            key={s._id || `${usage}-${idx}`}
+                                            className="rounded-md border px-3 py-2 text-sm flex flex-col gap-1 bg-card/40"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="font-medium">
+                                                    Lần {usage}
+                                                </span>
+                                                {performed && (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        Thực hiện: {performed}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                                <span>
+                                                    Liều dùng:{' '}
+                                                    <b>
+                                                        {dose} {unit}
+                                                    </b>
+                                                </span>
+                                                <span>
+                                                    Bắt đầu: <b>{start}</b>
+                                                </span>
+                                                <span>
+                                                    Kết thúc: <b>{end}</b>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-muted-foreground">
+                                Chưa có lần thực hiện liệu trình nào cho đơn này.
+                            </p>
+                        )}
+                        {treatmentHistoryError && (
+                            <p className="text-sm text-destructive">{treatmentHistoryError}</p>
+                        )}
+                    </div>
+                ) : (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                        Không có dữ liệu liệu trình.
+                    </div>
+                )}
             </Popup>
         </div>
     );

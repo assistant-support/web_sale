@@ -1617,7 +1617,9 @@ export default function ChatClient({
 
     // 7) Phân công nhân viên
     const [showAssigneesPopup, setShowAssigneesPopup] = useState(false);
-    const [assigneesData, setAssigneesData] = useState([]); // Danh sách nhân viên được phân công
+    const [assigneesData, setAssigneesData] = useState([]); // Danh sách nhân viên được phân công (cho hội thoại đang chọn)
+    const [conversationAssigneesMap, setConversationAssigneesMap] = useState({}); // Map: conversationId -> danh sách nhân viên đã phân công
+    const conversationAssigneesMapRef = useRef(conversationAssigneesMap);
     const [allUsers, setAllUsers] = useState([]); // Danh sách tất cả nhân viên của page
     const [isLoadingAssignees, setIsLoadingAssignees] = useState(false);
     const assigneesPopupRef = useRef(null);
@@ -1857,6 +1859,17 @@ export default function ChatClient({
                 console.log('[Assignees] Final assigned users count:', assignedUsers.length);
                 console.log('[Assignees] Final assigned users:', assignedUsers);
                 setAssigneesData(assignedUsers);
+
+                // Lưu lại mapping để sidebar biết hội thoại nào đã được phân công nhân viên
+                setConversationAssigneesMap((prev) => {
+                    const next = {
+                        ...prev,
+                        [conversationId]: assignedUsers,
+                    };
+                    conversationAssigneesMapRef.current = next;
+                    return next;
+                });
+
                 return assignedUsers;
             } else {
                 const errorText = await response.text().catch(() => '');
@@ -1868,6 +1881,15 @@ export default function ChatClient({
         } catch (error) {
             console.error('Error loading assignees history:', error);
             setAssigneesData([]);
+            // Nếu lỗi, đánh dấu hội thoại này là chưa có thông tin phân công (tránh icon sai)
+            setConversationAssigneesMap((prev) => {
+                const next = {
+                    ...prev,
+                    [conversationId]: [],
+                };
+                conversationAssigneesMapRef.current = next;
+                return next;
+            });
             return [];
         } finally {
             setIsLoadingAssignees(false);
@@ -4705,6 +4727,40 @@ export default function ChatClient({
         tagFilterConversations,
     ]);
 
+    // Tự động preload thông tin phân công nhân viên cho các hội thoại đang hiển thị ở sidebar
+    useEffect(() => {
+        const list = Array.isArray(filteredSortedConversations) ? filteredSortedConversations : [];
+        if (!list.length) return;
+
+        // Lấy danh sách conversationId chưa có dữ liệu phân công trong map (dựa trên ref, không đưa map vào deps)
+        const idsToFetch = [...new Set(
+            list
+                .map((c) => c?.id)
+                .filter((id) => id && !(id in (conversationAssigneesMapRef.current || {})))
+        )];
+
+        if (!idsToFetch.length) return;
+
+        let cancelled = false;
+
+        const preloadAssignees = async () => {
+            for (const convoId of idsToFetch) {
+                if (cancelled) break;
+                try {
+                    await loadAssigneesHistory(convoId);
+                } catch (err) {
+                    console.error('[Assignees] Error preloading assignees for conversation:', convoId, err);
+                }
+            }
+        };
+
+        preloadAssignees();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [filteredSortedConversations, loadAssigneesHistory]);
+
     // Helper: gộp labels từ Labelfb (customer[pageId].IDconversation) + label từ conversationleadstatuses (LEAD/NOT_LEAD)
     const getAssignedLabelsForConversation = useCallback((conversationId) => {
         if (!conversationId) return [];
@@ -4900,6 +4956,12 @@ export default function ChatClient({
                             const lastFromPage = isLastFromPage(convo);
                             const snippetPrefix = lastFromPage ? 'Bạn: ' : `${customerName}: `;
                             const unrepliedCount = lastFromPage ? 0 : 1;
+
+                            // Hội thoại đã có nhân viên được phân công hay chưa (dùng cho icon trong danh sách)
+                            const hasAssignedStaff =
+                                conversationId &&
+                                Array.isArray(conversationAssigneesMap[conversationId]) &&
+                                conversationAssigneesMap[conversationId].length > 0;
                             
                             // ✅ Xác định loại conversation và icon tương ứng
                             const convoType = getConvoType(convo);
@@ -4941,6 +5003,13 @@ export default function ChatClient({
                                             )}
                                             {isCommentType && (
                                                 <MessageSquare className="h-4 w-4 text-blue-500 flex-shrink-0" title="Bình luận" />
+                                            )}
+                                            {/* ✅ Icon hiển thị hội thoại đã được phân công nhân viên */}
+                                            {hasAssignedStaff && (
+                                                <User
+                                                    className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0"
+                                                    title="Hội thoại đã được phân công nhân viên"
+                                                />
                                             )}
                                         </div>
                                         <h6 className="text-sm text-gray-600 truncate">

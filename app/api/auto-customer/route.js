@@ -48,7 +48,7 @@ function extractPhones(text) {
 }
 
 // Source ID mặc định cho "Nhắn tin" (tương tự như trong /api/mes/route.js)
-const DEFAULT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
+const DEFAULT_SOURCE_ID = '6925700a097e2a7b59cd8a4e';
 
 // Chuyển đổi platform code sang tên hiển thị
 function formatPlatformName(platform) {

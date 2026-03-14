@@ -134,7 +134,7 @@ const AppointmentStatusChart = ({ chartData }) => {
     return <Doughnut data={chartData} options={options} />;
 };
 
-const AppointmentLogTable = ({ appointments }) => {
+const AppointmentLogTable = ({ appointments, userMap }) => {
     const getStatusBadge = (status) => {
         switch (status) {
             case 'completed':
@@ -176,21 +176,30 @@ const AppointmentLogTable = ({ appointments }) => {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {appointments.map((appt) => (
-                                <TableRow key={appt._id}>
-                                    <TableCell className="font-medium">{appt.title}</TableCell>
-                                    <TableCell>{appt.customer?.name ?? '—'}</TableCell>
-                                    <TableCell>
-                                        {typeof appt.createdBy === 'object'
-                                            ? (appt.createdBy?.name ?? '—')
-                                            : '—'}
-                                    </TableCell>
+                            {appointments.map((appt) => {
+                                let staffName = '—';
+                                if (typeof appt.createdBy === 'object') {
+                                    staffName = appt.createdBy?.name
+                                        || appt.createdBy?.fullName
+                                        || appt.createdBy?.username
+                                        || '—';
+                                } else if (userMap) {
+                                    const u = userMap.get(String(appt.createdBy));
+                                    staffName = u?.name || u?.fullName || u?.username || '—';
+                                }
+
+                                return (
+                                    <TableRow key={appt._id}>
+                                        <TableCell className="font-medium">{appt.title}</TableCell>
+                                        <TableCell>{appt.customer?.name ?? '—'}</TableCell>
+                                        <TableCell>{staffName}</TableCell>
                                     <TableCell>{getStatusBadge(appt.status)}</TableCell>
                                     <TableCell className="text-right text-xs">
                                         {new Date(appt.appointmentDate).toLocaleString('vi-VN')}
                                     </TableCell>
-                                </TableRow>
-                            ))}
+                                        </TableRow>
+                                );
+                            })}
                         </TableBody>
                     </Table>
                 </div>
@@ -221,6 +230,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         return toYMD(d);
     });
     const [groupFilter, setGroupFilter] = useState('all'); // all | noi_khoa | ngoai_khoa
+    const [staffFilter, setStaffFilter] = useState('all'); // all | <userId>
     const [statusFilter, setStatusFilter] = useState('all'); // all | completed | pending | cancelled | postponed | missed | not_attended (gộp Hủy+Hoãn+Không đến)
     const [customerTypeFilter, setCustomerTypeFilter] = useState('all'); // all | new | old (dựa trên đơn dịch vụ)
 
@@ -248,6 +258,17 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
         { value: 'not_attended', label: 'Không đến (Hủy + Hoãn + Không đến)' },
     ]), []);
 
+    const staffOptions = useMemo(() => {
+        const list = Array.isArray(user) ? user : [];
+        return [
+            { value: 'all', label: 'Tất cả nhân viên' },
+            ...list.map(u => ({
+                value: String(u._id),
+                label: u.name || u.fullName || u.username || 'Không tên',
+            })),
+        ];
+    }, [user]);
+
     // Loại khách hàng theo đơn dịch vụ (serviceDetails trong model Customer):
     // - Khách hàng mới: chưa có bất kỳ đơn nào (serviceDetails rỗng/không tồn tại)
     // - Khách hàng cũ: đã có ít nhất 1 đơn (serviceDetails có phần tử)
@@ -269,10 +290,23 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
             if (start && at < start) return false;
             if (end && at > end) return false;
 
+            // Chuẩn hoá thông tin người tạo lịch hẹn
+            const createdById = typeof a.createdBy === 'object'
+                ? String(a.createdBy?._id ?? a.createdBy?.id ?? '')
+                : String(a.createdBy ?? '');
+            const createdByUser = typeof a.createdBy === 'object'
+                ? a.createdBy
+                : (createdById ? userMap.get(createdById) : null);
+
             // Group by createdBy -> user.group
             if (groupFilter !== 'all') {
-                const u = userMap.get(String(a.createdBy));
+                const u = createdByUser;
                 if ((u?.group || 'unknown') !== groupFilter) return false;
+            }
+
+            // Staff (nhân viên tạo lịch hẹn)
+            if (staffFilter !== 'all') {
+                if (!createdById || createdById !== staffFilter) return false;
             }
 
             // Status
@@ -298,7 +332,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
 
             return true;
         });
-    }, [initialData, startDate, endDate, groupFilter, statusFilter, customerTypeFilter, userMap]);
+    }, [initialData, startDate, endDate, groupFilter, staffFilter, statusFilter, customerTypeFilter, userMap]);
 
     // Stats + Chart (thêm % hiển thị trong 4 ô)
     const { stats, chartData } = useMemo(() => {
@@ -358,6 +392,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                             setStartDate('');
                             setEndDate('');
                             setGroupFilter('all');
+                            setStaffFilter('all');
                             setStatusFilter('all');
                             setCustomerTypeFilter('all');
                         }}
@@ -374,6 +409,12 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                         options={groupOptions}
                         value={groupFilter}
                         onChange={setGroupFilter}
+                    />
+                    <Listbox
+                        label="Nhân viên"
+                        options={staffOptions}
+                        value={staffFilter}
+                        onChange={setStaffFilter}
                     />
                     <Listbox
                         label="Trạng thái lịch hẹn"
@@ -454,7 +495,7 @@ export default function AppointmentStatsClient({ initialData = [], user = [] }) 
                     </CardContent>
                 </Card>
 
-                <AppointmentLogTable appointments={filtered} />
+                <AppointmentLogTable appointments={filtered} userMap={userMap} />
             </div>
         </div>
     );

@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DollarSign, RefreshCw, Download, Loader2 } from 'lucide-react';
+import { DollarSign, RefreshCw, Download, Loader2, BookOpenText } from 'lucide-react';
+import Popup from '@/components/ui/popup';
 
 const StatCard = ({ title, value, icon: Icon, color }) => (
     <Card className="shadow-lg border-l-4" style={{ borderLeftColor: color }}>
@@ -37,6 +38,7 @@ export default function RevenueReportClient() {
     const defaultRange = getDefaultMonthRange();
     const [startDate, setStartDate] = useState(defaultRange.from);
     const [endDate, setEndDate] = useState(defaultRange.to);
+    const [docOpen, setDocOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [data, setData] = useState({
@@ -116,14 +118,25 @@ export default function RevenueReportClient() {
             <Card className="shadow-md">
                 <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle>Bộ lọc</CardTitle>
-                    <button
-                        type="button"
-                        onClick={handleResetFilter}
-                        className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
-                        style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
-                    >
-                        <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            title="Mô tả chức năng"
+                            onClick={() => setDocOpen(true)}
+                            className="inline-flex items-center justify-center rounded-[6px] border px-2 py-2 text-xs"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        >
+                            <BookOpenText className="w-4 h-4" style={{ color: '#f97316' }} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleResetFilter}
+                            className="inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-sm"
+                            style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        >
+                            <RefreshCw className="w-4 h-4" /> Đặt lại bộ lọc
+                        </button>
+                    </div>
                 </CardHeader>
                 <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
@@ -234,6 +247,49 @@ export default function RevenueReportClient() {
                     </div>
                 </CardContent>
             </Card>
+
+            <Popup
+                open={docOpen}
+                onClose={() => setDocOpen(false)}
+                header="Mô tả chức năng - Báo cáo doanh thu"
+            >
+                <div className="space-y-3 text-sm">
+
+                    <p>
+                        Báo cáo doanh thu hiển thị kết quả kinh doanh dựa trên các đơn đã hoàn thành trong khoảng thời gian được chọn.
+                    </p>
+
+                    <div>
+                        <p className="font-medium">Các chỉ số tổng:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li>
+                                {/* <b>Tổng doanh thu:</b> Tổng tiền từ các đơn có trạng thái hoàn thành (tính theo ngày hoàn thành). */}
+                                <b>Tổng doanh thu:</b>Tổng doanh thu từ các đơn được duyệt của tháng đó .
+                            </li>
+                            <li>
+                                <b>Top dịch vụ:</b> là dịch vụ nhiều người sử dụng nhất từ tháng đó.
+                                {/* <b>Số đơn hàng:</b> Tổng số đơn đã hoàn tất dịch vụ. */}
+                            </li>
+                            <li>
+                                <b>Số khách hàng có doanh thu:</b> Số khách hàng phát sinh ít nhất một đơn hoàn thành/: là số lượng khách hàng có đơn được duyệt
+                                trong tháng đó.
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng dịch vụ:</p>
+                        <p>
+                            Là các dịch vụ trong tháng đó phát sinh doanh thu và doanh thu đến từ số lượng đơn có liên quan đến dịch vụ đó .
+                        </p>
+                    </div>
+
+                    <p className="text-gray-500">
+                        Lưu ý: Báo cáo chỉ ghi nhận doanh thu từ các đơn đã hoàn thành để đảm bảo số liệu chính xác.
+                    </p>
+
+                </div>
+            </Popup>
         </div>
     );
 }
