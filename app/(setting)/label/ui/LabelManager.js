@@ -71,6 +71,20 @@ export default function LabelManager({ initialLabels = [] }) {
 
     const isEditing = !!selectedLabel;
 
+    const isSystemLeadLabel =
+        selectedLabel && ['LEAD', 'NOT LEAD'].includes((selectedLabel.name || '').toUpperCase());
+
+    const hasCustomerData =
+        !!selectedLabel &&
+        !!selectedLabel.customer &&
+        (
+            Array.isArray(selectedLabel.customer)
+                ? selectedLabel.customer.length > 0
+                : Object.keys(selectedLabel.customer || {}).length > 0
+        );
+
+    const isProtectedLabel = isSystemLeadLabel || hasCustomerData;
+
     const filteredLabels = labels.filter(label =>
         label.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -168,7 +182,17 @@ export default function LabelManager({ initialLabels = [] }) {
                                 <Input id="labelName" placeholder="Nhập tên nhãn..." value={labelName} onChange={(e) => setLabelName(e.target.value)} disabled={isPending} />
                             </div>
                             <div>
-                                <label className="text-sm font-medium mb-2 block">Màu sắc</label>
+                                <label className="text-sm font-medium mb-1 block">Màu sắc</label>
+                                {isProtectedLabel && (
+                                    <div className="mb-2 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2">
+                                        <p className="text-xs font-semibold text-yellow-700">Lưu ý</p>
+                                        <p className="text-xs text-yellow-700">
+                                            {hasCustomerData
+                                                ? 'Đang có khách hàng, không thể xóa, hãy liên hệ kỹ thuật viên để sao lưu dữ liệu'
+                                                : 'Nhãn CRM hệ thống không thể xóa'}
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-6 gap-2">
                                     {COLORS.map(color => (
                                         <button key={color} type="button" onClick={() => setLabelColor(color)} style={{ backgroundColor: color }} className={cn("h-8 w-8 rounded-full transition-transform transform hover:scale-110 focus:outline-none", labelColor === color ? 'ring-2 ring-offset-2 ring-blue-500' : 'ring-1 ring-inset ring-black/10')} aria-label={`Select color ${color}`} />
@@ -177,7 +201,24 @@ export default function LabelManager({ initialLabels = [] }) {
                             </div>
                             <div className="mt-auto pt-4 space-y-2">
                                 <Button type="submit" className="w-full" disabled={isPending}>{isPending ? 'Đang lưu...' : (isEditing ? 'Lưu thay đổi' : 'Tạo nhãn')}</Button>
-                                {isEditing && <Button type="button" variant="outline" className="w-full" onClick={() => setDeletingLabel(selectedLabel)} disabled={isPending}> <Trash2 className="mr-2 h-4 w-4" /> Xóa nhãn</Button>}
+                                {isEditing && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="w-full"
+                                        onClick={() => setDeletingLabel(selectedLabel)}
+                                        disabled={isPending || isProtectedLabel}
+                                        title={
+                                            !isProtectedLabel
+                                                ? ''
+                                                : hasCustomerData
+                                                    ? 'Đang có khách hàng, không thể xóa, hãy liên hệ kỹ thuật viên để sao lưu dữ liệu'
+                                                    : 'Nhãn CRM không thể xóa'
+                                        }
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" /> Xóa nhãn
+                                    </Button>
+                                )}
                             </div>
                         </form>
                     </div>

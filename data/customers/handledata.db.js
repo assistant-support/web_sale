@@ -121,6 +121,48 @@ export async function getCustomersForReports() {
     }
 }
 
+/** Phân trang cho Báo cáo: lấy limit khách từ offset, trả về { customers, total }. */
+export async function getCustomersForReportsPaginated(limit = 10, offset = 0) {
+    try {
+        await connectDB();
+
+        const [total, customers] = await Promise.all([
+            Customer.countDocuments({}),
+            Customer.find({})
+                .populate({ path: 'source', select: 'name' })
+                .populate({ path: 'roles', select: 'name avt' })
+                .populate([
+                    { path: 'serviceDetails.selectedService', select: 'name code price' },
+                    { path: 'serviceDetails.approvedBy', select: 'name avt' },
+                    { path: 'serviceDetails.payments.receivedBy', select: 'name avt' },
+                    { path: 'serviceDetails.commissions.user', select: 'name avt' },
+                    { path: 'serviceDetails.costs.createdBy', select: 'name avt' },
+                ])
+                .sort({ createAt: -1 })
+                .skip(offset)
+                .limit(limit)
+                .lean(),
+        ]);
+
+        const customersWithLimitedCare = customers.map(customer => {
+            const care = Array.isArray(customer.care) ? customer.care : [];
+            return {
+                ...customer,
+                care: care.slice(-5),
+                careCount: care.length,
+            };
+        });
+
+        return {
+            customers: JSON.parse(JSON.stringify(customersWithLimitedCare)),
+            total,
+        };
+    } catch (error) {
+        console.error('Lỗi trong getCustomersForReportsPaginated:', error);
+        throw new Error('Không thể lấy dữ liệu khách hàng cho báo cáo.');
+    }
+}
+
 /**
  * Lấy care logs (lịch sử tương tác) của một khách hàng theo phân trang.
  * KHÔNG cache vì dữ liệu có thể rất lớn và thay đổi thường xuyên.

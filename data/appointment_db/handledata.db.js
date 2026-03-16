@@ -174,6 +174,30 @@ export async function dataAppointments() {
     }
 }
 
+/** Phân trang cho Báo cáo: lấy limit lịch hẹn từ offset, trả về { appointments, total }. */
+export async function getAppointmentsPaginated(limit = 10, offset = 0) {
+    try {
+        await connectDB();
+        const [total, appointments] = await Promise.all([
+            Appointment.countDocuments({}),
+            Appointment.find({})
+                .populate('customer', 'name phone serviceDetails')
+                .populate('createdBy', 'name group')
+                .populate('service', 'name')
+                .sort({ appointmentDate: -1 })
+                .skip(offset)
+                .limit(limit)
+                .lean(),
+        ]);
+        return {
+            appointments: JSON.parse(JSON.stringify(appointments)),
+            total,
+        };
+    } catch (error) {
+        console.error('Lỗi trong getAppointmentsPaginated:', error);
+        throw new Error('Không thể lấy dữ liệu lịch hẹn.');
+    }
+}
 
 /**
  * Lấy danh sách lịch hẹn của một khách hàng (có cache).

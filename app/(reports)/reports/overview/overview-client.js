@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -67,20 +67,45 @@ function Listbox({ label, options, value, onChange, placeholder = 'Chọn...' })
     );
 }
 
-const StatCard = ({ title, value, icon: Icon, color }) => (
+const StatCard = ({ title, value, icon: Icon, color, loading }) => (
     <Card className="shadow-lg border-l-4" style={{ borderLeftColor: color }}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">{title}</CardTitle>
             <Icon className="h-5 w-5" style={{ color }} />
         </CardHeader>
         <CardContent>
-            <div className="text-2xl font-bold">{value}</div>
+            {loading ? (
+                <div className="h-8 w-16 animate-pulse rounded bg-muted" />
+            ) : (
+                <div className="text-2xl font-bold">{value}</div>
+            )}
         </CardContent>
     </Card>
 );
 
-export default function OverviewReportClient({ customers = [], appointments = [], services = [], sources = [], messageSources = [], conversations = [] }) {
+const SCROLL_LOAD_THRESHOLD = 0.5;
+
+export default function OverviewReportClient({
+    customers = [],
+    appointments = [],
+    services = [],
+    sources = [],
+    messageSources = [],
+    conversations = [],
+    loadingHeavy = false,
+    customersTotal = 0,
+    appointmentsTotal = 0,
+    countsLoading = false,
+    hasMoreCustomers = false,
+    hasMoreAppointments = false,
+    loadingMoreCustomers = false,
+    loadingMoreAppointments = false,
+    onLoadMoreCustomers,
+    onLoadMoreAppointments,
+}) {
     const PAGE_SIZE = 40;
+    const scrollHalfReachedCustomers = useRef(false);
+    const scrollHalfReachedAppointments = useRef(false);
 
     // Filters
     const [sourceFilter, setSourceFilter] = useState('all');
@@ -377,7 +402,35 @@ export default function OverviewReportClient({ customers = [], appointments = []
         };
     }, [filteredData, servicesWithStatsAll, sources, messageSources, customerLimit, appointmentLimit, serviceLimit, conversationLimit]);
 
-    // Khi cuộn tới cuối bảng thì load thêm PAGE_SIZE bản ghi
+    // Reset ref khi load xong để lần kéo tiếp có thể load tiếp
+    useEffect(() => {
+        if (!loadingMoreCustomers) scrollHalfReachedCustomers.current = false;
+    }, [loadingMoreCustomers]);
+    useEffect(() => {
+        if (!loadingMoreAppointments) scrollHalfReachedAppointments.current = false;
+    }, [loadingMoreAppointments]);
+
+    // Kéo thanh trượt quá nửa thì gọi API load thêm (khách hàng / lịch hẹn)
+    const handleScrollLoadFromApi = useCallback((e, type) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+        if (scrollHeight <= 0) return;
+        const ratio = (scrollTop + clientHeight) / scrollHeight;
+        if (ratio < SCROLL_LOAD_THRESHOLD) return;
+
+        if (type === 'customers' && hasMoreCustomers && !loadingMoreCustomers && onLoadMoreCustomers) {
+            if (!scrollHalfReachedCustomers.current) {
+                scrollHalfReachedCustomers.current = true;
+                onLoadMoreCustomers();
+            }
+        } else if (type === 'appointments' && hasMoreAppointments && !loadingMoreAppointments && onLoadMoreAppointments) {
+            if (!scrollHalfReachedAppointments.current) {
+                scrollHalfReachedAppointments.current = true;
+                onLoadMoreAppointments();
+            }
+        }
+    }, [hasMoreCustomers, hasMoreAppointments, loadingMoreCustomers, loadingMoreAppointments, onLoadMoreCustomers, onLoadMoreAppointments]);
+
+    // Khi cuộn tới cuối bảng thì mở rộng số dòng hiển thị (slice)
     const handleScrollLoadMore = (e, type) => {
         const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
         const isBottom = scrollTop + clientHeight >= scrollHeight - 8;
@@ -397,6 +450,16 @@ export default function OverviewReportClient({ customers = [], appointments = []
             setConversationLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         }
     };
+
+    // Gọi load-from-API khi kéo quá nửa (cả khi chưa tới đáy)
+    const handleCustomersScroll = useCallback((e) => {
+        handleScrollLoadFromApi(e, 'customers');
+        handleScrollLoadMore(e, 'customers');
+    }, [handleScrollLoadFromApi]);
+    const handleAppointmentsScroll = useCallback((e) => {
+        handleScrollLoadFromApi(e, 'appointments');
+        handleScrollLoadMore(e, 'appointments');
+    }, [handleScrollLoadFromApi]);
 
     // Export Excel: luôn lấy TOÀN BỘ dữ liệu đã lọc (không theo limit)
     const handleDownload = async (type) => {
@@ -657,19 +720,21 @@ export default function OverviewReportClient({ customers = [], appointments = []
                 </div>
             </Popup>
 
-            {/* Cards */}
+            {/* Cards: số lượng thật từ DB, không phụ thuộc số mẫu đã load */}
             <div className="grid gap-4 md:grid-cols-2">
                 <StatCard
                     title="Tổng số khách hàng"
-                    value={stats.totalCustomers}
+                    value={customersTotal}
                     icon={Users}
                     color="#6366f1"
+                    loading={countsLoading}
                 />
                 <StatCard
                     title="Tổng số lịch hẹn"
-                    value={stats.totalAppointments}
+                    value={appointmentsTotal}
                     icon={Calendar}
                     color="#10b981"
+                    loading={countsLoading}
                 />
             </div>
 
@@ -682,7 +747,8 @@ export default function OverviewReportClient({ customers = [], appointments = []
                         <button
                             type="button"
                             onClick={() => handleDownload('customers')}
-                            className="text-xs text-muted-foreground hover:text-foreground"
+                            disabled={loadingHeavy}
+                            className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                         >
                             <Download className="w-4 h-4" />
                         </button>
@@ -690,7 +756,7 @@ export default function OverviewReportClient({ customers = [], appointments = []
                     <CardContent>
                         <div
                             className="max-h-[400px] overflow-y-auto"
-                            onScroll={(e) => handleScrollLoadMore(e, 'customers')}
+                            onScroll={handleCustomersScroll}
                         >
                             <Table>
                                 <TableHeader>
@@ -703,7 +769,17 @@ export default function OverviewReportClient({ customers = [], appointments = []
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {tableData.customers.map((c) => {
+                                    {loadingHeavy ? (
+                                        Array.from({ length: 5 }).map((_, i) => (
+                                            <TableRow key={`skeleton-c-${i}`}>
+                                                <TableCell className="text-xs"><div className="h-4 w-24 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-28 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs text-right"><div className="h-4 w-8 animate-pulse rounded bg-muted ml-auto" /></TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : tableData.customers.map((c) => {
                                         const customerServices = getCustomerServices(c);
                                         const orderCount = getCustomerOrderCount(c);
                                         return (
@@ -739,6 +815,18 @@ export default function OverviewReportClient({ customers = [], appointments = []
                                 </TableBody>
                             </Table>
                         </div>
+                        {hasMoreCustomers && (
+                            <div className="mt-2 flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={onLoadMoreCustomers}
+                                    disabled={loadingMoreCustomers}
+                                    className="text-sm text-primary hover:underline disabled:opacity-50"
+                                >
+                                    {loadingMoreCustomers ? 'Đang tải...' : `Tải thêm (${customers.length}/${customersTotal})`}
+                                </button>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
@@ -749,7 +837,8 @@ export default function OverviewReportClient({ customers = [], appointments = []
                         <button
                             type="button"
                             onClick={() => handleDownload('appointments')}
-                            className="text-xs text-muted-foreground hover:text-foreground"
+                            disabled={loadingHeavy}
+                            className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                         >
                             <Download className="w-4 h-4" />
                         </button>
@@ -757,7 +846,7 @@ export default function OverviewReportClient({ customers = [], appointments = []
                     <CardContent>
                         <div
                             className="max-h-[400px] overflow-y-auto"
-                            onScroll={(e) => handleScrollLoadMore(e, 'appointments')}
+                            onScroll={handleAppointmentsScroll}
                         >
                             <Table>
                                 <TableHeader>
@@ -769,7 +858,16 @@ export default function OverviewReportClient({ customers = [], appointments = []
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {tableData.appointments.map((a) => {
+                                    {loadingHeavy ? (
+                                        Array.from({ length: 5 }).map((_, i) => (
+                                            <TableRow key={`skeleton-a-${i}`}>
+                                                <TableCell className="text-xs"><div className="h-4 w-28 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-24 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                                                <TableCell className="text-xs"><div className="h-4 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : tableData.appointments.map((a) => {
                                         const customerType = getCustomerType(a.customer);
                                         return (
                                             <TableRow key={a._id}>
@@ -794,6 +892,18 @@ export default function OverviewReportClient({ customers = [], appointments = []
                                 </TableBody>
                             </Table>
                         </div>
+                        {hasMoreAppointments && (
+                            <div className="mt-2 flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={onLoadMoreAppointments}
+                                    disabled={loadingMoreAppointments}
+                                    className="text-sm text-primary hover:underline disabled:opacity-50"
+                                >
+                                    {loadingMoreAppointments ? 'Đang tải...' : `Tải thêm (${appointments.length}/${appointmentsTotal})`}
+                                </button>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
