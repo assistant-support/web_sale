@@ -4,6 +4,7 @@ import autoAssignForCustomer from '@/utils/autoAssign';
 import { revalidateData } from '@/app/actions/customer.actions';
 import mongoose from 'mongoose';
 import { getPagesFromAPI } from '@/lib/pancake-api';
+import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 // Source ID mặc định cho "Nhắn tin"
 const DEFAULT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
@@ -254,8 +255,25 @@ export async function processMessageConversation(conversation, pageInfo = null) 
             id_phone_mes: conversation.id // Lưu conversation ID
         };
 
-        const newCustomer = new Customer(newCustomerData);
-        await newCustomer.save();
+        const customerCodeType = 'TN';
+        let newCustomer = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const codePayload = await generateCustomerCodeByType(customerCodeType);
+            const payload = {
+                ...newCustomerData,
+                customerCode: codePayload.customerCode,
+                customerCodeType: codePayload.customerCodeType,
+                customerCodeNumber: codePayload.customerCodeNumber,
+            };
+            try {
+                newCustomer = new Customer(payload);
+                await newCustomer.save();
+                break;
+            } catch (err) {
+                if (isDuplicateKeyError(err) && attempt < 4) continue;
+                throw err;
+            }
+        }
 
         // Gán tự động Sale phụ trách cho nhóm "Nội khoa"
         try {

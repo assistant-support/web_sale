@@ -25,6 +25,7 @@ import { getStatusInVietnamese, getCurrentStageFromPipeline } from '@/function/i
 
 const ALL_COLUMNS = [
     { key: 'name', header: 'Tên Khách Hàng' },
+    { key: 'customerCode', header: 'Mã Khách Hàng' },
     { key: 'phonex', header: 'Số Điện Thoại' },
     { key: 'currentStep', header: 'Bước Hiện Tại' },
     { key: 'pipelineStatus', header: 'Trạng Thái' },
@@ -34,7 +35,7 @@ const ALL_COLUMNS = [
     { key: 'createAt', header: 'Ngày Tiếp Nhận' },
 ];
 
-const INITIAL_VISIBLE_COLUMNS = ['name', 'phonex', 'currentStep', 'pipelineStatus', 'tags', 'assignees'];
+const INITIAL_VISIBLE_COLUMNS = ['name', 'customerCode', 'phonex', 'pipelineStatus', 'tags', 'assignees'];
 const MAX_VISIBLE_COLUMNS = 6;
 
 const useBreakpoint = () => {
@@ -117,6 +118,8 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
         const value = customer[colKey];
         switch (colKey) {
             case 'createAt': return <h6>{new Date(value).toLocaleDateString('vi-VN')}</h6>;
+            case 'customerCode':
+                return <h6>{value && String(value).trim() !== '' ? String(value) : 'Null'}</h6>;
             case 'tags':
                 return <h6>{Array.isArray(value) ? value.map(tag => tag.name).join(', ') : '-'}</h6>;
 

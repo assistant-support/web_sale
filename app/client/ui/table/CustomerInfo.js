@@ -369,6 +369,7 @@ const updateFormSchema = z.object({
     Id_area_customer: z.string().optional(),
     bd: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    customerCode: z.string().optional(),
     service_start_date: z.string().optional(),
     service_last_date: z.string().optional(),
 });
@@ -390,6 +391,8 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     const [newAreaType, setNewAreaType] = useState('');
     const [isEditAreaDialogOpen, setIsEditAreaDialogOpen] = useState(false);
     const [isEditingArea, setIsEditingArea] = useState(false);
+    const [isEditingCustomerCode, setIsEditingCustomerCode] = useState(false);
+    const [isGeneratingCustomerCode, setIsGeneratingCustomerCode] = useState(false);
     const [editingAreaId, setEditingAreaId] = useState(null);
     const [editAreaName, setEditAreaName] = useState('');
     const [editAreaType, setEditAreaType] = useState('');
@@ -398,6 +401,8 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     // State cho popup xem chi tiết đơn chốt dịch vụ
     const [isViewDetailOpen, setIsViewDetailOpen] = useState(false);
     const [viewingDetail, setViewingDetail] = useState(null);
+
+    const customerCodeLocked = customer?.sourceDetails === 'Trực tiếp';
     
     // ✅ State để lưu full serviceDetails đã fetch từ service_details collection
     const [fullServiceDetails, setFullServiceDetails] = useState([]);
@@ -1281,6 +1286,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             Id_area_customer: customer.Id_area_customer || '',
             bd: customer.bd ? new Date(customer.bd).toISOString().split('T')[0] : '',
             tags: customer.tags?.map(tag => tag._id) || [],
+            customerCode: customer.customerCode || '',
             service_start_date: customer.service_start_date ? new Date(customer.service_start_date).toISOString().split('T')[0] : '',
             service_last_date: customer.service_last_date ? new Date(customer.service_last_date).toISOString().split('T')[0] : '',
         },
@@ -1378,6 +1384,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             
             if (result.success) {
                 setCoverImage(null); // Reset sau khi lưu thành công
+                setIsEditingCustomerCode(false);
                 setNotification({ 
                     open: true, 
                     status: true, 
@@ -1410,6 +1417,53 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="name" render={({ field }) => (<FormItem><Label><h6>Tên khách hàng *</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                     <FormField control={form.control} name="email" render={({ field }) => (<FormItem><Label><h6>Email</h6></Label><FormControl><Input type="email" {...field} /></FormControl></FormItem>)} />
+                    <FormField 
+                        control={form.control} 
+                        name="customerCode" 
+                        render={({ field }) => (
+                            <FormItem>
+                                <div className="flex items-center justify-between mb-2">
+                                    <Label><h6>Mã khách hàng</h6></Label>
+                                    {!customerCodeLocked && !isEditingCustomerCode && (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 w-8 p-0"
+                                            disabled={isGeneratingCustomerCode}
+                                            onClick={async () => {
+                                                setIsEditingCustomerCode(true);
+                                                setIsGeneratingCustomerCode(true);
+                                                try {
+                                                    const res = await fetch('/api/customers/generate-code?type=NORMAL');
+                                                    const json = await res.json();
+                                                    if (!res.ok || !json?.success) {
+                                                        throw new Error(json?.error || json?.message || 'Không thể tạo mã gợi ý');
+                                                    }
+                                                    form.setValue('customerCode', json.suggestedCode, { shouldDirty: true, shouldTouch: true });
+                                                } catch (e) {
+                                                    setNotification({ open: true, status: false, mes: e?.message || 'Có lỗi khi tạo mã gợi ý' });
+                                                    setIsEditingCustomerCode(false);
+                                                } finally {
+                                                    setIsGeneratingCustomerCode(false);
+                                                }
+                                            }}
+                                        >
+                                            {isGeneratingCustomerCode ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pencil className="h-3 w-3" />}
+                                        </Button>
+                                    )}
+                                </div>
+                                <FormControl>
+                                    <Input
+                                        {...field}
+                                        value={field.value && String(field.value).trim() !== '' ? field.value : 'Null'}
+                                        disabled={customerCodeLocked || !isEditingCustomerCode}
+                                        readOnly={customerCodeLocked || !isEditingCustomerCode}
+                                    />
+                                </FormControl>
+                            </FormItem>
+                        )}
+                    />
                     <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
                     <FormField control={form.control} name="area" render={({ field }) => (<FormItem><Label><h6>Địa chỉ</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                     <FormField 

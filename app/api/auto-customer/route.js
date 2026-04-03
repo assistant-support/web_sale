@@ -6,6 +6,7 @@ import Customer from '@/models/customer.model';
 import { revalidateData } from '@/app/actions/customer.actions';
 import autoAssignForCustomer from '@/utils/autoAssign';
 import mongoose from 'mongoose';
+import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 // Chuẩn hóa số điện thoại Việt Nam
 function normalizeVNPhone(digits) {
@@ -110,6 +111,8 @@ export async function POST(req) {
         // Tạo sourceDetails chi tiết với thông tin platform và page name
         const sourceDetails = formatSourceDetails(platform, pageName);
 
+        const customerCodeType = 'TN';
+
         // Tạo khách hàng mới
         const newCustomerData = {
             name: customerName,
@@ -128,8 +131,25 @@ export async function POST(req) {
             createAt: new Date()
         };
 
-        const newCustomer = new Customer(newCustomerData);
-        await newCustomer.save();
+        let newCustomer = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const codePayload = await generateCustomerCodeByType(customerCodeType);
+            const payload = {
+                ...newCustomerData,
+                customerCode: codePayload.customerCode,
+                customerCodeType: codePayload.customerCodeType,
+                customerCodeNumber: codePayload.customerCodeNumber,
+            };
+
+            try {
+                newCustomer = new Customer(payload);
+                await newCustomer.save();
+                break;
+            } catch (err) {
+                if (isDuplicateKeyError(err) && attempt < 4) continue;
+                throw err;
+            }
+        }
         
         // Gán tự động Sale phụ trách cho nhóm "Nội khoa" (noi_khoa)
         try {

@@ -117,7 +117,7 @@ export default function FilterControls({
                 <div style={{ flex: 1, display: 'flex' }}>
                     <input
                         type="text"
-                        placeholder="Tìm theo tên, SĐT..."
+                        placeholder="Tìm theo tên, SĐT, mã KH..."
                         className="input"
                         style={{ width: '100%' }}
                         defaultValue={searchParams.get('query') || ''}

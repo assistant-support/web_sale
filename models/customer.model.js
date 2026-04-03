@@ -157,6 +157,14 @@ const FormSchema = new Schema(
         name: { type: String, required: true, trim: true },
         email: { type: String, trim: true, match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
         phone: { type: String, trim: true, unique: true, match: /^0\d{9}$/ },
+        
+        // Mã khách hàng (KH-xxxxx / KH-TNxxxxx)
+        // - customers "cũ" chưa có -> field này sẽ không tồn tại (undefined) để sparse unique index không bị conflict
+        // - chỉ set khi tạo customer mới hoặc khi nhân viên bấm sửa
+        customerCode: { type: String, unique: true, sparse: true, index: true },
+        customerCodeType: { type: String, enum: ['NORMAL', 'TN'], index: true },
+        customerCodeNumber: { type: Number, index: true },
+
         area: { type: String, trim: true },
 
         source: { type: Schema.Types.ObjectId, ref: 'form', required: true },
@@ -277,6 +285,7 @@ FormSchema.index({ phone: 1 }, { unique: true });
 FormSchema.index({ source: 1 });
 FormSchema.index({ tags: 1 });
 FormSchema.index({ sourceDetails: 1 }); // Index cho lọc nguồn từ sourceDetails
+FormSchema.index({ customerCodeType: 1, customerCodeNumber: -1 });
 
 const Customer = models.customer || model('customer', FormSchema);
 export default Customer;

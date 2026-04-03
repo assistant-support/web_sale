@@ -13,6 +13,7 @@ import ServiceDetail from '@/models/service_details.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
 import { uploadFileToDrive } from '@/function/drive/image';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
+import { parseCustomerCode, isCustomerCodeAvailable } from '@/utils/customerCode';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
@@ -176,6 +177,7 @@ export async function getCombinedData(params) {
                     $or: [
                         { name: { $regex: query, $options: 'i' } },
                         { phone: { $regex: query, $options: 'i' } },
+                        { customerCode: { $regex: query, $options: 'i' } },
                     ],
                 });
             }
@@ -666,6 +668,7 @@ export async function updateCustomerInfo(previousState, formData) {
         const tags = formData.getAll('tags');
         const service_start_date = formData.get('service_start_date');
         const service_last_date = formData.get('service_last_date');
+        const customerCodeInput = formData.get('customerCode');
 
         // Lấy khu vực cũ (là _id) để xóa customer khỏi mảng id_customer
         const oldAreaCustomerId = customerDoc.Id_area_customer;
@@ -673,6 +676,34 @@ export async function updateCustomerInfo(previousState, formData) {
         const oldBd = customerDoc.bd ? new Date(customerDoc.bd) : null;
 
         
+
+        // ===== customerCode (mã khách hàng) =====
+        // Rule theo yêu cầu:
+        // - Khách "Trực tiếp" (tạo từ Thêm khách lẻ) => không được phép sửa mã.
+        // - Khi nhân viên bấm sửa => giá trị nhập phải đúng format và không trùng trong hệ thống.
+        if (customerCodeInput !== undefined) {
+            const raw = String(customerCodeInput ?? '').trim();
+            if (raw !== '') {
+                const parsed = parseCustomerCode(raw);
+                if (!parsed) {
+                    return { success: false, error: 'Mã khách hàng không đúng định dạng' };
+                }
+
+                const canonical = parsed.canonicalCustomerCode;
+                const isLocked = customerDoc.sourceDetails === 'Trực tiếp';
+                if (isLocked && customerDoc.customerCode !== canonical) {
+                    return { success: false, error: 'Mã khách hàng này không được phép sửa.' };
+                }
+                const available = await isCustomerCodeAvailable(canonical, customerDoc._id);
+                if (!available) {
+                    return { success: false, error: 'Mã này đã tồn tại trong hệ thống - hãy tạo mã khác' };
+                }
+
+                customerDoc.customerCode = canonical;
+                customerDoc.customerCodeType = parsed.customerCodeType;
+                customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+            }
+        }
 
         if (name) customerDoc.name = name;
         if (email !== undefined) customerDoc.email = email || null;

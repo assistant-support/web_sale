@@ -2,7 +2,7 @@
 'use client';
 
 // ... (Giải thích và imports giữ nguyên)
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -30,6 +30,7 @@ const formSchema = z.object({
     address: z.string().optional(),
     service: z.string({ required_error: "Vui lòng chọn một dịch vụ." }).min(1, { message: 'Vui lòng chọn một dịch vụ.' }), // Cập nhật để bắt buộc chọn
     dob: z.date().optional(),
+    customerCode: z.string().optional(),
 });
 
 /**
@@ -39,14 +40,47 @@ const formSchema = z.object({
 export default function Customer_add({ service }) {
     const [isOpen, setIsOpen] = useState(false);
     const actionUI = useActionUI();
+    const [suggestedCustomerCode, setSuggestedCustomerCode] = useState('');
+    const [isSuggestingCode, setIsSuggestingCode] = useState(false);
 
     const form = useForm({
         resolver: zodResolver(formSchema),
         mode: 'onChange',
         defaultValues: {
             fullName: '', phone: '', email: '', address: '', service: '', dob: undefined,
+            customerCode: '',
         },
     });
+
+    useEffect(() => {
+        let cancelled = false;
+        async function loadSuggestedCode() {
+            if (!isOpen) return;
+            setIsSuggestingCode(true);
+            try {
+                const res = await fetch('/api/customers/generate-code?type=NORMAL');
+                const json = await res.json();
+                if (!res.ok || !json?.success) {
+                    throw new Error(json?.error || json?.message || 'Không thể tạo mã gợi ý');
+                }
+                if (cancelled) return;
+                const code = json?.suggestedCode || '';
+                setSuggestedCustomerCode(code);
+                form.setValue('customerCode', code, { shouldDirty: true, shouldTouch: true });
+            } catch (e) {
+                if (cancelled) return;
+                // Nếu fail, vẫn để trống để backend tự fallback KH-03900
+                setSuggestedCustomerCode('');
+                form.setValue('customerCode', '', { shouldDirty: false, shouldTouch: false });
+            } finally {
+                if (!cancelled) setIsSuggestingCode(false);
+            }
+        }
+        loadSuggestedCode();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const { errors, isSubmitting } = form.formState; // Lấy isSubmitting trực tiếp từ formState
     const errorMessages = Object.values(errors).map(error => error.message);
@@ -97,6 +131,11 @@ export default function Customer_add({ service }) {
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                    <FormLabel><h5>Mã khách hàng</h5></FormLabel>
+                                    <Input value={suggestedCustomerCode || 'KH-03900'} disabled readOnly />
+                                    {isSuggestingCode && <h6 style={{ color: 'white', opacity: 0.8 }}>Đang gợi ý...</h6>}
+                                </div>
                                 <FormField control={form.control} name="fullName" render={({ field }) => (
                                     <FormItem><FormLabel><h5>Họ và Tên *</h5></FormLabel><FormControl><Input placeholder="Nguyễn Văn A" {...field} /></FormControl></FormItem>
                                 )} />

@@ -21,6 +21,7 @@ import Logs from '@/models/log.model';
 import Variant from '@/models/variant.model';
 import { findUserUid } from '@/data/zalo/chat.actions';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
+import { generateCustomerCodeByType, isDuplicateKeyError, parseCustomerCode } from '@/utils/customerCode';
 
 export async function createAreaAction(_previousState, formData) {
     await dbConnect();
@@ -149,6 +150,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
             service: isFormData ? inputData.get('service')?.trim() : inputData.service?.trim(),
             source: isFormData ? inputData.get('source')?.trim() : '68b5ebb3658a1123798c0ce4',
             sourceName: isFormData ? inputData.get('sourceName')?.trim() : 'Trực tiếp',
+            customerCode: isFormData ? inputData.get('customerCode')?.trim() : inputData.customerCode?.trim(),
         };
 
         let user = null;
@@ -228,6 +230,21 @@ export async function addRegistrationToAction(_previousState, inputData) {
         }
 
         // TRƯỜNG HỢP 2: TẠO KHÁCH HÀNG MỚI
+        const customerCodeType = rawData.sourceName === 'Trực tiếp' ? 'NORMAL' : 'TN';
+
+        // Nếu client đã gửi mã gợi ý (hệ thống tự sinh), ưu tiên dùng mã đó ở attempt đầu tiên.
+        let preferredCodePayload = null;
+        if (rawData.customerCode) {
+            const parsed = parseCustomerCode(rawData.customerCode);
+            if (parsed?.customerCodeType === customerCodeType) {
+                preferredCodePayload = {
+                    customerCode: parsed.canonicalCustomerCode,
+                    customerCodeType: parsed.customerCodeType,
+                    customerCodeNumber: parsed.customerCodeNumber,
+                };
+            }
+        }
+
         const newCustomerData = {
             name: rawData.name,
             phone: normalizedPhone,
@@ -242,8 +259,34 @@ export async function addRegistrationToAction(_previousState, inputData) {
             ...(user && { createdBy: user.id }),
         };
 
-        const newCustomer = new Customer(newCustomerData);
-        await newCustomer.save();
+        // Sinh mã khách hàng khi tạo mới.
+        // - KH khách cũ (không có customerCode) sẽ giữ nguyên field trống cho tới khi nhân viên bấm sửa.
+        // - Dùng retry vì có thể race condition khi nhiều request tạo cùng lúc.
+        let newCustomer = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const codePayload =
+                attempt === 0 && preferredCodePayload
+                    ? preferredCodePayload
+                    : await generateCustomerCodeByType(customerCodeType);
+            const payload = {
+                ...newCustomerData,
+                customerCode: codePayload.customerCode,
+                customerCodeType: codePayload.customerCodeType,
+                customerCodeNumber: codePayload.customerCodeNumber,
+            };
+
+            try {
+                newCustomer = new Customer(payload);
+                await newCustomer.save();
+                break;
+            } catch (err) {
+                if (isDuplicateKeyError(err) && attempt < 4) continue;
+                throw err;
+            }
+        }
+        if (!newCustomer) {
+            return { ok: false, message: 'Lỗi hệ thống, không thể tạo mã khách hàng.' };
+        }
         
         // Cập nhật Fillter_customer nếu có bd
         if (birthDate) {

@@ -1,5 +1,6 @@
 import Customer from '@/models/customer.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
+import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // --- Pancake API ---
 // URL và Token để lấy dữ liệu hội thoại từ Pancake.vn
 const PANCAKE_API_URL = 'https://pancake.vn/api/v1/conversations';
-const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3NzgxNDU4NDgsImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoiZWI4ODM0YjYtMzZkMi00MDRlLWFlMTUtNDRiMzI0NDExMzhiIiwiaWF0IjoxNzcwMzY5ODQ4LCJmYl9pZCI6IjEyMjE0NzQyMTMzMjY5MDU2MSIsImxvZ2luX3Nlc3Npb24iOm51bGwsImZiX25hbWUiOiJEZXYgU3VwcG9ydCJ9.S20F_NkkGAybGwG4NqPlnwKDp7Shjd5Yn8FiO5i-0Nw';
+const PANCAKE_ACCESS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiRGV2IFN1cHBvcnQiLCJleHAiOjE3ODA4ODA3OTksImFwcGxpY2F0aW9uIjoxLCJ1aWQiOiIwNzUzNDE2YS01NzBlLTRmODItOWI0Ny05ZmUzNTVjOGYzMTgiLCJzZXNzaW9uX2lkIjoiZTcwYTQxOTQtZmRiNC00ODZmLThiM2UtM2EyZDk3NDA4MDlkIiwiaWF0IjoxNzczMTA0Nzk5LCJmYl9pZCI6IjEyMjE0NzQyMTMzMjY5MDU2MSIsImxvZ2luX3Nlc3Npb24iOm51bGwsImZiX25hbWUiOiJEZXYgU3VwcG9ydCJ9.JhZx8a4pEQGQfMDH_SNM-eyLdjpI5Dj5m-b1aBVC0rQ';
 const PAGE_IDS = [
     'igo_17841465772365564', 'igo_17841459653240080', 'igo_17841432303738838',
     '140918602777989', '104088111408586', '111644183773352', '1992837824267906'
@@ -167,18 +168,28 @@ export async function GET() {
                     name: customerName,
                     phone: phoneToRegister,
                     source: DEFAULT_SOURCE_ID,
-                    sourceName: DEFAULT_SOURCE_NAME,
+                    sourceDetails: DEFAULT_SOURCE_NAME,
                     // Bạn có thể thêm các trường mặc định khác ở đây nếu model yêu cầu
                 };
 
+                const customerCodeType = 'TN';
                 let createdCustomer = null;
-                try {
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    try {
+                    const codePayload = await generateCustomerCodeByType(customerCodeType);
+                    const payload = {
+                        ...newCustomerData,
+                        customerCode: codePayload.customerCode,
+                        customerCodeType: codePayload.customerCodeType,
+                        customerCodeNumber: codePayload.customerCodeNumber,
+                    };
+
                     // Thử tạo bản ghi mới
                     if (typeof Customer.create === 'function') {
-                        createdCustomer = await Customer.create(newCustomerData);
+                        createdCustomer = await Customer.create(payload);
                     } else {
                         // fallback nếu model là class với constructor
-                        createdCustomer = new Customer(newCustomerData);
+                        createdCustomer = new Customer(payload);
                         if (typeof createdCustomer.save === 'function') {
                             createdCustomer = await createdCustomer.save();
                         }
@@ -209,6 +220,7 @@ export async function GET() {
                         phone_used: phoneToRegister,
                         created_customer_id: createdCustomer._id ?? createdCustomer.id ?? null,
                     });
+                    break;
                 } catch (createErr) {
                     // Xử lý trường hợp race-condition / duplicate key (ví dụ index unique trên phone)
                     // Mongo duplicate key error thường có code 11000
@@ -221,14 +233,31 @@ export async function GET() {
                         } catch (e) {
                             // ignore
                         }
+                        if (dupExisting) {
+                            automationResults.push({
+                                conversation_id: conv.id,
+                                decision: 'already_exists_after_create_attempt',
+                                customer_name: customerName,
+                                phone_used: phoneToRegister,
+                                existing_customer_id: dupExisting?._id ?? dupExisting?.id ?? null,
+                                note: 'Duplicate key detected when creating, treated as already exists.',
+                            });
+                            break;
+                        }
+
+                        // Duplicate khả năng cao đến từ customerCode (trùng do race).
+                        // Không có bản ghi theo phone => retry generate mã.
+                        if (attempt < 4) continue;
+
                         automationResults.push({
                             conversation_id: conv.id,
-                            decision: 'already_exists_after_create_attempt',
+                            decision: 'db_create_error',
                             customer_name: customerName,
                             phone_used: phoneToRegister,
-                            existing_customer_id: dupExisting?._id ?? dupExisting?.id ?? null,
-                            note: 'Duplicate key detected when creating, treated as already exists.',
+                            error: createErr?.message || String(createErr),
+                            note: 'Duplicate customerCode; retries exhausted.',
                         });
+                        break;
                     } else {
                         // Lỗi khác khi tạo
                         automationResults.push({
@@ -238,7 +267,9 @@ export async function GET() {
                             phone_used: phoneToRegister,
                             error: createErr?.message || String(createErr),
                         });
+                        break;
                     }
+                }
                 }
 
             } catch (dbErr) {

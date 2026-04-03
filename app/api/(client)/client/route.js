@@ -12,6 +12,7 @@ import { changeFriendAlias } from '@/data/zalo/chat.actions';
 import { formatMessage } from "@/app/api/(zalo)/action/route";
 import { revalidateData } from "@/app/actions/customer.actions";
 import autoAssignForCustomer from "@/utils/autoAssign";
+import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,9 +95,33 @@ export async function POST(req) {
     if (existed) {
       return NextResponse.json({ status: false, message: "duplicate_phone", data: { phone } }, { status: 409 });
     }
-    const doc = await Customer.create({
-      name: data?.name, bd: data?.bd, email: data?.email, phone, nameparent: data?.nameparent, area: data?.area, source: data?.source, roles: selectedZalo.roles || [],
-    });
+    const customerCodeType = 'TN';
+    let doc = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const codePayload = await generateCustomerCodeByType(customerCodeType);
+      try {
+        doc = await Customer.create({
+          name: data?.name,
+          bd: data?.bd,
+          email: data?.email,
+          phone,
+          nameparent: data?.nameparent,
+          area: data?.area,
+          source: data?.source,
+          roles: selectedZalo.roles || [],
+          customerCode: codePayload.customerCode,
+          customerCodeType: codePayload.customerCodeType,
+          customerCodeNumber: codePayload.customerCodeNumber,
+        });
+        break;
+      } catch (err) {
+        if (isDuplicateKeyError(err) && attempt < 4) continue;
+        throw err;
+      }
+    }
+    if (!doc) {
+      return NextResponse.json({ status: false, message: 'Lỗi hệ thống, không thể tạo mã khách hàng.' }, { status: 500 });
+    }
     console.log(`[Create Customer] Đã tạo khách hàng mới: ${String(doc._id)} với SĐT: ${phone}`);
     
     // Cập nhật Fillter_customer nếu có bd
