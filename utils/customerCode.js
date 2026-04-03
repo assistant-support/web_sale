@@ -3,6 +3,8 @@ import Customer from '@/models/customer.model';
 const CUSTOMER_CODE_TYPES = {
     NORMAL: 'NORMAL',
     TN: 'TN',
+    /** Nhân viên gán/sửa mã (kể cả khách NULL hoặc sửa nhầm) — cho phép sửa */
+    NORMAL_EDIT: 'NORMAL_EDIT',
 };
 
 const PAD_LEN = 5;
@@ -49,8 +51,14 @@ export function isDuplicateKeyError(err) {
 }
 
 async function getMaxCustomerCodeNumberByType(customerCodeType) {
+    // Dãy KH-xxxxx: cả NORMAL (tạo trực tiếp) và NORMAL_EDIT (nhân viên gán) dùng chung số tăng
+    const typeFilter =
+        customerCodeType === CUSTOMER_CODE_TYPES.NORMAL
+            ? { $in: [CUSTOMER_CODE_TYPES.NORMAL, CUSTOMER_CODE_TYPES.NORMAL_EDIT] }
+            : customerCodeType;
+
     const doc = await Customer.findOne({
-        customerCodeType,
+        customerCodeType: typeFilter,
         customerCodeNumber: { $ne: null },
     })
         .sort({ customerCodeNumber: -1 })

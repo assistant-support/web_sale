@@ -162,7 +162,7 @@ const FormSchema = new Schema(
         // - customers "cũ" chưa có -> field này sẽ không tồn tại (undefined) để sparse unique index không bị conflict
         // - chỉ set khi tạo customer mới hoặc khi nhân viên bấm sửa
         customerCode: { type: String, unique: true, sparse: true, index: true },
-        customerCodeType: { type: String, enum: ['NORMAL', 'TN'], index: true },
+        customerCodeType: { type: String, enum: ['NORMAL', 'TN', 'NORMAL_EDIT'], index: true },
         customerCodeNumber: { type: Number, index: true },
 
         area: { type: String, trim: true },

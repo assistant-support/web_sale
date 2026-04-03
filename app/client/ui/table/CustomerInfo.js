@@ -402,7 +402,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     const [isViewDetailOpen, setIsViewDetailOpen] = useState(false);
     const [viewingDetail, setViewingDetail] = useState(null);
 
-    const customerCodeLocked = customer?.sourceDetails === 'Trực tiếp';
+    // Chỉ khóa khi mã do hệ thống gán (NORMAL) và đã có mã — không khóa theo nguồn chi tiết
+    const hasCustomerCode = !!(customer?.customerCode && String(customer.customerCode).trim() !== '');
+    const customerCodeLocked = customer?.customerCodeType === 'NORMAL' && hasCustomerCode;
     
     // ✅ State để lưu full serviceDetails đã fetch từ service_details collection
     const [fullServiceDetails, setFullServiceDetails] = useState([]);

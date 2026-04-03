@@ -678,9 +678,9 @@ export async function updateCustomerInfo(previousState, formData) {
         
 
         // ===== customerCode (mã khách hàng) =====
-        // Rule theo yêu cầu:
-        // - Khách "Trực tiếp" (tạo từ Thêm khách lẻ) => không được phép sửa mã.
-        // - Khi nhân viên bấm sửa => giá trị nhập phải đúng format và không trùng trong hệ thống.
+        // NORMAL: mã do hệ thống gán khi Thêm khách lẻ — không cho đổi sang mã khác (giữ nguyên nếu trùng).
+        // TN: hệ thống tự tạo từ nguồn khác — cho phép sửa.
+        // NORMAL_EDIT: nhân viên gán/sửa (kể cả từ NULL, hoặc sửa nhầm) — luôn cho phép sửa lại.
         if (customerCodeInput !== undefined) {
             const raw = String(customerCodeInput ?? '').trim();
             if (raw !== '') {
@@ -690,18 +690,38 @@ export async function updateCustomerInfo(previousState, formData) {
                 }
 
                 const canonical = parsed.canonicalCustomerCode;
-                const isLocked = customerDoc.sourceDetails === 'Trực tiếp';
-                if (isLocked && customerDoc.customerCode !== canonical) {
+                const oldCode =
+                    customerDoc.customerCode && String(customerDoc.customerCode).trim() !== ''
+                        ? String(customerDoc.customerCode).trim()
+                        : '';
+                const existingType = customerDoc.customerCodeType;
+
+                if (existingType === 'NORMAL' && oldCode && canonical !== oldCode) {
                     return { success: false, error: 'Mã khách hàng này không được phép sửa.' };
                 }
+
                 const available = await isCustomerCodeAvailable(canonical, customerDoc._id);
                 if (!available) {
                     return { success: false, error: 'Mã này đã tồn tại trong hệ thống - hãy tạo mã khác' };
                 }
 
                 customerDoc.customerCode = canonical;
-                customerDoc.customerCodeType = parsed.customerCodeType;
-                customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+
+                if (parsed.customerCodeType === 'TN') {
+                    customerDoc.customerCodeType = 'TN';
+                    customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+                } else {
+                    // Định dạng KH-xxxxx (parser trả về NORMAL)
+                    if (existingType === 'NORMAL' && oldCode && canonical === oldCode) {
+                        customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+                    } else if (existingType === undefined && oldCode && canonical === oldCode) {
+                        // Bản ghi cũ chưa có customerCodeType: không đổi mã thì không gán NORMAL_EDIT
+                        customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+                    } else {
+                        customerDoc.customerCodeType = 'NORMAL_EDIT';
+                        customerDoc.customerCodeNumber = parsed.customerCodeNumber;
+                    }
+                }
             }
         }
 
