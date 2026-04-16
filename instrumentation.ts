@@ -1,6 +1,8 @@
 export async function register() {
     if (process.env.NEXT_RUNTIME === 'nodejs') {
         // Chỉ chạy trên server-side
+        // Seed labelCall: chỉ trong config/connectDB.js (tránh tải mongoose 2 lần ở đây → dễ OOM khi compile instrumentation).
+
         console.log('[instrumentation] 🚀 Khởi tạo Agenda job scheduler...');
         
         try {

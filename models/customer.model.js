@@ -248,6 +248,12 @@ const FormSchema = new Schema(
             enum: ['new', 'old'], 
             default: 'new' 
         },
+
+        /** Thẻ cuộc gọi (tối đa một thẻ / khách), đồng bộ với collection `labelCall`. */
+        Call_Label: {
+            name: { type: String, trim: true },
+            id_call_label: { type: Schema.Types.ObjectId, ref: 'labelCall' },
+        },
         
         // Thống kê cho phân loại khách mới/cũ và doanh thu
         total_completed_orders: { type: Number, default: 0, min: 0 }, // Tổng số đơn đã hoàn thành

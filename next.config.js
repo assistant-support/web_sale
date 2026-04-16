@@ -1,9 +1,17 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // Tránh Turbopack chọn nhầm root (lockfile ở C:\Users\thanh) → giảm RAM compile & lệch module
+    turbopack: {
+        root: __dirname,
+    },
     experimental: {
-        instrumentationHook: true,
         serverActions: {
-            bodySizeLimit: '500mb', // hỗ trợ upload video / file lớn hơn 25mb
+            bodySizeLimit: '500mb',
         },
     },
     images: {
@@ -77,6 +85,6 @@ const nextConfig = {
         ],
     },
     output: 'standalone',
-}
+};
 
 export default nextConfig;

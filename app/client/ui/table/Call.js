@@ -7,10 +7,11 @@ import RecordingPlayer from '@/components/call/RecordingPlayer';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Loader2, Phone, PhoneOff, CircleDot, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, Phone, PhoneOff, CircleDot, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { maskPhoneNumber } from '@/function/index';
 import { saveCallAction, call_data } from '@/data/call/wraperdata.db';
 import Script from 'next/script';
+import { getLabelCallsForSelect, setCustomerCallLabel } from '@/app/actions/callLabel.actions';
 
 // Map SIP → Call.status
 const toCallStatus = (sipCode, seconds) => {
@@ -66,6 +67,90 @@ export default function Call({ customer, user }) {
         }
         return false;
     });
+
+    const [labelOptions, setLabelOptions] = useState([]);
+    const [labelSavePending, setLabelSavePending] = useState(false);
+
+    const customerCallLabelId =
+        customer?.Call_Label?.id_call_label != null
+            ? String(customer.Call_Label.id_call_label)
+            : '';
+    const customerCallLabelName = customer?.Call_Label?.name || '';
+    const [callLabelView, setCallLabelView] = useState({
+        id: customerCallLabelId,
+        name: customerCallLabelName,
+    });
+
+    useEffect(() => {
+        setCallLabelView({
+            id: customerCallLabelId,
+            name: customerCallLabelName,
+        });
+    }, [customer?._id, customerCallLabelId, customerCallLabelName]);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const list = await getLabelCallsForSelect();
+            if (!cancelled) setLabelOptions(Array.isArray(list) ? list : []);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const handleAssignCallLabel = useCallback(
+        async (labelCallId) => {
+            if (!customer?._id || !labelCallId || labelSavePending) return;
+            if (labelCallId === callLabelView.id) return;
+            setLabelSavePending(true);
+            try {
+                const nextLabel = labelOptions.find((x) => x._id === labelCallId);
+                if (nextLabel) {
+                    // Optimistic UI để tránh refresh toàn trang
+                    setCallLabelView({ id: nextLabel._id, name: nextLabel.name });
+                }
+                const res = await setCustomerCallLabel(String(customer._id), labelCallId);
+                if (res.success) {
+                    if (!res.noChange) {
+                        toast.success(res.message || 'Đã gán thẻ cuộc gọi.');
+                    }
+                    if (res?.data?.id_call_label) {
+                        setCallLabelView({
+                            id: String(res.data.id_call_label),
+                            name: res.data.name || nextLabel?.name || '',
+                        });
+                    }
+                } else {
+                    setCallLabelView({ id: customerCallLabelId, name: customerCallLabelName });
+                    toast.error(res.error || 'Không thể gán thẻ.');
+                }
+            } finally {
+                setLabelSavePending(false);
+            }
+        },
+        [customer?._id, labelSavePending, callLabelView.id, labelOptions, customerCallLabelId, customerCallLabelName]
+    );
+
+    const handleClearCallLabel = useCallback(async () => {
+        if (!customer?._id || labelSavePending) return;
+        if (!callLabelView.id) return;
+        setLabelSavePending(true);
+        try {
+            setCallLabelView({ id: '', name: '' });
+            const res = await setCustomerCallLabel(String(customer._id), '');
+            if (res.success) {
+                if (!res.noChange) {
+                    toast.success(res.message || 'Đã xóa thẻ cuộc gọi.');
+                }
+            } else {
+                setCallLabelView({ id: customerCallLabelId, name: customerCallLabelName });
+                toast.error(res.error || 'Không thể xóa thẻ.');
+            }
+        } finally {
+            setLabelSavePending(false);
+        }
+    }, [customer?._id, labelSavePending, callLabelView.id, customerCallLabelId, customerCallLabelName]);
 
     // ===== REFS =====
     const sdkRef = useRef(null);              // SDK instance
@@ -1910,10 +1995,43 @@ export default function Call({ customer, user }) {
             {/* Call Section */}
             <Card className="flex-shrink-0">
                 <CardHeader className="pb-1">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                        <Phone className="h-3 w-3" />
-                        Thông tin & Gọi
-                    </CardTitle>
+                <CardTitle className="flex items-center justify-between gap-2 text-sm flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <Phone className="h-3 w-3 shrink-0" />
+                        <span className="truncate">Thông tin & Gọi</span>
+                    </div>
+                    <div className="flex items-center shrink-0">
+                        <select
+                            key={`${customer?._id || 'customer'}-${callLabelView.id || 'none'}`}
+                            value={callLabelView.id || ''}
+                            onChange={(e) => {
+                                const nextId = e.target.value;
+                                if (!nextId) return;
+                                void handleAssignCallLabel(nextId);
+                            }}
+                            disabled={labelSavePending || !customer?._id || labelOptions.length === 0}
+                            aria-label="Chọn thẻ gán cho cuộc gọi"
+                            className="h-7 w-40 max-w-[11rem] rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                        >
+                            <option value="" disabled>
+                                Chọn thẻ gán
+                            </option>
+                            {labelOptions.map((opt) => (
+                                <option key={opt._id} value={opt._id}>
+                                    {opt.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </CardTitle>
+                    {/* <CardTitle className="flex items-center gap-2 text-sm">
+                        <Phone className="h-3 w-3" /> */}
+                        {/* Thông tin & Gọi */}
+                        {/* <div className="flex items-center gap-2">
+                            <div>Thông tin & Gọi</div>
+                            <div className="bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">Vị trí gán thẻ </div>
+                        </div>
+                    </CardTitle> */}
                 </CardHeader>
                 <CardContent className="space-y-1 pt-0">
                     {/* Connection Status */}
@@ -1938,7 +2056,37 @@ export default function Call({ customer, user }) {
                             <AvatarFallback className="text-xs">{customer?.name?.charAt(0) || customer?.zaloname?.charAt(0) || 'C'}</AvatarFallback>
                         </Avatar>
                         <div>
-                            <div className="font-medium text-xs">{customer?.name || customer?.zaloname || 'Không có tên'}</div>
+                            {/* <div className="font-medium text-xs">{customer?.name || customer?.zaloname || 'Không có tên'}</div><div>Gán thẻ</div> */}
+                            <div className="flex flex-col gap-0.5 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                    <div className="font-medium text-xs truncate">{customer?.name || customer?.zaloname || 'Không có tên'}</div>
+                                    {callLabelView.name ? (
+                                        <div className="inline-flex items-center gap-0.5 shrink-0">
+                                            <span
+                                                className="bg-blue-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full max-w-[10rem] truncate"
+                                                title={callLabelView.name}
+                                            >
+                                                {callLabelView.name}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                className="rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-900 disabled:opacity-50"
+                                                aria-label="Xóa thẻ cuộc gọi"
+                                                disabled={labelSavePending}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    void handleClearCallLabel();
+                                                }}
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <span className="text-[10px] text-muted-foreground shrink-0">Chưa gán thẻ</span>
+                                    )}
+                                </div>
+                                <p className="text-[10px] text-muted-foreground">Mỗi khách hàng chỉ một thẻ cuộc gọi.</p>
+                            </div>
                             <div className="text-xs text-gray-600">{maskPhoneNumber(customer?.phone || customer?.phonex) || 'Không có số điện thoại'}</div>
                             {customer?.area && (
                                 <div className="text-xs text-gray-500">{customer.area}</div>
