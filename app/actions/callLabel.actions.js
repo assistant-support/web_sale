@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidateTag } from 'next/cache';
 import mongoose from 'mongoose';
 import connectDB from '@/config/connectDB';
 import checkAuthToken from '@/utils/checktoken';
@@ -10,6 +11,14 @@ const LABEL_CALL_CACHE_TTL_MS = 5 * 60 * 1000;
 let labelCallCache = null;
 let labelCallCacheAt = 0;
 
+function revalidateCustomerListCache() {
+    try {
+        revalidateTag('combined-data');
+    } catch {
+        // ignore unsupported context
+    }
+}
+
 function canManageCallLabel(user) {
     if (!user?.role) return false;
     return (
@@ -19,7 +28,7 @@ function canManageCallLabel(user) {
     );
 }
 
-/** Danh sách thẻ cuộc gọi (đọc DB, không tạo mẫu). */
+/** Danh sach the cuoc goi (doc DB, khong tao mau). */
 export async function getLabelCallsForSelect() {
     const user = await checkAuthToken();
     if (!user?.id) return [];
@@ -44,20 +53,18 @@ export async function getLabelCallsForSelect() {
 }
 
 /**
- * Gán hoặc xóa thẻ cuộc gọi cho khách (một khách tối đa một thẻ).
- * @param {string} customerId
- * @param {string|null|undefined} labelCallId — null/undefined/'' để xóa thẻ
+ * Gan hoac xoa the cuoc goi cho khach (mot khach toi da mot the).
  */
 export async function setCustomerCallLabel(customerId, labelCallId) {
     const user = await checkAuthToken();
     if (!user?.id) {
-        return { success: false, error: 'Bạn cần đăng nhập để thực hiện hành động này.' };
+        return { success: false, error: 'Ban can dang nhap de thuc hien hanh dong nay.' };
     }
     if (!canManageCallLabel(user)) {
-        return { success: false, error: 'Bạn không có quyền thực hiện chức năng này.' };
+        return { success: false, error: 'Ban khong co quyen thuc hien chuc nang nay.' };
     }
     if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
-        return { success: false, error: 'Khách hàng không hợp lệ.' };
+        return { success: false, error: 'Khach hang khong hop le.' };
     }
 
     const clear =
@@ -74,18 +81,19 @@ export async function setCustomerCallLabel(customerId, labelCallId) {
                 { $unset: { Call_Label: '' } }
             );
             if (clearResult.modifiedCount === 0) {
-                return { success: true, noChange: true, message: 'Khách hàng chưa có thẻ cuộc gọi.' };
+                return { success: true, noChange: true, message: 'Khach hang chua co the cuoc goi.' };
             }
-            return { success: true, cleared: true, message: 'Đã xóa thẻ cuộc gọi.' };
+            revalidateCustomerListCache();
+            return { success: true, cleared: true, message: 'Da xoa the cuoc goi.' };
         }
 
         if (!mongoose.Types.ObjectId.isValid(labelCallId)) {
-            return { success: false, error: 'Thẻ không hợp lệ.' };
+            return { success: false, error: 'The khong hop le.' };
         }
 
         const label = await LabelCall.findById(labelCallId).lean();
         if (!label) {
-            return { success: false, error: 'Không tìm thấy thẻ.' };
+            return { success: false, error: 'Khong tim thay the.' };
         }
 
         const updateResult = await Customer.updateOne(
@@ -103,19 +111,20 @@ export async function setCustomerCallLabel(customerId, labelCallId) {
             return {
                 success: true,
                 noChange: true,
-                message: 'Thẻ cuộc gọi không thay đổi.',
+                message: 'The cuoc goi khong thay doi.',
                 data: { id_call_label: String(label._id), name: label.name },
             };
         }
 
+        revalidateCustomerListCache();
         return {
             success: true,
             assigned: true,
-            message: 'Đã gán thẻ cuộc gọi.',
+            message: 'Da gan the cuoc goi.',
             data: { id_call_label: String(label._id), name: label.name },
         };
     } catch (e) {
         console.error('[setCustomerCallLabel]', e);
-        return { success: false, error: 'Lỗi máy chủ khi cập nhật thẻ.' };
+        return { success: false, error: 'Loi may chu khi cap nhat the.' };
     }
 }

@@ -1,7 +1,8 @@
 // components/Call.js
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, startTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import RecordingPlayer from '@/components/call/RecordingPlayer';
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,8 @@ const hhmmssToSec = (txt = '00:00') => {
 };
 
 export default function Call({ customer, user }) {
+    const router = useRouter();
+    const lastCustomerIdSyncedRef = useRef(null);
     // ===== STATE MANAGEMENT =====
     const [connectionStatus, setConnectionStatus] = useState({ status: 'disconnected', text: 'Chưa kết nối' });
     const [callStage, setCallStage] = useState('idle'); // idle | connecting | ringing | in_call
@@ -81,11 +84,16 @@ export default function Call({ customer, user }) {
         name: customerCallLabelName,
     });
 
+    // Chi dong bo tu props khi doi khach (_id). Tranh ban ghi customer trong bang bi stale ghi de len UI.
     useEffect(() => {
-        setCallLabelView({
-            id: customerCallLabelId,
-            name: customerCallLabelName,
-        });
+        const cid = customer?._id != null ? String(customer._id) : '';
+        if (cid !== lastCustomerIdSyncedRef.current) {
+            lastCustomerIdSyncedRef.current = cid;
+            setCallLabelView({
+                id: customerCallLabelId,
+                name: customerCallLabelName,
+            });
+        }
     }, [customer?._id, customerCallLabelId, customerCallLabelName]);
 
     useEffect(() => {
@@ -103,11 +111,11 @@ export default function Call({ customer, user }) {
         async (labelCallId) => {
             if (!customer?._id || !labelCallId || labelSavePending) return;
             if (labelCallId === callLabelView.id) return;
+            const snapshot = { id: callLabelView.id, name: callLabelView.name };
             setLabelSavePending(true);
             try {
                 const nextLabel = labelOptions.find((x) => x._id === labelCallId);
                 if (nextLabel) {
-                    // Optimistic UI để tránh refresh toàn trang
                     setCallLabelView({ id: nextLabel._id, name: nextLabel.name });
                 }
                 const res = await setCustomerCallLabel(String(customer._id), labelCallId);
@@ -121,20 +129,24 @@ export default function Call({ customer, user }) {
                             name: res.data.name || nextLabel?.name || '',
                         });
                     }
+                    if (res.assigned) {
+                        startTransition(() => router.refresh());
+                    }
                 } else {
-                    setCallLabelView({ id: customerCallLabelId, name: customerCallLabelName });
+                    setCallLabelView(snapshot);
                     toast.error(res.error || 'Không thể gán thẻ.');
                 }
             } finally {
                 setLabelSavePending(false);
             }
         },
-        [customer?._id, labelSavePending, callLabelView.id, labelOptions, customerCallLabelId, customerCallLabelName]
+        [customer?._id, labelSavePending, callLabelView.id, callLabelView.name, labelOptions, router]
     );
 
     const handleClearCallLabel = useCallback(async () => {
         if (!customer?._id || labelSavePending) return;
         if (!callLabelView.id) return;
+        const snapshotClear = { id: callLabelView.id, name: callLabelView.name };
         setLabelSavePending(true);
         try {
             setCallLabelView({ id: '', name: '' });
@@ -143,14 +155,17 @@ export default function Call({ customer, user }) {
                 if (!res.noChange) {
                     toast.success(res.message || 'Đã xóa thẻ cuộc gọi.');
                 }
+                if (res.cleared) {
+                    startTransition(() => router.refresh());
+                }
             } else {
-                setCallLabelView({ id: customerCallLabelId, name: customerCallLabelName });
+                setCallLabelView(snapshotClear);
                 toast.error(res.error || 'Không thể xóa thẻ.');
             }
         } finally {
             setLabelSavePending(false);
         }
-    }, [customer?._id, labelSavePending, callLabelView.id, customerCallLabelId, customerCallLabelName]);
+    }, [customer?._id, labelSavePending, callLabelView.id, callLabelView.name, router]);
 
     // ===== REFS =====
     const sdkRef = useRef(null);              // SDK instance

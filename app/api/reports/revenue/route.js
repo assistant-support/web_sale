@@ -2,9 +2,11 @@ import { NextResponse } from 'next/server';
 import connectDB from '@/config/connectDB';
 import ServiceDetail from '@/models/service_details.model';
 
+const SERVICE_TYPES = ['noi_khoa', 'ngoai_khoa', 'da_lieu'];
+
 /**
  * Báo cáo doanh thu - nguồn: service_details (đơn completed + approved).
- * Query: from, to (mặc định = đầu tháng ~ cuối tháng hiện tại).
+ * Query: from, to (mặc định = đầu tháng ~ cuối tháng hiện tại), type (tùy chọn: noi_khoa | ngoai_khoa | da_lieu).
  * Trả về: summary (totalRevenue, totalOrders, totalCustomers), topService, services (bảng dịch vụ).
  */
 export async function GET(req) {
@@ -14,6 +16,12 @@ export async function GET(req) {
         const { searchParams } = new URL(req.url);
         const fromParam = searchParams.get('from');
         const toParam = searchParams.get('to');
+        const typeParam = searchParams.get('type');
+        const serviceTypeFilter =
+            typeParam && SERVICE_TYPES.includes(typeParam) ? typeParam : null;
+        const typeMatchAfterLookup = serviceTypeFilter
+            ? [{ $match: { 'serviceDoc.type': serviceTypeFilter } }]
+            : [];
 
         const now = new Date();
         const fromDate = fromParam
@@ -32,6 +40,16 @@ export async function GET(req) {
         // 1) Summary: tổng doanh thu, tổng đơn, số khách hàng có doanh thu (distinct customerId)
         const summaryAgg = await ServiceDetail.aggregate([
             { $match: match },
+            {
+                $lookup: {
+                    from: 'services',
+                    localField: 'serviceId',
+                    foreignField: '_id',
+                    as: 'serviceDoc',
+                },
+            },
+            { $unwind: { path: '$serviceDoc', preserveNullAndEmptyArrays: true } },
+            ...typeMatchAfterLookup,
             {
                 $group: {
                     _id: null,
@@ -75,6 +93,7 @@ export async function GET(req) {
                 },
             },
             { $unwind: { path: '$serviceDoc', preserveNullAndEmptyArrays: true } },
+            ...typeMatchAfterLookup,
             {
                 $project: {
                     serviceId: '$_id',

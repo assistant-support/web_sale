@@ -1,11 +1,19 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DollarSign, RefreshCw, Download, Loader2, BookOpenText } from 'lucide-react';
 import Popup from '@/components/ui/popup';
+import CustomSelect from '@/components/ui/CustomSelect.client';
+
+const TYPE_FILTER_ITEMS = [
+    { value: 'all', label: 'Tất cả loại' },
+    { value: 'noi_khoa', label: 'Nội khoa' },
+    { value: 'ngoai_khoa', label: 'Ngoại khoa' },
+    { value: 'da_lieu', label: 'Da li\u1ec5u' },
+];
 
 const StatCard = ({ title, value, icon: Icon, color }) => (
     <Card className="shadow-lg border-l-4" style={{ borderLeftColor: color }}>
@@ -38,6 +46,7 @@ export default function RevenueReportClient() {
     const defaultRange = getDefaultMonthRange();
     const [startDate, setStartDate] = useState(defaultRange.from);
     const [endDate, setEndDate] = useState(defaultRange.to);
+    const [serviceTypeFilter, setServiceTypeFilter] = useState('all');
     const [docOpen, setDocOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -46,20 +55,21 @@ export default function RevenueReportClient() {
         services: [],
     });
 
-    const fetchReport = async (from, to) => {
+    const fetchReport = async (from, to, type) => {
         setLoading(true);
         setError(null);
         try {
             const params = new URLSearchParams({ from, to });
+            if (type && type !== 'all') params.set('type', type);
             const res = await fetch(`/api/reports/revenue?${params}`);
             const json = await res.json();
             if (!res.ok || !json.success) {
                 throw new Error(json.error || 'Không tải được báo cáo');
             }
-            setData({
-                summary: json.summary || data.summary,
+            setData((prev) => ({
+                summary: json.summary || prev.summary,
                 services: json.services || [],
-            });
+            }));
         } catch (e) {
             setError(e.message);
             setData(prev => ({ ...prev }));
@@ -69,13 +79,14 @@ export default function RevenueReportClient() {
     };
 
     useEffect(() => {
-        fetchReport(startDate, endDate);
-    }, [startDate, endDate]);
+        fetchReport(startDate, endDate, serviceTypeFilter);
+    }, [startDate, endDate, serviceTypeFilter]);
 
     const handleResetFilter = () => {
         const { from, to } = getDefaultMonthRange();
         setStartDate(from);
         setEndDate(to);
+        setServiceTypeFilter('all');
     };
 
     const { summary, services } = data;
@@ -138,7 +149,7 @@ export default function RevenueReportClient() {
                         </button>
                     </div>
                 </CardHeader>
-                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <CardContent className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                     <div>
                         <label className="block mb-2 text-sm text-muted-foreground">Từ ngày</label>
                         <input
@@ -157,6 +168,14 @@ export default function RevenueReportClient() {
                             onChange={(e) => setEndDate(e.target.value)}
                             className="w-full rounded-[6px] border px-3 py-2 text-sm"
                             style={{ borderColor: 'var(--border)', background: 'var(--bg-primary)' }}
+                        />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-1">
+                        <label className="block mb-2 text-sm text-muted-foreground">Loại dịch vụ</label>
+                        <CustomSelect
+                            value={serviceTypeFilter}
+                            onChange={setServiceTypeFilter}
+                            items={TYPE_FILTER_ITEMS}
                         />
                     </div>
                 </CardContent>
