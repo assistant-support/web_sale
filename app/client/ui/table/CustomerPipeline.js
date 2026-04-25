@@ -140,6 +140,16 @@ const getStep3Status = (customer) => {
     }
     return { text: 'Chưa phân bổ', Icon: User, className: 'bg-gray-100 text-gray-800' };
 };
+const getStep4Status = (customer) => {
+    const rawStatus = String(customer?.statusForCall || '').toLowerCase();
+    if (rawStatus === 'success') {
+        return { text: 'success', Icon: CheckCircle, className: 'bg-green-100 text-green-800' };
+    }
+    if (rawStatus === 'false' || rawStatus === 'failse') {
+        return { text: 'false', Icon: CircleDot, className: 'bg-red-100 text-red-800' };
+    }
+    return null; // await hoặc giá trị rỗng thì không hiển thị
+};
 const getStep5Status = (customer) => {
     const hasAppointment = customer.pipelineStatus === 'appointed' || customer.care.some(n => n.content?.includes('Đặt lịch hẹn'));
     if (hasAppointment) return { text: 'Đã có lịch hẹn', Icon: CheckCircle, className: 'bg-green-100 text-green-800' };
@@ -442,10 +452,46 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         { id: 1, title: 'Tiếp nhận & Xử lý', getStatus: getStep1Status },
         { id: 2, title: 'Nhắn tin xác nhận', getStatus: getStep2Status },
         { id: 3, title: 'Phân bổ Telesale', getStatus: getStep3Status },
-        { id: 4, title: 'Telesale Tư vấn', getStatus: () => null },
+        { id: 4, title: 'Telesale Tư vấn', getStatus: getStep4Status },
         { id: 5, title: 'Nhắc lịch & Xác nhận', getStatus: getStep5Status },
         { id: 6, title: 'Chốt dịch vụ', getStatus: getStep6Status }
     ], []);
+    const fuArrowItems = useMemo(() => {
+        const fuList = Array.isArray(customer?.FU) ? customer.FU : [];
+        const map = { FU1: false, FU2: false, FU3: false };
+        const rawStatusForCall = customer?.statusForCall;
+        const statusForCallText = rawStatusForCall == null ? '' : String(rawStatusForCall).trim();
+
+        fuList.forEach((item) => {
+            if (!item || typeof item !== 'object') return;
+            if (Object.prototype.hasOwnProperty.call(item, 'FU1')) map.FU1 = true;
+            if (Object.prototype.hasOwnProperty.call(item, 'FU2')) map.FU2 = true;
+            if (Object.prototype.hasOwnProperty.call(item, 'FU3')) {
+                map.FU3 = true;
+            }
+        });
+
+        const arrows = [
+            { step: 1, value: 'FU1', color: map.FU1 ? 'bg-sky-500' : 'bg-slate-400' },
+            { step: 2, value: 'FU2', color: map.FU2 ? 'bg-emerald-500' : 'bg-slate-400' },
+            { step: 3, value: 'FU3', color: map.FU3 ? 'bg-amber-500' : 'bg-slate-400' },
+        ];
+
+        if (statusForCallText) {
+            arrows.push({
+                step: 4,
+                value: statusForCallText,
+                color:
+                    statusForCallText.toLowerCase() === 'success'
+                        ? 'bg-green-600'
+                        : statusForCallText.toLowerCase() === 'false' || statusForCallText.toLowerCase() === 'failse'
+                            ? 'bg-red-500'
+                            : 'bg-slate-600',
+            });
+        }
+
+        return arrows;
+    }, [customer?.FU, customer?.statusForCall]);
 
     const { currentStageId, currentStageIndex } = useMemo(() => getCurrentStageFromPipeline(customer), [customer]);
 
@@ -1256,6 +1302,24 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                         />
                                     ) : (
                                         <>
+                                            {stage.id === 4 && (
+                                                <div className="mb-3 overflow-x-auto">
+                                                    <div className="flex items-center gap-2 min-w-max">
+                                                        {fuArrowItems.map((item) => (
+                                                            <div key={`fu-arrow-${item.step}`} className="relative inline-flex">
+                                                                <div
+                                                                    className={`h-8 min-w-[96px] px-3 text-white font-semibold text-xs flex items-center justify-center ${item.color}`}
+                                                                    style={{
+                                                                        clipPath: 'polygon(0% 0%, 84% 0%, 100% 50%, 84% 100%, 0% 100%)',
+                                                                    }}
+                                                                >
+                                                                    {item.step}. {item.value}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                             {notesForStage.length > 0
                                                 ? notesForStage.map(note => <CareNoteItem key={note._id || `${stage.id}-${Math.random()}`} note={note} />)
                                                 : <h6 className='text-center text-muted-foreground p-4'>Chưa có hoạt động.</h6>

@@ -8,9 +8,12 @@ import RecordingPlayer from '@/components/call/RecordingPlayer';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import { Loader2, Phone, PhoneOff, CircleDot, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { maskPhoneNumber } from '@/function/index';
-import { saveCallAction, call_data } from '@/data/call/wraperdata.db';
+import { saveCallAction, call_data, appendCustomerFUAction, updateLatestRecordedCallLabelFUAction, updateCallLabelFUByIdAction } from '@/data/call/wraperdata.db';
 import Script from 'next/script';
 import { getLabelCallsForSelect, setCustomerCallLabel } from '@/app/actions/callLabel.actions';
 
@@ -47,6 +50,21 @@ const hhmmssToSec = (txt = '00:00') => {
     return 0;
 };
 
+// const FU_LABEL_OPTIONS = [
+//     'GLS: Nghe máy và hẹn gọi lại sau',
+//     'RA: Rà lại các leads',
+//     'TI: Ở xã tỉnh/ nước ngoài, có nhu cầu chăm thêm',
+//     'TN: Tiềm năng có nhu cầu nhưng chưa chuyển đổi lịch được',
+//     'KNC: Không nhu cầu',
+//     'SS: Sai số, ngoài vùng phủ sóng, thuê bao',
+// ];
+const FU_LABEL_OPTIONS = [
+    'Đã tư vấn',
+    'Chưa tư vấn',
+    'Đã xác nhận lịch hẹn',
+    'Không có nhu cầu',
+];
+
 export default function Call({ customer, user }) {
     const router = useRouter();
     const lastCustomerIdSyncedRef = useRef(null);
@@ -73,6 +91,9 @@ export default function Call({ customer, user }) {
 
     const [labelOptions, setLabelOptions] = useState([]);
     const [labelSavePending, setLabelSavePending] = useState(false);
+    const [isFUPopupOpen, setIsFUPopupOpen] = useState(false);
+    const [selectedFUCallLabel, setSelectedFUCallLabel] = useState('');
+    const [isSavingFULabel, setIsSavingFULabel] = useState(false);
 
     const customerCallLabelId =
         customer?.Call_Label?.id_call_label != null
@@ -83,6 +104,24 @@ export default function Call({ customer, user }) {
         id: customerCallLabelId,
         name: customerCallLabelName,
     });
+
+    const latestFUView = (() => {
+        const fuList = Array.isArray(customer?.FU) ? customer.FU : [];
+        if (fuList.length === 0) return { key: '', label: '' };
+
+        for (let i = fuList.length - 1; i >= 0; i -= 1) {
+            const item = fuList[i];
+            if (!item || typeof item !== 'object') continue;
+            const key = Object.keys(item).find((k) => /^FU\d+$/.test(k));
+            if (!key) continue;
+            const rawLabel = item?.[key]?.label;
+            const label = Array.isArray(rawLabel)
+                ? (rawLabel[rawLabel.length - 1] || '')
+                : (rawLabel ? String(rawLabel) : '');
+            return { key, label };
+        }
+        return { key: '', label: '' };
+    })();
 
     // Chi dong bo tu props khi doi khach (_id). Tranh ban ghi customer trong bang bi stale ghi de len UI.
     useEffect(() => {
@@ -180,6 +219,8 @@ export default function Call({ customer, user }) {
     const lastEndInfoRef = useRef({ statusCode: null, by: null, durationSec: 0, callStatus: 'failed' });
     const processRecordingOnceRef = useRef(false);
     const hasRingingRef = useRef(false); // Track xem đã có ringing event (đổ chuông) chưa
+    const fuAppendOnceRef = useRef(false); // Tránh append FU trùng nếu event ended bắn nhiều lần
+    const lastSavedCallIdRef = useRef(null);
     
     // Audio recording refs
     const localStreamRef = useRef(null);      // Local audio stream
@@ -664,6 +705,43 @@ export default function Call({ customer, user }) {
             processRecordingOnceRef.current = false; // Reset flag để cho phép lưu cuộc gọi tiếp theo
         }, 2000);
     }, [customer]);
+
+    const handleSaveFUCallLabel = useCallback(async () => {
+        if (!customer?._id) return;
+        if (!selectedFUCallLabel) {
+            toast.error('Vui lòng chọn kết quả FU.');
+            return;
+        }
+        if (fuAppendOnceRef.current || isSavingFULabel) return;
+
+        setIsSavingFULabel(true);
+        try {
+            const fuRes = await appendCustomerFUAction(String(customer._id), selectedFUCallLabel);
+            if (!fuRes?.success) {
+                toast.error(fuRes?.error || 'Không thể lưu FU.');
+                return;
+            }
+
+            const callRes = lastSavedCallIdRef.current
+                ? await updateCallLabelFUByIdAction(String(lastSavedCallIdRef.current), selectedFUCallLabel)
+                : await updateLatestRecordedCallLabelFUAction(String(customer._id), selectedFUCallLabel);
+            if (!callRes?.success) {
+                toast.error(callRes?.error || 'Không thể lưu label_FU cho cuộc gọi.');
+                return;
+            }
+
+            fuAppendOnceRef.current = true;
+            setIsFUPopupOpen(false);
+            setSelectedFUCallLabel('');
+            startTransition(() => router.refresh());
+            toast.success(`Đã lưu ${fuRes?.key || 'FU'} và label_FU: ${selectedFUCallLabel}`);
+        } catch (error) {
+            console.error('[Call] ❌ Save FU label error:', error);
+            toast.error('Lỗi khi lưu FU.');
+        } finally {
+            setIsSavingFULabel(false);
+        }
+    }, [customer?._id, isSavingFULabel, router, selectedFUCallLabel]);
 
 
     // ===== HIGH QUALITY AUDIO FUNCTIONS =====
@@ -1211,12 +1289,18 @@ export default function Call({ customer, user }) {
             formData.append('startTime', new Date(Date.now() - (finalDuration * 1000)).toISOString());
             formData.append('callStatus', finalStatus);
             formData.append('sipStatusCode', String(finalCode));
+            formData.append('label_FU', selectedFUCallLabel || '');
             
             const result = await saveCallAction(null, formData);
             
             if (result.success) {
                 console.log('[Call] 🎤 Call saved successfully (auto-saved)');
+                lastSavedCallIdRef.current = result.callId || null;
                 toast.success('Cuộc gọi đã được lưu tự động');
+                if (customer?._id && !fuAppendOnceRef.current) {
+                    setSelectedFUCallLabel('');
+                    setIsFUPopupOpen(true);
+                }
                 
                 // Reload call history
                 const history = await call_data({ customerId: customer._id });
@@ -1276,6 +1360,7 @@ export default function Call({ customer, user }) {
             // Real call implementation
             callCountRef.current += 1;
             const callId = `call_${callCountRef.current}_${Date.now()}`;
+            fuAppendOnceRef.current = false;
             
             console.log('[Call] 📞 Starting real call...');
             
@@ -2075,6 +2160,14 @@ export default function Call({ customer, user }) {
                             <div className="flex flex-col gap-0.5 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                                     <div className="font-medium text-xs truncate">{customer?.name || customer?.zaloname || 'Không có tên'}</div>
+                                    {latestFUView.key ? (
+                                        <span
+                                            className="bg-orange-100 text-orange-800 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                                            title={latestFUView.label ? `${latestFUView.key} - ${latestFUView.label}` : latestFUView.key}
+                                        >
+                                            {latestFUView.label ? `${latestFUView.key}: ${latestFUView.label}` : latestFUView.key}
+                                        </span>
+                                    ) : null}
                                     {callLabelView.name ? (
                                         <div className="inline-flex items-center gap-0.5 shrink-0">
                                             <span
@@ -2139,7 +2232,7 @@ export default function Call({ customer, user }) {
                     </div>
 
                     {/* Call Status Display - Chỉ hiển thị khi stateCall === true */}
-                    {stateCall && (
+                    {/* {stateCall && (
                         <div className="text-center space-y-1 p-1.5 bg-blue-50 rounded">
                             <div className="font-medium text-blue-600 text-xs">{statusText}</div>
                             <div className="text-xs font-mono tracking-wider">{durationText}</div>
@@ -2150,7 +2243,7 @@ export default function Call({ customer, user }) {
                                 </div>
                             )}
                         </div>
-                    )}
+                    )} */}
 
                     {/* Call Status Display */}
                     {isCalling && (
@@ -2196,14 +2289,21 @@ export default function Call({ customer, user }) {
                             {callHistory.map((call, index) => (
                                 <div key={call._id} className="bg-gray-50 border border-gray-200 rounded p-1">
                                     <div className="flex items-center justify-between mb-1">
-                                        <span className={`px-1 py-0.5 rounded-full text-xs font-medium ${
-                                            call.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                            call.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                            call.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
-                                            'bg-gray-100 text-gray-800'
-                                        }`}>
-                                            {getCallStatusText(call.status)}
-                                        </span>
+                                        <div className="flex items-center gap-1">
+                                            <span className={`px-1 py-0.5 rounded-full text-xs font-medium ${
+                                                call.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                                call.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                                call.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
+                                                'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {getCallStatusText(call.status)}
+                                            </span>
+                                            {call.label_FU ? (
+                                                <span className="px-1 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                    {call.label_FU}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                         <span className="text-xs text-gray-500">
                                             {new Date(call.createdAt).toLocaleString('vi-VN')}
                                         </span>
@@ -2229,6 +2329,31 @@ export default function Call({ customer, user }) {
             {/* Hidden audio element for OMI Call SDK */}
             <audio ref={remoteAudioRef} playsInline style={{ display: 'none' }} />
         </div>
+
+        <Dialog open={isFUPopupOpen} onOpenChange={() => {}}>
+            <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                <DialogHeader>
+                    <DialogTitle>Chọn kết quả FU sau cuộc gọi</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <RadioGroup value={selectedFUCallLabel} onValueChange={setSelectedFUCallLabel}>
+                        {FU_LABEL_OPTIONS.map((option, idx) => (
+                            <div key={option} className="flex items-start gap-2">
+                                <RadioGroupItem value={option} id={`fu-option-${idx}`} className="mt-0.5" />
+                                <Label htmlFor={`fu-option-${idx}`} className="text-sm leading-5 cursor-pointer">
+                                    {option}
+                                </Label>
+                            </div>
+                        ))}
+                    </RadioGroup>
+                    <div className="flex justify-end">
+                        <Button type="button" size="sm" onClick={handleSaveFUCallLabel} disabled={isSavingFULabel}>
+                            {isSavingFULabel ? 'Đang lưu...' : 'Lưu kết quả FU'}
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
         </>
     );
 }

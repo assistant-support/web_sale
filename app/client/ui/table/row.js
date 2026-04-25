@@ -30,12 +30,63 @@ import { history_data } from '@/data/actions/get';
 import OMICallClient from './Call';
 import ZaloButton from './Zalo';
 import ZaloPancake from './ZaloPancake';
+import { getLabelCallsForSelect } from '@/app/actions/callLabel.actions';
 
 // =============================================================
 // == CÁC COMPONENT PHỤ CÒN LẠI
 // =============================================================
 function CustomerDetailHeader({ customer, zalo }) {
     const zaloAccount = customer.uid?.[0]?.zalo ? zalo.find(z => z._id === customer.uid[0].zalo) : null;
+    const [callLabelMeta, setCallLabelMeta] = useState(null);
+    const statusForCallTextMap = {
+        success: 'Gọi và đặt lịch thành công',
+        false: 'Gọi và đặt lịch thất bại',
+        await: 'Chờ hoàn tất chu kỳ gọi',
+    };
+    const statusForCall = ['success', 'false', 'await'].includes(customer?.statusForCall)
+        ? customer.statusForCall
+        : 'await';
+    const statusForCallText = statusForCallTextMap[statusForCall];
+    const latestFUView = (() => {
+        const fuList = Array.isArray(customer?.FU) ? customer.FU : [];
+        for (let i = fuList.length - 1; i >= 0; i -= 1) {
+            const item = fuList[i];
+            if (!item || typeof item !== 'object') continue;
+            const key = Object.keys(item).find((k) => /^FU\d+$/.test(k));
+            if (!key) continue;
+            return { key };
+        }
+        return { key: '' };
+    })();
+    useEffect(() => {
+        let cancelled = false;
+        const needFallbackType = !customer?.Call_Label?.type && (customer?.Call_Label?.id_call_label || customer?.Call_Label?.name);
+        if (!needFallbackType) {
+            setCallLabelMeta(null);
+            return () => { };
+        }
+
+        (async () => {
+            try {
+                const rows = await getLabelCallsForSelect();
+                if (cancelled || !Array.isArray(rows)) return;
+                const currentId = customer?.Call_Label?.id_call_label ? String(customer.Call_Label.id_call_label) : '';
+                const currentName = customer?.Call_Label?.name ? String(customer.Call_Label.name).trim() : '';
+                const found = rows.find((x) => (currentId && x._id === currentId) || (currentName && x.name === currentName));
+                if (!cancelled) setCallLabelMeta(found || null);
+            } catch (_error) {
+                if (!cancelled) setCallLabelMeta(null);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [customer?.Call_Label?.id_call_label, customer?.Call_Label?.name, customer?.Call_Label?.type]);
+
+    const callLabelType = String(customer?.Call_Label?.type || callLabelMeta?.type || '').trim();
+    const callLabelName = String(customer?.Call_Label?.name || '').trim();
+
     return (
         <DialogHeader className="p-2 border-b">
             <div className="flex items-center gap-3">
@@ -44,7 +95,29 @@ function CustomerDetailHeader({ customer, zalo }) {
                     <AvatarFallback>{customer.name.charAt(0)}</AvatarFallback>
                 </Avatar>
                 <div>
-                    <DialogTitle asChild><h4>{customer.zaloname || customer.name}</h4></DialogTitle>
+                    <DialogTitle asChild>
+                        <h4 className="flex items-center gap-2">
+                            <span>{customer.zaloname || customer.name}</span>
+                            {latestFUView.key ? (
+                                <>
+                                    <span className="bg-orange-100 text-orange-800 text-[15px] font-semibold px-1.5 py-0.5 rounded-full">
+                                        {latestFUView.key}
+                                    </span>
+                                    {callLabelType ? (
+                                        <span className="bg-blue-100 text-blue-800 text-[15px] font-semibold px-1.5 py-0.5 rounded-full">
+                                            {callLabelType}
+                                        </span>
+                                    ) : null}
+                                    {callLabelName ? (
+                                        <span className="bg-indigo-100 text-indigo-800 text-[15px] font-semibold px-1.5 py-0.5 rounded-full">
+                                            {callLabelName}
+                                        </span>
+                                    ) : null}
+                                </>
+                            ) : null}
+                        </h4>
+                    </DialogTitle>
+                    <h6 className="text-xs text-muted-foreground">{statusForCallText}</h6>
                     <DialogDescription asChild><h6>{customer.phonex}</h6></DialogDescription>
                     {zaloAccount && <h6 className='text-muted-foreground'>CSKH: {zaloAccount.name}</h6>}
                 </div>

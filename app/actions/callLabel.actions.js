@@ -42,7 +42,12 @@ export async function getLabelCallsForSelect() {
 
         await connectDB();
         const rows = await LabelCall.find().sort({ name: 1 }).lean();
-        const data = rows.map((r) => ({ _id: String(r._id), name: r.name }));
+        const data = rows.map((r) => ({
+            _id: String(r._id),
+            name: r.name,
+            type: r.type || '',
+            note: r.note || '',
+        }));
         labelCallCache = data;
         labelCallCacheAt = now;
         return data;
@@ -102,6 +107,8 @@ export async function setCustomerCallLabel(customerId, labelCallId) {
                 $set: {
                     Call_Label: {
                         name: label.name,
+                        type: label.type || '',
+                        note: label.note || '',
                         id_call_label: label._id,
                     },
                 },
@@ -112,7 +119,7 @@ export async function setCustomerCallLabel(customerId, labelCallId) {
                 success: true,
                 noChange: true,
                 message: 'The cuoc goi khong thay doi.',
-                data: { id_call_label: String(label._id), name: label.name },
+                data: { id_call_label: String(label._id), name: label.name, type: label.type || '', note: label.note || '' },
             };
         }
 
@@ -121,7 +128,7 @@ export async function setCustomerCallLabel(customerId, labelCallId) {
             success: true,
             assigned: true,
             message: 'Da gan the cuoc goi.',
-            data: { id_call_label: String(label._id), name: label.name },
+            data: { id_call_label: String(label._id), name: label.name, type: label.type || '', note: label.note || '' },
         };
     } catch (e) {
         console.error('[setCustomerCallLabel]', e);

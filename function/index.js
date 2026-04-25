@@ -154,6 +154,17 @@ export function getCurrentStageFromPipeline(customer) {
             // break;
         }
     }
+    // Fallback nghiệp vụ cho bước 4:
+    // Nếu đã phát sinh cuộc gọi/FU (tức đã bắt đầu tư vấn) nhưng pipelineStatus chưa cập nhật kịp,
+    // vẫn coi như đã sang bước 4 để UI không bị kẹt ở bước 3.
+    const hasFU = Array.isArray(customer?.FU) && customer.FU.some((x) => x && typeof x === 'object');
+    const hasStep4Care = Array.isArray(customer?.care) && customer.care.some((n) => Number(n?.step) === 4);
+    const hasAnyCallHistoryHint = hasFU || hasStep4Care;
+
+    if (hasAnyCallHistoryHint && highestStep < 4) {
+        highestStep = 4;
+    }
+
     const currentStageId = highestStep === 0 ? 1 : highestStep; // 1..6
     const currentStageIndex = currentStageId - 1;               // 0..5 (dùng cho Accordion)
     return { currentStageId, currentStageIndex };

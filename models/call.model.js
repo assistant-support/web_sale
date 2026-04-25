@@ -51,6 +51,10 @@ const CallSchema = new Schema(
             type: String,
             default: ''
         },
+        label_FU: {
+            type: String,
+            default: ''
+        },
         meta: {
             type: Schema.Types.Mixed,
             default: {}

@@ -252,7 +252,22 @@ const FormSchema = new Schema(
         /** Thẻ cuộc gọi (tối đa một thẻ / khách), đồng bộ với collection `labelCall`. */
         Call_Label: {
             name: { type: String, trim: true },
+            type: { type: String, trim: true },
+            note: { type: String, trim: true },
             id_call_label: { type: Schema.Types.ObjectId, ref: 'labelCall' },
+        },
+
+        /** Follow-up sau mỗi cuộc gọi: [{ FU1: { label: "" } }, { FU2: { label: "" } }, ...] */
+        FU: {
+            type: [Schema.Types.Mixed],
+            default: [],
+        },
+
+        /** Trạng thái theo dõi gọi điện: await | false | success */
+        statusForCall: {
+            type: String,
+            enum: ['await', 'false', 'success'],
+            default: 'await',
         },
         
         // Thống kê cho phân loại khách mới/cũ và doanh thu

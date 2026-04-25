@@ -116,6 +116,7 @@ export async function createAppointmentAction(prevState, formData) {
             $set: {
                 'pipelineStatus.0': newPipelineStatus,
                 'pipelineStatus.5': newPipelineStatus,
+                statusForCall: 'success',
             }
         });
 
