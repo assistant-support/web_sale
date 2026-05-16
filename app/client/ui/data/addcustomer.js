@@ -86,9 +86,21 @@ export default function Customer_add({ service }) {
     const errorMessages = Object.values(errors).map(error => error.message);
 
     const onSubmit = async (values) => {
-        // THAY ĐỔI 2: Dữ liệu 'values' lúc này đã chứa ID của service,
-        // nên chúng ta có thể gửi thẳng đi mà không cần chỉnh sửa.
-        await actionUI.run(() => addRegistrationToAction(null, values), {
+        await actionUI.run(async () => {
+            if (values.customerCode && values.customerCode !== suggestedCustomerCode) {
+                try {
+                    const res = await fetch(`/api/customers/check-code?code=${encodeURIComponent(values.customerCode)}`);
+                    const json = await res.json();
+                    if (json.success && !json.isAvailable) {
+                        form.setError('customerCode', { type: 'manual', message: 'Mã khách hàng này đã tồn tại!' });
+                        return { ok: false, message: 'Mã khách hàng này đã tồn tại!' };
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            return await addRegistrationToAction(null, values);
+        }, {
             loadingText: 'Đang lưu...',
             silentOnSuccess: false,
             refreshOnSuccess: true,
@@ -131,11 +143,18 @@ export default function Customer_add({ service }) {
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="grid gap-2">
-                                    <FormLabel><h5>Mã khách hàng</h5></FormLabel>
-                                    <Input value={suggestedCustomerCode || 'KH-03900'} disabled readOnly />
-                                    {isSuggestingCode && <h6 style={{ color: 'white', opacity: 0.8 }}>Đang gợi ý...</h6>}
-                                </div>
+                                <FormField control={form.control} name="customerCode" render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel><h5>Mã khách hàng</h5></FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Input placeholder="Mã khách hàng..." {...field} disabled={isSuggestingCode} className={form.formState.errors.customerCode ? "border-red-500 focus-visible:ring-red-500" : ""} />
+                                                {isSuggestingCode && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
+                                            </div>
+                                        </FormControl>
+                                        {form.formState.errors.customerCode && <p className="text-[0.8rem] font-medium text-red-500">{form.formState.errors.customerCode.message}</p>}
+                                    </FormItem>
+                                )} />
                                 <FormField control={form.control} name="fullName" render={({ field }) => (
                                     <FormItem><FormLabel><h5>Họ và Tên *</h5></FormLabel><FormControl><Input placeholder="Nguyễn Văn A" {...field} /></FormControl></FormItem>
                                 )} />
