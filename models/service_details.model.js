@@ -44,8 +44,10 @@ const SelectedCourseSchema = new Schema({
     medicationName: { type: String, trim: true, default: '' },
     medicationDosage: { type: String, trim: true, default: '' },
     medicationUnit: { type: String, trim: true, default: '' },
-    consultantName: { type: String, trim: true, default: '' },
-    doctorName: { type: String, trim: true, default: '' },
+    consultantName: { type: String, trim: true, default: '' }, // Tư vấn viên
+    technician: { type: String, trim: true, default: '' }, // Kỹ thuật viên
+    doctorName: { type: String, trim: true, default: '' }, // Bác sĩ Tư vấn
+    treatmentDoctorsName: { type: String, trim: true, default: '' }, // Bác sĩ Liệu trình
 }, { _id: false });
 
 const ServiceDetailSchema = new Schema(

@@ -31,13 +31,19 @@ export default async function TeacherPage() {
     const roles = Array.isArray(currentUser?.role) ? currentUser.role : [];
 
     const isManagerViewer = roles.includes("Manager");
+    const isAdminViewer = roles.includes("Admin");
     const isAdminSaleViewer = roles.includes("Admin Sale");
 
     // Bắt đầu từ toàn bộ users
     let visibleUsers = Array.isArray(allUsers) ? [...allUsers] : [];
 
+    // Admin + Manager: thấy toàn bộ danh sách nhân sự, không ẩn thông tin group.
+    if (isManagerViewer || isAdminViewer) {
+        return <Main initialTeachers={visibleUsers} />;
+    }
+
     // 1) Manager & Admin Sale: không thấy user có role chứa "Admin"
-    if (isManagerViewer || isAdminSaleViewer) {
+    if (isAdminSaleViewer) {
         visibleUsers = visibleUsers.filter((u) => !u.role?.includes("Admin"));
     }
 

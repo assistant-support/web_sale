@@ -27,7 +27,7 @@ const postUser = new Schema({
   },
   group: {
     type: String,
-    enum: ['noi_khoa', 'ngoai_khoa'],
+    enum: ['noi_khoa', 'ngoai_khoa', 'noi_khoa_va_ngoai_khoa'],
     required: true
   }
 }, { timestamps: true })

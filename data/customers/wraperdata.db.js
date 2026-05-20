@@ -734,7 +734,9 @@ export async function closeServiceAction(prevState, formData) {
             const medicationDosage = String(formData.get('medicationDosage') || '').trim();
             const medicationUnit = String(formData.get('medicationUnit') || '').trim();
             const consultantName = String(formData.get('consultantName') || '').trim();
+            const technician = String(formData.get('technician') || '').trim();
             const doctorName = String(formData.get('doctorName') || '').trim();
+            const treatmentDoctorsName = String(formData.get('treatmentDoctorsName') || '').trim();
             
             courseSnapshot = {
                 name: course.name,
@@ -744,7 +746,9 @@ export async function closeServiceAction(prevState, formData) {
                 medicationDosage: medicationDosage,
                 medicationUnit: medicationUnit,
                 consultantName: consultantName,
+                technician: technician,
                 doctorName: doctorName,
+                treatmentDoctorsName: treatmentDoctorsName,
             };
         }
 
@@ -1060,7 +1064,9 @@ export async function updateServiceDetailAction(prevState, formData) {
     const medicationDosage = formData.get('medicationDosage') != null ? String(formData.get('medicationDosage')).trim() : undefined;
     const medicationUnit = formData.get('medicationUnit') != null ? String(formData.get('medicationUnit')).trim() : undefined;
     const consultantName = formData.get('consultantName') != null ? String(formData.get('consultantName')).trim() : undefined;
+    const technician = formData.get('technician') != null ? String(formData.get('technician')).trim() : undefined;
     const doctorName = formData.get('doctorName') != null ? String(formData.get('doctorName')).trim() : undefined;
+    const treatmentDoctorsName = formData.get('treatmentDoctorsName') != null ? String(formData.get('treatmentDoctorsName')).trim() : undefined;
 
     const listPrice = formData.get('listPrice') != null ? Number(formData.get('listPrice')) : undefined;
     const discountType =
@@ -1139,7 +1145,7 @@ export async function updateServiceDetailAction(prevState, formData) {
         if (typeof selectedService !== 'undefined') serviceDetail.serviceId = selectedService;
 
         // Cập nhật selectedCourse nếu có thông tin mới
-        if (typeof selectedCourseName !== 'undefined' || typeof medicationName !== 'undefined' || typeof medicationDosage !== 'undefined' || typeof medicationUnit !== 'undefined' || typeof consultantName !== 'undefined' || typeof doctorName !== 'undefined') {
+        if (typeof selectedCourseName !== 'undefined' || typeof medicationName !== 'undefined' || typeof medicationDosage !== 'undefined' || typeof medicationUnit !== 'undefined' || typeof consultantName !== 'undefined' || typeof technician !== 'undefined' || typeof doctorName !== 'undefined' || typeof treatmentDoctorsName !== 'undefined') {
             // Nếu có selectedCourseName, cần tìm course từ service để lấy thông tin đầy đủ
             if (selectedCourseName && selectedService) {
                 try {
@@ -1156,7 +1162,9 @@ export async function updateServiceDetailAction(prevState, formData) {
                                 medicationDosage: typeof medicationDosage !== 'undefined' ? medicationDosage : (serviceDetail.selectedCourse?.medicationDosage || ''),
                                 medicationUnit: typeof medicationUnit !== 'undefined' ? medicationUnit : (serviceDetail.selectedCourse?.medicationUnit || ''),
                                 consultantName: typeof consultantName !== 'undefined' ? consultantName : (serviceDetail.selectedCourse?.consultantName || ''),
+                                technician: typeof technician !== 'undefined' ? technician : (serviceDetail.selectedCourse?.technician || ''),
                                 doctorName: typeof doctorName !== 'undefined' ? doctorName : (serviceDetail.selectedCourse?.doctorName || ''),
+                                treatmentDoctorsName: typeof treatmentDoctorsName !== 'undefined' ? treatmentDoctorsName : (serviceDetail.selectedCourse?.treatmentDoctorsName || ''),
                             };
                         }
                     }
@@ -1177,8 +1185,14 @@ export async function updateServiceDetailAction(prevState, formData) {
                 if (typeof consultantName !== 'undefined') {
                     serviceDetail.selectedCourse.consultantName = consultantName;
                 }
+                if (typeof technician !== 'undefined') {
+                    serviceDetail.selectedCourse.technician = technician;
+                }
                 if (typeof doctorName !== 'undefined') {
                     serviceDetail.selectedCourse.doctorName = doctorName;
+                }
+                if (typeof treatmentDoctorsName !== 'undefined') {
+                    serviceDetail.selectedCourse.treatmentDoctorsName = treatmentDoctorsName;
                 }
             }
         }
@@ -1335,6 +1349,7 @@ export async function updateServiceDetailAction(prevState, formData) {
         const pricing = serviceDetail.pricing || {};
         const snapshotSet = {
             'serviceDetails.$.status': statusForSnapshot,
+            'serviceDetails.$.notes': serviceDetail.notes ?? '',
             'serviceDetails.$.pricing.listPrice': Number(pricing.listPrice ?? 0) || 0,
             'serviceDetails.$.pricing.discountType': pricing.discountType || 'none',
             'serviceDetails.$.pricing.discountValue': Number(pricing.discountValue ?? 0) || 0,
@@ -1350,6 +1365,23 @@ export async function updateServiceDetailAction(prevState, formData) {
             const oid = new mongoose.Types.ObjectId(newServiceId);
             snapshotSet['serviceDetails.$.serviceId'] = oid;
             snapshotSet['serviceDetails.$.selectedService'] = oid;
+        }
+        // Đồng bộ selectedCourse snapshot (bác sĩ tư vấn / liệu trình, thuốc, ...) để view/edit lần sau hiển thị đúng
+        if (serviceDetail.selectedCourse) {
+            const sc = serviceDetail.selectedCourse;
+            const scPlain = typeof sc.toObject === 'function' ? sc.toObject() : sc;
+            snapshotSet['serviceDetails.$.selectedCourse'] = {
+                name: scPlain.name || '',
+                description: scPlain.description || '',
+                costs: scPlain.costs || {},
+                medicationName: scPlain.medicationName || '',
+                medicationDosage: scPlain.medicationDosage || '',
+                medicationUnit: scPlain.medicationUnit || '',
+                consultantName: scPlain.consultantName || '',
+                technician: scPlain.technician || '',
+                doctorName: scPlain.doctorName || '',
+                treatmentDoctorsName: scPlain.treatmentDoctorsName || '',
+            };
         }
         await customersCollection.updateOne(
             {

@@ -50,7 +50,9 @@ const SelectedCourseSchema = new Schema({
     medicationDosage: { type: String, trim: true, default: '' }, // Liều lượng thuốc
     medicationUnit: { type: String, trim: true, default: '' }, // Đơn vị thuốc
     consultantName: { type: String, trim: true, default: '' }, // Tư vấn viên (tên người đăng nhập)
+    technician: { type: String, trim: true, default: '' }, // Kỹ thuật viên
     doctorName: { type: String, trim: true, default: '' }, // Bác sĩ Tư vấn
+    treatmentDoctorsName: { type: String, trim: true, default: '' }, // Bác sĩ Liệu trình
 }, { _id: false });
 
 

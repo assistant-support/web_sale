@@ -81,8 +81,9 @@ function TreatmentDoseAccordion({ item }) {
     };
 
     const headerTitle = doseInfo
-        ? `${item.courseName || 'Liệu trình'} - Tổng: ${doseInfo.totalDose ?? '—'} ${doseInfo.unit || ''
-        } / Đã dùng: ${doseInfo.usedDose ?? 0} ${doseInfo.unit || ''}`
+        ? `${item.courseName || 'Liệu trình'} - Tổng: ${doseInfo.totalDose ?? '—'} ${
+              doseInfo.unit || ''
+          } / Đã dùng: ${doseInfo.usedDose ?? 0} ${doseInfo.unit || ''}`
         : `${item.courseName || 'Liệu trình'}`;
 
     return (
@@ -117,8 +118,9 @@ function TreatmentDoseAccordion({ item }) {
                                         key={s._id || `${idx}`}
                                         className="text-xs text-muted-foreground"
                                     >
-                                        {`${item.courseName || 'Liệu trình'} - ${dose} ${unit || ''
-                                            } - ${start}`}
+                                        {`${item.courseName || 'Liệu trình'} - ${dose} ${
+                                            unit || ''
+                                        } - ${start}`}
                                     </div>
                                 );
                             })}
@@ -176,7 +178,7 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
 
             const handleWheel = (e) => {
                 const { scrollTop, scrollHeight, clientHeight } = element;
-
+                
                 // Nếu có thể scroll trong element
                 if (scrollHeight > clientHeight) {
                     const isAtTop = scrollTop <= 0;
@@ -187,7 +189,7 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
                         // Cho phép scroll page nếu đã đến đầu/cuối
                         return;
                     }
-
+                    
                     // Ngăn scroll page khi đang scroll trong element
                     e.stopPropagation();
                 }
@@ -214,13 +216,13 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
                     <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent
+            <PopoverContent 
                 className="w-[--radix-popover-trigger-width] p-0"
                 style={{ maxHeight: '150px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
             >
                 <Command className="flex flex-col h-full">
                     <CommandInput placeholder="Tìm kiếm..." className="flex-shrink-0" />
-                    <div
+                    <div 
                         ref={commandListRef}
                         style={{
                             maxHeight: '150px',
@@ -231,77 +233,77 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
                         }}
                         className="area-select-scroll"
                     >
-                        <CommandList
-                            className={cn("flex-1")}
-                            style={{
-                                overflow: 'visible',
-                                maxHeight: 'none',
-                                height: 'auto'
-                            }}
-                        >
-                            {isLoading ? (
-                                <div className="p-4 text-center">
-                                    <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                                    <p className="text-sm text-muted-foreground mt-2">Đang tải...</p>
-                                </div>
-                            ) : (
-                                <>
-                                    <CommandEmpty>Không tìm thấy.</CommandEmpty>
-                                    <CommandGroup>
-                                        {options.map((option) => (
-                                            <CommandItem
-                                                key={option.value}
-                                                onSelect={() => {
-                                                    onChange(option.value === value ? '' : option.value);
-                                                    setOpen(false);
-                                                }}
-                                                className="flex items-center justify-between group"
-                                            >
-                                                <div className="flex items-center flex-1">
-                                                    <Check className={cn("mr-2 h-4 w-4", value === option.value ? "opacity-100" : "opacity-0")} />
-                                                    {option.label}
-                                                </div>
-                                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    {onEdit && (
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-6 w-6 p-0 hover:bg-blue-50 hover:text-blue-600"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                onEdit(option.value, option.label, option.type_area);
-                                                            }}
-                                                        >
-                                                            <Pencil className="h-3 w-3" />
-                                                        </Button>
-                                                    )}
-                                                    {onDelete && (
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleDelete(option.value, option.label);
-                                                            }}
-                                                            disabled={deletingId === option.value}
-                                                        >
-                                                            {deletingId === option.value ? (
-                                                                <Loader2 className="h-3 w-3 animate-spin" />
-                                                            ) : (
-                                                                <Trash2 className="h-3 w-3" />
-                                                            )}
-                                                        </Button>
-                                                    )}
-                                                </div>
-                                            </CommandItem>
-                                        ))}
-                                    </CommandGroup>
-                                </>
-                            )}
-                        </CommandList>
+                    <CommandList 
+                        className={cn("flex-1")}
+                        style={{ 
+                            overflow: 'visible',
+                            maxHeight: 'none',
+                            height: 'auto'
+                        }}
+                    >
+                        {isLoading ? (
+                            <div className="p-4 text-center">
+                                <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                                <p className="text-sm text-muted-foreground mt-2">Đang tải...</p>
+                            </div>
+                        ) : (
+                            <>
+                                <CommandEmpty>Không tìm thấy.</CommandEmpty>
+                                <CommandGroup>
+                                    {options.map((option) => (
+                                        <CommandItem
+                                            key={option.value}
+                                            onSelect={() => {
+                                                onChange(option.value === value ? '' : option.value);
+                                                setOpen(false);
+                                            }}
+                                            className="flex items-center justify-between group"
+                                        >
+                                            <div className="flex items-center flex-1">
+                                                <Check className={cn("mr-2 h-4 w-4", value === option.value ? "opacity-100" : "opacity-0")} />
+                                                {option.label}
+                                            </div>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                {onEdit && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 hover:bg-blue-50 hover:text-blue-600"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onEdit(option.value, option.label, option.type_area);
+                                                        }}
+                                                    >
+                                                        <Pencil className="h-3 w-3" />
+                                                    </Button>
+                                                )}
+                                                {onDelete && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDelete(option.value, option.label);
+                                                        }}
+                                                        disabled={deletingId === option.value}
+                                                    >
+                                                        {deletingId === option.value ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <Trash2 className="h-3 w-3" />
+                                                        )}
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </CommandItem>
+                                    ))}
+                                </CommandGroup>
+                            </>
+                        )}
+                    </CommandList>
                     </div>
                 </Command>
             </PopoverContent>
@@ -370,6 +372,7 @@ const updateFormSchema = z.object({
     customerCode: z.string().optional(),
     service_start_date: z.string().optional(),
     service_last_date: z.string().optional(),
+    sourceDetails: z.string().optional(),
 });
 
 export default function CustomerInfo({ customer, onClose, service = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
@@ -395,16 +398,15 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     const [editAreaName, setEditAreaName] = useState('');
     const [editAreaType, setEditAreaType] = useState('');
     const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
-
+    
     // State cho popup xem chi tiết đơn chốt dịch vụ
     const [isViewDetailOpen, setIsViewDetailOpen] = useState(false);
     const [viewingDetail, setViewingDetail] = useState(null);
 
     // Chỉ khóa khi mã do hệ thống gán (NORMAL) và đã có mã — không khóa theo nguồn chi tiết
     const hasCustomerCode = !!(customer?.customerCode && String(customer.customerCode).trim() !== '');
-    // const customerCodeLocked = customer?.customerCodeType === 'NORMAL' && hasCustomerCode;
-    const customerCodeLocked = customer?.customerCodeType === '' && hasCustomerCode;
-
+    const customerCodeLocked = customer?.customerCodeType === 'NORMAL' && hasCustomerCode;
+    
     // ✅ State để lưu full serviceDetails đã fetch từ service_details collection
     const [fullServiceDetails, setFullServiceDetails] = useState([]);
     const [isLoadingServiceDetails, setIsLoadingServiceDetails] = useState(false);
@@ -598,9 +600,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         // 2) Fallback: sử dụng fullServiceDetails đã fetch từ service_details collection
         // Sử dụng fullServiceDetails (đã fetch đầy đủ từ service_details collection)
         const serviceDetailsToUse = fullServiceDetails.length > 0 ? fullServiceDetails : [];
-
+        
         console.log('[CustomerInfo] groupedServiceDetailsByService - fullServiceDetails:', serviceDetailsToUse.length);
-
+        
         // Nếu không có serviceDetails, trả về mảng rỗng
         if (serviceDetailsToUse.length === 0) {
             console.log('[CustomerInfo] Không có serviceDetails để hiển thị');
@@ -630,9 +632,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             }
 
             // Lấy tên dịch vụ
-            const serviceName = serviceMap.get(serviceIdStr)
-                || (detail.serviceId?.name)
-                || serviceOptions.find(opt => String(opt.value) === serviceIdStr)?.label
+            const serviceName = serviceMap.get(serviceIdStr) 
+                || (detail.serviceId?.name) 
+                || serviceOptions.find(opt => String(opt.value) === serviceIdStr)?.label 
                 || 'Không rõ dịch vụ';
 
             // Lấy courseName từ selectedCourse
@@ -648,7 +650,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             }
 
             const serviceGroup = groupedByServiceId.get(serviceIdStr);
-
+            
             // Group courses theo courseName
             if (!serviceGroup.courses.has(courseName)) {
                 serviceGroup.courses.set(courseName, []);
@@ -698,12 +700,12 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             // Dịch vụ quan tâm (tags) của khách hàng
             const tagIds = Array.isArray(customer.tags)
                 ? customer.tags
-                    .map((tag) => {
-                        if (typeof tag === 'string') return tag;
-                        if (tag?._id) return String(tag._id);
-                        return String(tag);
-                    })
-                    .filter(Boolean)
+                      .map((tag) => {
+                          if (typeof tag === 'string') return tag;
+                          if (tag?._id) return String(tag._id);
+                          return String(tag);
+                      })
+                      .filter(Boolean)
                 : [];
 
             const serviceMapById = new Map();
@@ -813,7 +815,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         const servicesList = allServices.filter(
             (s) => s?._id && tagIdsForFallback.includes(String(s._id))
         );
-
+        
         // Tạo map để dễ tìm service theo tên hoặc ID
         const serviceMapByName = {};
         const serviceMapById = {};
@@ -824,7 +826,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
 
         // Nhóm serviceDetails theo dịch vụ
         const treatmentMap = {};
-
+        
         // Xử lý serviceDetails đã có
         if (customer.serviceDetails && Array.isArray(customer.serviceDetails) && customer.serviceDetails.length > 0) {
             customer.serviceDetails.forEach((sd) => {
@@ -904,11 +906,11 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
 
         // Xử lý tất cả dịch vụ từ services để tìm liệu trình chưa làm
         const result = [];
-
+        
         servicesList.forEach(service => {
             const serviceName = service.name || 'Không rõ dịch vụ';
             const serviceId = String(service._id || '');
-
+            
             const treatment = treatmentMap[serviceName] || {
                 serviceName,
                 serviceId,
@@ -977,7 +979,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             console.log('✅ [loadAreaCustomersData] Đã có dữ liệu, không load lại');
             return; // Đã load rồi thì không load lại
         }
-
+        
         try {
             console.log('🔄 [loadAreaCustomersData] Bắt đầu load dữ liệu...');
             setIsLoadingAreaCustomers(true);
@@ -989,11 +991,11 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                 length: areaCustomers?.length,
                 sample: areaCustomers?.[0]
             });
-
+            
             if (areaCustomers) {
                 // Xử lý cả trường hợp là array hoặc không phải array
                 const dataArray = Array.isArray(areaCustomers) ? areaCustomers : [areaCustomers];
-
+                
                 if (dataArray.length > 0) {
                     const options = dataArray
                         .filter(area => area && area.name && area._id) // Lọc các item có name và _id
@@ -1003,15 +1005,15 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                             _id: area._id,
                             type_area: area.type_area || null // Lưu type_area vào option
                         }));
-
+                    
                     console.log('✅ [loadAreaCustomersData] Options đã tạo:', options);
                     setAreaCustomerOptions(options);
-
+                    
                     // Nếu đã có giá trị được chọn, tìm type_area tương ứng
                     const currentValue = form.getValues('Id_area_customer') || customer.Id_area_customer;
                     if (currentValue) {
-                        const selectedOption = options.find(opt =>
-                            opt.value === currentValue ||
+                        const selectedOption = options.find(opt => 
+                            opt.value === currentValue || 
                             opt._id === currentValue ||
                             String(opt._id) === String(currentValue)
                         );
@@ -1056,7 +1058,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         setIsAddingArea(true);
         try {
             console.log('🔄 [handleAddArea] Bắt đầu thêm khu vực:', newAreaName.trim());
-
+            
             // Cookies sẽ được gửi tự động với fetch request
             const response = await fetch('/api/area_customer', {
                 method: 'POST',
@@ -1093,7 +1095,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                 const errorMessage = result?.mes || result?.message || 'Thêm khu vực thất bại';
                 console.log('❌ [handleAddArea] Đang hiển thị thông báo lỗi:', errorMessage);
                 console.log('❌ [handleAddArea] response.ok:', response.ok, 'result.status:', result?.status);
-
+                
                 // Hiển thị Noti
                 setNotification({ open: true, status: false, mes: errorMessage });
                 console.log('✅ [handleAddArea] Đã gọi setNotification');
@@ -1103,16 +1105,16 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             // Thành công
             console.log('✅ [handleAddArea] Thêm khu vực thành công:', result);
             setNotification({ open: true, status: true, mes: result.mes || 'Thêm khu vực thành công' });
-
+            
             // Reset form
             setNewAreaName('');
             setNewAreaType('');
             setIsAddAreaDialogOpen(false);
-
+            
             // Reload danh sách khu vực
             setAreaCustomerOptions([]); // Reset để force reload
             await loadAreaCustomersData();
-
+            
             // Tự động chọn khu vực vừa tạo
             if (result.data && result.data._id) {
                 form.setValue('Id_area_customer', result.data._id);
@@ -1141,7 +1143,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
 
         try {
             console.log('🔄 [handleDeleteArea] Bắt đầu xóa khu vực:', areaId);
-
+            
             const response = await fetch(`/api/area_customer/${areaId}`, {
                 method: 'DELETE',
                 headers: {
@@ -1173,14 +1175,14 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             // Thành công
             console.log('✅ [handleDeleteArea] Xóa khu vực thành công:', result);
             setNotification({ open: true, status: true, mes: result.mes || 'Xóa khu vực thành công' });
-
+            
             // Nếu khu vực đang được chọn, xóa selection
             const currentValue = form.getValues('Id_area_customer');
             if (currentValue === areaId) {
                 form.setValue('Id_area_customer', '');
                 setSelectedAreaType(null);
             }
-
+            
             // Reload danh sách khu vực
             setAreaCustomerOptions([]);
             await loadAreaCustomersData();
@@ -1211,7 +1213,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         setIsEditingArea(true);
         try {
             console.log('🔄 [handleUpdateArea] Bắt đầu cập nhật khu vực:', editingAreaId);
-
+            
             const response = await fetch(`/api/area_customer/${editingAreaId}`, {
                 method: 'PUT',
                 headers: {
@@ -1247,20 +1249,20 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             // Thành công
             console.log('✅ [handleUpdateArea] Cập nhật khu vực thành công:', result);
             setNotification({ open: true, status: true, mes: result.mes || 'Cập nhật khu vực thành công' });
-
+            
             // Lưu editingAreaId trước khi reset
             const updatedAreaId = editingAreaId;
-
+            
             // Reset form
             setEditAreaName('');
             setEditAreaType('');
             setEditingAreaId(null);
             setIsEditAreaDialogOpen(false);
-
+            
             // Reload danh sách khu vực
             setAreaCustomerOptions([]);
             await loadAreaCustomersData();
-
+            
             // Nếu khu vực đang được chọn, cập nhật lại type_area
             const currentValue = form.getValues('Id_area_customer');
             if (currentValue === updatedAreaId && result.data) {
@@ -1290,8 +1292,20 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             customerCode: customer.customerCode || '',
             service_start_date: customer.service_start_date ? new Date(customer.service_start_date).toISOString().split('T')[0] : '',
             service_last_date: customer.service_last_date ? new Date(customer.service_last_date).toISOString().split('T')[0] : '',
+            sourceDetails: customer.sourceDetails || '',
         },
     });
+
+    // Khách có source = "Trực tiếp" (ID cố định) thì hiện icon bút để cho phép sửa "Nguồn chi tiết".
+    const DIRECT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
+    const customerSourceId = (() => {
+        const src = customer?.source;
+        if (!src) return '';
+        if (typeof src === 'object') return String(src._id || src.$oid || '');
+        return String(src);
+    })();
+    const canEditSourceDetails = customerSourceId === DIRECT_SOURCE_ID;
+    const [isEditingSourceDetails, setIsEditingSourceDetails] = useState(false);
 
     // Load dữ liệu area_customer khi component mount nếu đã có Id_area_customer
     useEffect(() => {
@@ -1306,8 +1320,8 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     useEffect(() => {
         if (customer.Id_area_customer && areaCustomerOptions.length > 0) {
             // Tìm option có _id trùng với customer.Id_area_customer
-            const selectedOption = areaCustomerOptions.find(opt =>
-                opt.value === customer.Id_area_customer ||
+            const selectedOption = areaCustomerOptions.find(opt => 
+                opt.value === customer.Id_area_customer || 
                 opt._id === customer.Id_area_customer ||
                 String(opt._id) === String(customer.Id_area_customer) ||
                 String(opt.value) === String(customer.Id_area_customer)
@@ -1382,28 +1396,28 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         try {
             setIsSubmitting(true);
             const result = await updateCustomerInfo(null, formData);
-
+            
             if (result.success) {
                 setCoverImage(null); // Reset sau khi lưu thành công
                 setIsEditingCustomerCode(false);
-                setNotification({
-                    open: true,
-                    status: true,
-                    mes: result.message || 'Cập nhật thành công!'
+                setNotification({ 
+                    open: true, 
+                    status: true, 
+                    mes: result.message || 'Cập nhật thành công!' 
                 });
             } else {
-                setNotification({
-                    open: true,
-                    status: false,
-                    mes: result.error || 'Cập nhật thất bại!'
+                setNotification({ 
+                    open: true, 
+                    status: false, 
+                    mes: result.error || 'Cập nhật thất bại!' 
                 });
             }
         } catch (error) {
             console.error('Lỗi khi cập nhật thông tin:', error);
-            setNotification({
-                open: true,
-                status: false,
-                mes: 'Có lỗi xảy ra khi cập nhật thông tin'
+            setNotification({ 
+                open: true, 
+                status: false, 
+                mes: 'Có lỗi xảy ra khi cập nhật thông tin' 
             });
         } finally {
             setIsSubmitting(false);
@@ -1418,9 +1432,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="name" render={({ field }) => (<FormItem><Label><h6>Tên khách hàng *</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                     <FormField control={form.control} name="email" render={({ field }) => (<FormItem><Label><h6>Email</h6></Label><FormControl><Input type="email" {...field} /></FormControl></FormItem>)} />
-                    <FormField
-                        control={form.control}
-                        name="customerCode"
+                    <FormField 
+                        control={form.control} 
+                        name="customerCode" 
                         render={({ field }) => (
                             <FormItem>
                                 <div className="flex items-center justify-between mb-2">
@@ -1465,11 +1479,46 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                             </FormItem>
                         )}
                     />
-                    <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
+                    {canEditSourceDetails ? (
+                        <FormField
+                            control={form.control}
+                            name="sourceDetails"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <Label><h6>Nguồn chi tiết</h6></Label>
+                                        {!isEditingSourceDetails && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 w-8 p-0"
+                                                onClick={() => setIsEditingSourceDetails(true)}
+                                                aria-label="Chỉnh sửa nguồn chi tiết"
+                                            >
+                                                <Pencil className="h-3 w-3" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                    <FormControl>
+                                        <Input
+                                            {...field}
+                                            value={field.value ?? ''}
+                                            placeholder="Nhập nguồn chi tiết"
+                                            disabled={!isEditingSourceDetails}
+                                            readOnly={!isEditingSourceDetails}
+                                        />
+                                    </FormControl>
+                                </FormItem>
+                            )}
+                        />
+                    ) : (
+                        <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
+                    )}
                     <FormField control={form.control} name="area" render={({ field }) => (<FormItem><Label><h6>Địa chỉ</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
-                    <FormField
-                        control={form.control}
-                        name="Id_area_customer"
+                    <FormField 
+                        control={form.control} 
+                        name="Id_area_customer" 
                         render={({ field }) => (
                             <FormItem>
                                 <div className="flex items-center justify-between mb-2">
@@ -1514,7 +1563,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                     />
                                 </FormControl>
                             </FormItem>
-                        )}
+                        )} 
                     />
                     {/* Dialog thêm khu vực - đặt ngoài FormField để tránh xung đột */}
                     <Dialog open={isAddAreaDialogOpen} onOpenChange={setIsAddAreaDialogOpen}>
@@ -1671,16 +1720,16 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                     </Dialog>
                     <FormField control={form.control} name="bd" render={({ field }) => (<FormItem><Label><h6>Ngày Tháng Năm sinh</h6></Label><FormControl><Input type="date" {...field} /></FormControl></FormItem>)} />
                 </div>
-
+                
                 {/* Upload ảnh khách hàng */}
                 <div className="grid gap-2">
                     <Label><h6>Ảnh khách hàng</h6></Label>
                     <div className="flex flex-col gap-3">
                         {coverImagePreview ? (
                             <div className="relative w-full max-w-xs">
-                                <img
-                                    src={coverImagePreview}
-                                    alt="Ảnh khách hàng"
+                                <img 
+                                    src={coverImagePreview} 
+                                    alt="Ảnh khách hàng" 
                                     className="w-full h-48 object-cover rounded-lg border"
                                 />
                                 <Button
@@ -1752,10 +1801,10 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                     if (!date) return '';
                                     const d = new Date(date);
                                     if (isNaN(d.getTime())) return '';
-                                    return d.toLocaleDateString('vi-VN', {
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric'
+                                    return d.toLocaleDateString('vi-VN', { 
+                                        day: '2-digit', 
+                                        month: '2-digit', 
+                                        year: 'numeric' 
                                     });
                                 };
 
@@ -1811,7 +1860,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                                 )} */}
 
                                                 {/* Liệu trình chưa làm - chỉ hiển thị tên liệu trình */}
-                                                {treatment.notDone && treatment.notDone.length > 0 && (
+                                                    {treatment.notDone && treatment.notDone.length > 0 && (
                                                     <div>
                                                         <h6 className="font-semibold mb-2 text-sm">Liệu trình chưa làm:</h6>
                                                         <div className="space-y-2">
@@ -1883,7 +1932,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                             <div key={courseIndex} className="space-y-4 pl-4 border-l-2 border-gray-300">
                                                 {/* Tên liệu trình */}
                                                 <div className="grid gap-1">
-                                                    <Input
+                                                    <Input 
                                                         value={course.courseName || 'Chưa có liệu trình'}
                                                         disabled
                                                         className="rounded-md border-black bg-muted"
@@ -1891,13 +1940,13 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                                         style={{ color: '#3A2885', fontWeight: 'bold', fontSize: '14px' }}
                                                     />
                                                 </div>
-
+                                                
                                                 {/* 2 trường ngày */}
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                     <div className="grid gap-2">
                                                         <Label><h6>Ngày bắt đầu sử dụng dịch vụ</h6></Label>
-                                                        <Input
-                                                            type="date"
+                                                        <Input 
+                                                            type="date" 
                                                             value={formatDate(course.startDate)}
                                                             disabled
                                                             className="rounded-md border-black bg-muted"
@@ -1906,8 +1955,8 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                                     </div>
                                                     <div className="grid gap-2">
                                                         <Label><h6>Ngày sử dụng dịch vụ lần cuối</h6></Label>
-                                                        <Input
-                                                            type="date"
+                                                        <Input 
+                                                            type="date" 
                                                             value={formatDate(course.lastDate)}
                                                             disabled
                                                             className="rounded-md border-black bg-muted"
@@ -1924,7 +1973,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                             // Nếu không có liệu trình, hiển thị form có thể chỉnh sửa
                             <>
                                 <div className="grid gap-2">
-                                    <Input
+                                    <Input 
                                         value="Chưa có liệu trình"
                                         disabled
                                         className="rounded-md border-black bg-muted"
@@ -1939,9 +1988,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                             <FormItem>
                                                 <Label><h6>Ngày bắt đầu sử dụng dịch vụ</h6></Label>
                                                 <FormControl>
-                                                    <Input
-                                                        type="date"
-                                                        {...field}
+                                                    <Input 
+                                                        type="date" 
+                                                        {...field} 
                                                         className="rounded-md border-black"
                                                     />
                                                 </FormControl>
@@ -1955,9 +2004,9 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                                             <FormItem>
                                                 <Label><h6>Ngày sử dụng dịch vụ lần cuối</h6></Label>
                                                 <FormControl>
-                                                    <Input
-                                                        type="date"
-                                                        {...field}
+                                                    <Input 
+                                                        type="date" 
+                                                        {...field} 
                                                         className="rounded-md border-black"
                                                     />
                                                 </FormControl>
@@ -1977,16 +2026,16 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                     </Button>
                 </DialogFooter>
             </form>
-            <Noti
-                open={notification.open}
-                onClose={() => setNotification({ ...notification, open: false })}
-                status={notification.status}
+            <Noti 
+                open={notification.open} 
+                onClose={() => setNotification({ ...notification, open: false })} 
+                status={notification.status} 
                 mes={notification.mes}
                 button={
                     <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                        <Button
+                        <Button 
                             onClick={() => setNotification({ ...notification, open: false })}
-                            style={{
+                            style={{ 
                                 padding: '8px 24px',
                                 borderRadius: 4,
                                 border: 'none',
@@ -2000,7 +2049,7 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                     </div>
                 }
             />
-
+            
             {/* Popup xem chi tiết đơn chốt dịch vụ */}
             {isViewDetailOpen && viewingDetail && (
                 <ViewServiceDetailPopup
@@ -2036,7 +2085,9 @@ const closeServiceSchema = z.object({
     medicationUnit: z.string().optional(),
     medicationDosage: z.string().optional(),
     consultantName: z.string().optional(),
+    technician: z.string().optional(),
     doctorName: z.string().optional(),
+    treatmentDoctorsName: z.string().optional(),
 });
 
 // Component để hiển thị chi tiết đơn chốt dịch vụ (read-only)
@@ -2048,7 +2099,7 @@ function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedici
     const [existingCustomerPhotoIds, setExistingCustomerPhotoIds] = useState([]);
     const [unifiedInvoiceImages, setUnifiedInvoiceImages] = useState([]);
     const [unifiedCustomerPhotos, setUnifiedCustomerPhotos] = useState([]);
-
+    
     const detailForm = useForm({
         resolver: zodResolver(closeServiceSchema),
         defaultValues: {
@@ -2064,7 +2115,9 @@ function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedici
             medicationUnit: '',
             medicationDosage: '',
             consultantName: '',
+            technician: '',
             doctorName: '',
+            treatmentDoctorsName: '',
         },
     });
 
@@ -2125,7 +2178,7 @@ function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedici
             // Map status DB (processing|completed|cancelled) sang form (in_progress|completed|rejected)
             const formStatus = detailData.status === 'processing' ? 'in_progress'
                 : detailData.status === 'cancelled' ? 'rejected'
-                    : (detailData.status || 'completed');
+                : (detailData.status || 'completed');
 
             const detailId = detailData._id ?? detailData.serviceDetailId;
             const idForForm = detailId != null ? (typeof detailId === 'object' ? String(detailId._id ?? detailId) : String(detailId)) : undefined;
@@ -2139,7 +2192,9 @@ function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedici
                     medicationDosage: detailData.selectedCourse?.medicationDosage || '',
                     medicationUnit: detailData.selectedCourse?.medicationUnit || '',
                     consultantName: detailData.selectedCourse?.consultantName || '',
+                    technician: detailData.selectedCourse?.technician || '',
                     doctorName: detailData.selectedCourse?.doctorName || '',
+                    treatmentDoctorsName: detailData.selectedCourse?.treatmentDoctorsName || '',
                     notes: detailData.notes || '',
                     invoiceImage: new DataTransfer().files,
                     customerPhotos: new DataTransfer().files,
@@ -2207,30 +2262,30 @@ function ViewServiceDetailPopup({ detail, services, discountPrograms, unitMedici
                         unitMedicines={unitMedicines}
                         treatmentDoctors={treatmentDoctors}
                         fileReg={detailForm.register('invoiceImage')}
-                        onImageChange={() => { }}
+                        onImageChange={() => {}}
                         existingImageUrls={existingImageUrls}
                         setExistingImageUrls={setExistingImageUrls}
                         existingImageIds={existingImageIds}
                         setExistingImageIds={setExistingImageIds}
                         newImagePreviews={[]}
-                        onRemoveNewImage={() => { }}
+                        onRemoveNewImage={() => {}}
                         customerPhotoFileReg={detailForm.register('customerPhotos')}
-                        onCustomerPhotoChange={() => { }}
+                        onCustomerPhotoChange={() => {}}
                         existingCustomerPhotoUrls={existingCustomerPhotoUrls}
                         setExistingCustomerPhotoUrls={setExistingCustomerPhotoUrls}
                         existingCustomerPhotoIds={existingCustomerPhotoIds}
                         setExistingCustomerPhotoIds={setExistingCustomerPhotoIds}
                         newCustomerPhotoPreviews={[]}
-                        onRemoveCustomerPhoto={() => { }}
-                        onSubmit={() => { }}
+                        onRemoveCustomerPhoto={() => {}}
+                        onSubmit={() => {}}
                         readOnly={true}
                         unifiedInvoiceImages={unifiedInvoiceImages}
                         setUnifiedInvoiceImages={setUnifiedInvoiceImages}
-                        onReorderInvoiceImages={() => { }}
+                        onReorderInvoiceImages={() => {}}
                         unifiedCustomerPhotos={unifiedCustomerPhotos}
                         setUnifiedCustomerPhotos={setUnifiedCustomerPhotos}
-                        onReorderCustomerPhotos={() => { }}
-                        onGetDeletedIds={() => { }}
+                        onReorderCustomerPhotos={() => {}}
+                        onGetDeletedIds={() => {}}
                         resetToken={0}
                     />
                 );

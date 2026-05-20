@@ -2,10 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, BarChart3, GitBranch, Share2, Users, CalendarClock, DollarSign } from 'lucide-react';
+import { BarChart3, GitBranch, Share2, Users, CalendarClock, DollarSign } from 'lucide-react';
 
-// Danh sách các tab trên navbar
-const navLinks = [
+const allNavLinks = [
     { name: 'Nguồn data', href: '/admin/data-reception', icon: Share2 },
     { name: 'Hành dộng', href: '/admin/action', icon: BarChart3 },
     { name: 'Phân bổ', href: '/admin/allocation', icon: GitBranch },
@@ -14,8 +13,24 @@ const navLinks = [
     { name: 'Doanh thu', href: '/admin/revenue', icon: DollarSign },
 ];
 
-export function Navbar() {
+export function Navbar({ roles = [] }) {
     const pathname = usePathname();
+    const isAdminSaleRestricted =
+        Array.isArray(roles) &&
+        roles.includes('Admin Sale') &&
+        !roles.includes('Admin') &&
+        !roles.includes('Manager');
+    const isSaleOnly = Array.isArray(roles) && roles.includes('Sale') && !roles.includes('Admin') && !roles.includes('Manager');
+    const navLinks = isAdminSaleRestricted
+        ? allNavLinks.filter((link) => link.href === '/admin/revenue')
+        : isSaleOnly
+            ? allNavLinks.filter((link) =>
+                link.href === '/admin/allocation' ||
+                link.href === '/admin/call' ||
+                link.href === '/admin/appointment-stats'
+            )
+            : allNavLinks;
+
     return (
         <nav className="bg-white shadow-md sticky top-0 z-50 rounded-sm">
             <div className="container mx-auto px-4">

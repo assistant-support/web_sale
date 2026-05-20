@@ -8,7 +8,7 @@ import * as z from 'zod';
 import {
     MessageSquare, CheckCircle2, CircleDot, Circle, UserCheck, UserX, UserSearch,
     MessageSquareText, MessageSquareX, CheckCircle, User, Pencil, Trash2,
-    ShieldCheck, BadgeCheck, Loader2, PlusCircle, Send,
+    ShieldCheck, BadgeCheck, Loader2, PlusCircle, Send, AlertTriangle,
 } from 'lucide-react';
 import { getCurrentStageFromPipeline, driveImage } from '@/function/index';
 
@@ -26,6 +26,7 @@ import {
     updateServiceDetailAction,
     deleteServiceDetailAction,
     closeServiceAction,
+    approveServiceDetailAction,
     getServiceDetailById,
 } from '@/data/customers/wraperdata.db';
 
@@ -175,7 +176,9 @@ const closeServiceSchema = z.object({
     medicationDosage: z.string().optional(), // Liều lượng thuốc
     medicationUnit: z.string().optional(), // Đơn vị thuốc
     consultantName: z.string().optional(), // Tư vấn viên
+    technician: z.string().optional(), // Kỹ thuật viên
     doctorName: z.string().optional(), // Bác sĩ Tư vấn
+    treatmentDoctorsName: z.string().optional(), // Bác sĩ Liệu trình
     notes: z.string().optional(),
     invoiceImage: z.any().optional(), // FileList
     customerPhotos: z.any().optional(), // FileList cho ảnh khách hàng
@@ -206,8 +209,9 @@ const closeServiceSchema = z.object({
 });
 
 /* ===================== Bước 6: ServiceDetailsSection ===================== */
-function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
+function ServiceDetailsSection({ customer, services = [], currentUserId, currentUserRoles = [], onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
     const { run: runAction } = useAction();
+    const isApprover = Array.isArray(currentUserRoles) && (currentUserRoles.includes('Admin') || currentUserRoles.includes('Manager'));
 
     const details = useMemo(() => {
         const arr = Array.isArray(customer.serviceDetails) ? customer.serviceDetails : (customer.serviceDetails ? [customer.serviceDetails] : []);
@@ -263,6 +267,19 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
         });
     };
 
+    const handleApprove = async (customerId, serviceDetailId) => {
+        const idStr = serviceDetailId != null && typeof serviceDetailId === 'object'
+            ? String(serviceDetailId._id ?? serviceDetailId.$oid ?? serviceDetailId)
+            : String(serviceDetailId);
+        const fd = new FormData();
+        fd.append('customerId', customerId);
+        fd.append('serviceDetailId', idStr);
+        await runAction(approveServiceDetailAction, [null, fd], {
+            successMessage: (res) => res?.message || 'Đã duyệt đơn.',
+            errorMessage: (res) => res?.error || 'Duyệt đơn thất bại.',
+        });
+    };
+
     return (
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 bg-muted/30">
@@ -297,6 +314,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                         const approved = d.approvalStatus === 'approved';
                         // Cho phép sửa/xóa khi đơn chưa duyệt và có user đăng nhập (backend vẫn kiểm tra approvalStatus)
                         const canEditOrDelete = !approved && !!currentUserId;
+                        const canApprove = !approved && isApprover;
 
                         const statusChip = d.status === 'completed'
                             ? { text: 'Hoàn thành', className: 'bg-green-100 text-green-800' }
@@ -307,6 +325,8 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                         const approvalChip = approved
                             ? { text: 'Đã duyệt', className: 'bg-emerald-100 text-emerald-800', Icon: CheckCircle }
                             : { text: 'Chờ duyệt', className: 'bg-amber-100 text-amber-800', Icon: CircleDot };
+
+                        const missingTechnician = !((d.selectedCourse?.technician || '').trim());
 
                         // Lấy serviceId từ snapshot (customers.serviceDetails) rồi resolve tên
                         const rawSid = d.serviceId ?? d.selectedService;
@@ -332,11 +352,16 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                                                 <ShieldCheck className="h-5 w-5 text-primary" />
                                                 <div className="font-semibold">{serviceName} {courseName && `• ${courseName}`}</div>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <Badge className={`font-normal ${statusChip.className}`}>{statusChip.text}</Badge>
                                                 <Badge className={`font-normal ${approvalChip.className}`}>
                                                     <approvalChip.Icon className="h-3 w-3 mr-1" />{approvalChip.text}
                                                 </Badge>
+                                                {missingTechnician && (
+                                                    <Badge className="font-normal bg-red-100 text-red-800">
+                                                        <AlertTriangle className="h-3 w-3 mr-1" />Thiếu kỹ thuật viên
+                                                    </Badge>
+                                                )}
                                             </div>
                                         </div>
 
@@ -376,6 +401,15 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
                                         <div className="flex flex-wrap items-center gap-2 pt-2 border-t mt-1">
                                             <Button size="sm" onClick={() => onOpenViewPopup(d)}>
                                                 Xem
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="default"
+                                                disabled={!canApprove}
+                                                title={!canApprove ? 'Chỉ Admin/Manager mới có thể duyệt đơn chờ duyệt' : undefined}
+                                                onClick={() => canApprove && handleApprove(customer._id, d.serviceDetailId || d._id)}
+                                            >
+                                                Xác nhận
                                             </Button>
                                             <Button
                                                 size="sm"
@@ -446,7 +480,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, onOpenC
 }
 
 /* ============================ COMPONENT CHÍNH ============================ */
-export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
+export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, currentUserRoles = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
     const router = useRouter();
     const PIPELINE_STAGES = useMemo(() => [
         { id: 1, title: 'Tiếp nhận & Xử lý', getStatus: getStep1Status },
@@ -592,7 +626,9 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             medicationDosage: '',
             medicationUnit: '',
             consultantName: currentUserName || '',
+            technician: '',
             doctorName: '',
+            treatmentDoctorsName: '',
             notes: '',
             invoiceImage: new DataTransfer().files,
             customerPhotos: new DataTransfer().files,
@@ -750,7 +786,9 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
             medicationDosage: editingDetail.selectedCourse?.medicationDosage || '',
             medicationUnit: editingDetail.selectedCourse?.medicationUnit || '',
             consultantName: editingDetail.selectedCourse?.consultantName || currentUserName || '',
+            technician: editingDetail.selectedCourse?.technician || '',
             doctorName: editingDetail.selectedCourse?.doctorName || '',
+            treatmentDoctorsName: editingDetail.selectedCourse?.treatmentDoctorsName || '',
             notes: editingDetail.notes || '',
             invoiceImage: new DataTransfer().files,
             customerPhotos: new DataTransfer().files,
@@ -859,6 +897,61 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
         if (values.medicationUnit) formData.append('medicationUnit', values.medicationUnit);
         if (values.consultantName) formData.append('consultantName', values.consultantName);
         if (values.doctorName) formData.append('doctorName', values.doctorName);
+        if (values.treatmentDoctorsName) formData.append('treatmentDoctorsName', values.treatmentDoctorsName);
+
+        // Kỹ thuật viên: lưu DB field `technician`; ưu tiên tên KTV thao tác lần cuối (chọn BS liệu trình hoặc chỉnh ảnh).
+        const isTechnicianRole = Array.isArray(currentUserRoles) && currentUserRoles.includes('Technician');
+        const hasNewInvoiceFiles = unifiedInvoiceImages.some(
+            (img) => img.type === 'new' && img.file && typeof img.file.size === 'number' && img.file.size > 0
+        );
+        const hasNewCustomerPhotoFiles = unifiedCustomerPhotos.some(
+            (img) => img.type === 'new' && img.file && typeof img.file.size === 'number' && img.file.size > 0
+        );
+        const hasDeletedInvoiceImages = Array.isArray(deletedImageIdsToSend) && deletedImageIdsToSend.length > 0;
+        const hasDeletedCustomerPhotos = Array.isArray(deletedCustomerPhotoIdsToSend) && deletedCustomerPhotoIdsToSend.length > 0;
+
+        let treatmentDoctorChanged = false;
+        let invoiceExistingOrderChanged = false;
+        let customerPhotoExistingOrderChanged = false;
+        if (editingDetail) {
+            const prevDoctor = String(editingDetail.selectedCourse?.treatmentDoctorsName || '').trim();
+            treatmentDoctorChanged = String(values.treatmentDoctorsName || '').trim() !== prevDoctor;
+
+            const delInv = new Set((deletedImageIdsToSend || []).map(String));
+            const baselineInvoiceIds = (editingDetail.invoiceDriveIds || []).map(String).filter((id) => !delInv.has(id));
+            const unifiedInvoiceExistingIds = unifiedInvoiceImages
+                .filter((img) => img.type === 'existing' && img.id)
+                .map((img) => String(img.id));
+            invoiceExistingOrderChanged = baselineInvoiceIds.join('|') !== unifiedInvoiceExistingIds.join('|');
+
+            const delCp = new Set((deletedCustomerPhotoIdsToSend || []).map(String));
+            const baselineCustomerPhotoIds = (editingDetail.customerPhotosDriveIds || []).map(String).filter((id) => !delCp.has(id));
+            const unifiedCustomerExistingIds = unifiedCustomerPhotos
+                .filter((img) => img.type === 'existing' && img.id)
+                .map((img) => String(img.id));
+            customerPhotoExistingOrderChanged = baselineCustomerPhotoIds.join('|') !== unifiedCustomerExistingIds.join('|');
+        }
+
+        const technicianRelevantChange =
+            treatmentDoctorChanged ||
+            hasNewInvoiceFiles ||
+            hasNewCustomerPhotoFiles ||
+            hasDeletedInvoiceImages ||
+            hasDeletedCustomerPhotos ||
+            invoiceExistingOrderChanged ||
+            customerPhotoExistingOrderChanged;
+
+        let technicianToSave = String(values.technician || '').trim();
+        if (isTechnicianRole && currentUserName) {
+            if (editingDetail && technicianRelevantChange) {
+                technicianToSave = currentUserName;
+            } else if (!editingDetail && (values.treatmentDoctorsName || hasNewInvoiceFiles || hasNewCustomerPhotoFiles)) {
+                technicianToSave = currentUserName;
+            } else if (values.treatmentDoctorsName && !technicianToSave) {
+                technicianToSave = currentUserName;
+            }
+        }
+        if (technicianToSave) formData.append('technician', technicianToSave);
 
         // Gửi ảnh theo thứ tự từ unified state (đã sắp xếp)
         // Gửi ảnh mới (files) theo thứ tự trong unified state
@@ -1294,6 +1387,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                             customer={customer}
                                             services={services}
                                             currentUserId={currentUserId}
+                                            currentUserRoles={currentUserRoles}
                                             onOpenCreatePopup={openCreatePopup}
                                             onOpenEditPopup={openEditPopup}
                                             onOpenViewPopup={openViewPopup}
@@ -1370,6 +1464,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                     discountType={discountType}
                     discountPrograms={discountPrograms}
                     currentUserName={currentUserName}
+                    currentUserRoles={currentUserRoles}
                     unitMedicines={unitMedicines}
                     treatmentDoctors={treatmentDoctors}
                     fileReg={fileReg}
@@ -1390,6 +1485,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                     onRemoveCustomerPhoto={onRemoveCustomerPhoto}
                     onSubmit={onSubmit}
                     readOnly={isReadOnlyView}
+                    isCreating={!editingDetail}
                     unifiedInvoiceImages={unifiedInvoiceImages}
                     setUnifiedInvoiceImages={setUnifiedInvoiceImages}
                     onReorderInvoiceImages={onReorderInvoiceImages}

@@ -248,6 +248,7 @@ export default function CustomerRow({
                         closeState={closeState}
                         currentUserId={user[0]?._id}
                         currentUserName={user[0]?.name || ''}
+                        currentUserRoles={user[0]?.role || []}
                         discountPrograms={discountPrograms}
                         unitMedicines={unitMedicines}
                         treatmentDoctors={treatmentDoctors}

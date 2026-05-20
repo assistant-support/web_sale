@@ -140,6 +140,30 @@ export async function addRegistrationToAction(_previousState, inputData) {
         const isFormData = inputData instanceof FormData;
         const isManualEntry = !isFormData;
 
+        // Chuẩn hóa danh sách dịch vụ về mảng các ID hợp lệ.
+        // - FormData: hỗ trợ cả `service` (single) và `service[]` / nhiều giá trị `service` (multi).
+        // - Plain object: chấp nhận chuỗi đơn hoặc mảng.
+        let rawServiceList = [];
+        if (isFormData) {
+            const multi = inputData.getAll('service');
+            if (Array.isArray(multi) && multi.length > 0) {
+                rawServiceList = multi;
+            } else {
+                const single = inputData.get('service');
+                if (single != null) rawServiceList = [single];
+            }
+        } else {
+            const raw = inputData.service;
+            rawServiceList = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+        }
+        const serviceIds = Array.from(
+            new Set(
+                rawServiceList
+                    .map((v) => (v == null ? '' : String(v).trim()))
+                    .filter(Boolean)
+            )
+        );
+
         // Chuẩn hóa dữ liệu đầu vào
         const rawData = {
             name: isFormData ? inputData.get('name')?.trim() : inputData.fullName?.trim(),
@@ -147,7 +171,9 @@ export async function addRegistrationToAction(_previousState, inputData) {
             phone: isFormData ? inputData.get('phone')?.trim() : inputData.phone?.trim(),
             email: isFormData ? inputData.get('email')?.trim() : inputData.email?.trim(),
             bd: isFormData ? inputData.get('bd') : inputData.dob,
-            service: isFormData ? inputData.get('service')?.trim() : inputData.service?.trim(),
+            // Giữ cả dạng cũ (1 ID) cho các nơi khác đang dùng + dạng mới (mảng)
+            service: serviceIds[0] || '',
+            services: serviceIds,
             source: isFormData ? inputData.get('source')?.trim() : '68b5ebb3658a1123798c0ce4',
             sourceName: isFormData ? inputData.get('sourceName')?.trim() : 'Trực tiếp',
             customerCode: isFormData ? inputData.get('customerCode')?.trim() : inputData.customerCode?.trim(),
@@ -179,6 +205,11 @@ export async function addRegistrationToAction(_previousState, inputData) {
             return { ok: false, message: 'Nguồn dữ liệu không hợp lệ.' };
         }
 
+        const invalidServiceId = rawData.services.find((id) => !mongoose.Types.ObjectId.isValid(id));
+        if (invalidServiceId) {
+            return { ok: false, message: 'Dịch vụ quan tâm không hợp lệ.' };
+        }
+
         // Xử lý logic chính
         await dbConnect();
         const existingCustomer = await Customer.findOne({ phone: normalizedPhone });
@@ -191,7 +222,9 @@ export async function addRegistrationToAction(_previousState, inputData) {
             if (rawData.email && existingCustomer.email !== rawData.email) existingCustomer.email = rawData.email;
             if (birthDate && (!existingCustomer.bd || existingCustomer.bd.getTime() !== birthDate.getTime())) existingCustomer.bd = birthDate;
 
-            existingCustomer.tags = [...new Set([...existingCustomer.tags, rawData.service].filter(Boolean))];
+            const existingTagStrings = (existingCustomer.tags || []).map((t) => String(t));
+            const mergedTagStrings = Array.from(new Set([...existingTagStrings, ...rawData.services]));
+            existingCustomer.tags = mergedTagStrings;
             existingCustomer.care.push({
                 content: `Data trùng từ ${isManualEntry ? 'nhập liệu thủ công' : `form "${rawData.sourceName}"`}. Gộp và cập nhật hồ sơ.`,
                 createBy: user?.id || '68b0af5cf58b8340827174e0',
@@ -250,7 +283,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
             phone: normalizedPhone,
             email: rawData.email || '',
             area: rawData.address || '',
-            tags: rawData.service ? [rawData.service] : [],
+            tags: rawData.services,
             bd: birthDate,
             pipelineStatus: ['new_unconfirmed_1', 'new_unconfirmed_1'],
             care: [{ content: 'Khách hàng được nhận hồ sơ vào hệ thống', createBy: user?.id || '68b0af5cf58b8340827174e0', step: 1 }],
@@ -350,9 +383,17 @@ async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
             notificationSentMap.delete(customerId);
         }, 60000);
         
-        // 1. Lấy thông tin dịch vụ
-        let service = await service_data();
-        service = service.find(item => item._id === rawData.service);
+        // 1. Lấy thông tin dịch vụ (hỗ trợ nhiều dịch vụ)
+        const allServices = await service_data();
+        const selectedIds = Array.isArray(rawData.services) && rawData.services.length > 0
+            ? rawData.services
+            : (rawData.service ? [rawData.service] : []);
+        const selectedServiceNames = selectedIds
+            .map((id) => allServices.find((item) => String(item._id) === String(id))?.name)
+            .filter(Boolean);
+        const serviceNamesText = selectedServiceNames.length > 0
+            ? selectedServiceNames.join(', ')
+            : 'Không có';
 
         // 2. Format thời gian
         const createAt = new Date();
@@ -370,7 +411,7 @@ async function sendUpdateNotification(customer, rawData, type, isManualEntry) {
 -----------------------------------
 Họ và tên: ${customer.name}
 Liên hệ: ${customer.phone}
-Dịch vụ quan tâm: ${service?.name || 'Không có'}
+Dịch vụ quan tâm: ${serviceNamesText}
 Thời gian: ${formattedCreateAt}`;
 
         // 5. Gửi qua Google Apps Script

@@ -9,29 +9,103 @@ import * as z from 'zod';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import { UserPlus, Calendar as CalendarIcon, Loader2, AlertCircle } from 'lucide-react';
+import { UserPlus, Calendar as CalendarIcon, Loader2, AlertCircle, ChevronsUpDown, Check, X } from 'lucide-react';
 import useActionUI from '@/hooks/useActionUI';
 import { addRegistrationToAction } from '@/app/actions/data.actions';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 
-// THAY ĐỔI 1: Schema vẫn giữ nguyên, Zod sẽ xác thực rằng có một chuỗi được chọn.
+// Cho phép chọn nhiều dịch vụ quan tâm; bắt buộc tối thiểu 1.
 const formSchema = z.object({
     fullName: z.string().min(2, { message: 'Vui lòng nhập họ và tên.' }),
     phone: z.string().min(10, { message: 'Vui lòng nhập số điện thoại hợp lệ.' }),
     email: z.string().email({ message: 'Email không đúng định dạng.' }).optional().or(z.literal('')),
     address: z.string().optional(),
-    service: z.string({ required_error: "Vui lòng chọn một dịch vụ." }).min(1, { message: 'Vui lòng chọn một dịch vụ.' }), // Cập nhật để bắt buộc chọn
+    service: z.array(z.string()).min(1, { message: 'Vui lòng chọn ít nhất một dịch vụ.' }),
     dob: z.date().optional(),
     customerCode: z.string().optional(),
 });
+
+// Multi-select dịch vụ: hiển thị các dịch vụ đã chọn dưới dạng badge, mở popover để tick chọn.
+function ServiceMultiSelect({ options, selected, onChange }) {
+    const [open, setOpen] = useState(false);
+    const handleUnselect = (value) => onChange(selected.filter((v) => v !== value));
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className="w-full justify-between h-auto min-h-[40px]"
+                >
+                    <div className="flex gap-1 flex-wrap">
+                        {selected.length > 0 ? (
+                            options
+                                .filter((opt) => selected.includes(opt.value))
+                                .map((opt) => (
+                                    <Badge
+                                        variant="secondary"
+                                        key={opt.value}
+                                        className="mr-1 mb-1"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleUnselect(opt.value);
+                                        }}
+                                    >
+                                        <h6>{opt.label}</h6>
+                                        <X className="h-3 w-3 ml-1 text-muted-foreground cursor-pointer" />
+                                    </Badge>
+                                ))
+                        ) : (
+                            <h6>Chọn dịch vụ...</h6>
+                        )}
+                    </div>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                <Command>
+                    <CommandInput placeholder="Tìm kiếm dịch vụ..." />
+                    <CommandList>
+                        <CommandEmpty>Không tìm thấy dịch vụ.</CommandEmpty>
+                        <CommandGroup>
+                            {options.map((opt) => (
+                                <CommandItem
+                                    key={opt.value}
+                                    onSelect={() => {
+                                        onChange(
+                                            selected.includes(opt.value)
+                                                ? selected.filter((v) => v !== opt.value)
+                                                : [...selected, opt.value]
+                                        );
+                                    }}
+                                >
+                                    <Check
+                                        className={cn(
+                                            'mr-2 h-4 w-4',
+                                            selected.includes(opt.value) ? 'opacity-100' : 'opacity-0'
+                                        )}
+                                    />
+                                    {opt.label}
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 /**
  * Component chính để hiển thị nút và popup thêm khách hàng.
@@ -47,7 +121,7 @@ export default function Customer_add({ service }) {
         resolver: zodResolver(formSchema),
         mode: 'onChange',
         defaultValues: {
-            fullName: '', phone: '', email: '', address: '', service: '', dob: undefined,
+            fullName: '', phone: '', email: '', address: '', service: [], dob: undefined,
             customerCode: '',
         },
     });
@@ -86,21 +160,9 @@ export default function Customer_add({ service }) {
     const errorMessages = Object.values(errors).map(error => error.message);
 
     const onSubmit = async (values) => {
-        await actionUI.run(async () => {
-            if (values.customerCode && values.customerCode !== suggestedCustomerCode) {
-                try {
-                    const res = await fetch(`/api/customers/check-code?code=${encodeURIComponent(values.customerCode)}`);
-                    const json = await res.json();
-                    if (json.success && !json.isAvailable) {
-                        form.setError('customerCode', { type: 'manual', message: 'Mã khách hàng này đã tồn tại!' });
-                        return { ok: false, message: 'Mã khách hàng này đã tồn tại!' };
-                    }
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-            return await addRegistrationToAction(null, values);
-        }, {
+        // THAY ĐỔI 2: Dữ liệu 'values' lúc này đã chứa ID của service,
+        // nên chúng ta có thể gửi thẳng đi mà không cần chỉnh sửa.
+        await actionUI.run(() => addRegistrationToAction(null, values), {
             loadingText: 'Đang lưu...',
             silentOnSuccess: false,
             refreshOnSuccess: true,
@@ -143,18 +205,11 @@ export default function Customer_add({ service }) {
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <FormField control={form.control} name="customerCode" render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel><h5>Mã khách hàng</h5></FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <Input placeholder="Mã khách hàng..." {...field} disabled={isSuggestingCode} className={form.formState.errors.customerCode ? "border-red-500 focus-visible:ring-red-500" : ""} />
-                                                {isSuggestingCode && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
-                                            </div>
-                                        </FormControl>
-                                        {form.formState.errors.customerCode && <p className="text-[0.8rem] font-medium text-red-500">{form.formState.errors.customerCode.message}</p>}
-                                    </FormItem>
-                                )} />
+                                <div className="grid gap-2">
+                                    <FormLabel><h5>Mã khách hàng</h5></FormLabel>
+                                    <Input value={suggestedCustomerCode || 'KH-03900'} disabled readOnly />
+                                    {isSuggestingCode && <h6 style={{ color: 'white', opacity: 0.8 }}>Đang gợi ý...</h6>}
+                                </div>
                                 <FormField control={form.control} name="fullName" render={({ field }) => (
                                     <FormItem><FormLabel><h5>Họ và Tên *</h5></FormLabel><FormControl><Input placeholder="Nguyễn Văn A" {...field} /></FormControl></FormItem>
                                 )} />
@@ -174,17 +229,13 @@ export default function Customer_add({ service }) {
                             <FormField control={form.control} name="service" render={({ field }) => (
                                 <FormItem>
                                     <FormLabel><h5>Dịch vụ quan tâm *</h5></FormLabel>
-                                    <Select className={'flex-1'} onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Chọn một dịch vụ" /></SelectTrigger></FormControl>
-                                        <SelectContent>
-                                            {/* THAY ĐỔI 3: Gán `value` của mỗi `SelectItem` là `item._id` */}
-                                            {service?.map((item) => (
-                                                <SelectItem key={item._id} value={item._id}>
-                                                    {item.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <FormControl>
+                                        <ServiceMultiSelect
+                                            options={(service || []).map((item) => ({ value: item._id, label: item.name }))}
+                                            selected={Array.isArray(field.value) ? field.value : []}
+                                            onChange={field.onChange}
+                                        />
+                                    </FormControl>
                                 </FormItem>
                             )} />
 

@@ -10,6 +10,7 @@ import Form from '@/models/formclient';
  * Báo cáo marketing theo kênh (nguồn).
  * - Lead: customers (createAt trong khoảng), group theo source/sourceDetails
  * - Booking: appointments (status != cancelled), group theo customer.source
+ * - Khách mua thành công: customers có serviceDetails không rỗng, group theo source/sourceDetails
  * - Hoàn thành + Doanh thu: service_details (completed, approved, closedAt), group theo sourceId/sourceDetails
  * - Chi phí: marketing_costs (trùng khoảng ngày), group theo source
  * - ROI = (Revenue - Cost) / Cost * 100
@@ -90,6 +91,47 @@ export async function GET(req) {
         leadBySourceDetailsAgg.forEach((r) => {
             const k = r._id ? String(r._id) : '';
             if (k) leadsByKey[k] = r.totalLead;
+        });
+
+        // 2.1) Khách mua thành công: customers có serviceDetails không rỗng theo kênh
+        const successSourcePipeline = [];
+        const successSourceMatch = { 'serviceDetails.0': { $exists: true } };
+        if (hasRange) {
+            successSourceMatch.createAt = { $gte: fromDate, $lte: toDate };
+        }
+        successSourcePipeline.push({ $match: successSourceMatch });
+        successSourcePipeline.push({
+            $group: {
+                _id: '$source',
+                totalSuccessCustomers: { $sum: 1 },
+            },
+        });
+        const successBySourceAgg = await Customer.aggregate(successSourcePipeline);
+
+        const successSourceDetailsPipeline = [];
+        const successSourceDetailsMatch = {
+            sourceDetails: { $exists: true, $ne: null, $ne: '' },
+            'serviceDetails.0': { $exists: true },
+        };
+        if (hasRange) {
+            successSourceDetailsMatch.createAt = { $gte: fromDate, $lte: toDate };
+        }
+        successSourceDetailsPipeline.push({ $match: successSourceDetailsMatch });
+        successSourceDetailsPipeline.push({
+            $group: {
+                _id: '$sourceDetails',
+                totalSuccessCustomers: { $sum: 1 },
+            },
+        });
+        const successBySourceDetailsAgg = await Customer.aggregate(successSourceDetailsPipeline);
+        const successCustomersByKey = {};
+        successBySourceAgg.forEach((r) => {
+            const k = r._id ? String(r._id) : '';
+            if (k) successCustomersByKey[k] = r.totalSuccessCustomers;
+        });
+        successBySourceDetailsAgg.forEach((r) => {
+            const k = r._id ? String(r._id) : '';
+            if (k) successCustomersByKey[k] = r.totalSuccessCustomers;
         });
 
         // 3) Booking: appointments, status != cancelled, lookup customer, group theo source key
@@ -185,6 +227,7 @@ export async function GET(req) {
         const report = channels.map((ch) => {
             const key = ch.key;
             const lead = leadsByKey[key] || 0;
+            const successfulCustomers = successCustomersByKey[key] || 0;
             const booking = bookingsByKey[key] || 0;
             const comp = completedByKey[key];
             const completed = comp ? comp.totalCompleted : 0;
@@ -197,6 +240,7 @@ export async function GET(req) {
                 channel: ch.name,
                 sourceId: ch._id,
                 lead,
+                successfulCustomers,
                 booking,
                 completed,
                 revenue,

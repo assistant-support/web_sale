@@ -7,7 +7,7 @@ import { getPagesFromAPI } from '@/lib/pancake-api';
 import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 // Source ID mặc định cho "Nhắn tin"
-const DEFAULT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
+const DEFAULT_SOURCE_ID = '6925700a097e2a7b59cd8a4e';
 
 // Chuẩn hóa số điện thoại Việt Nam
 function normalizeVNPhone(digits) {

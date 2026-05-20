@@ -389,6 +389,11 @@ export default function MarketingReportClient({ sources = [], messageSources = [
         worksheet.columns = [
             { header: 'Kênh', key: 'channel', width: 30 },
             { header: 'Lead', key: 'lead', width: 12 },
+            { header: 'Khách mua', key: 'successfulCustomers', width: 14 },
+            { header: 'Tỷ lệ rớt (%)', key: 'dropRate', width: 14 },
+            { header: 'CPL', key: 'cpl', width: 16 },
+            { header: 'MCR (%)', key: 'mcr', width: 12 },
+            { header: 'CAC', key: 'cac', width: 16 },
             { header: 'Booking', key: 'booking', width: 12 },
             { header: 'Hoàn thành', key: 'completed', width: 15 },
             { header: 'Doanh thu', key: 'revenue', width: 20 },
@@ -397,13 +402,27 @@ export default function MarketingReportClient({ sources = [], messageSources = [
         ];
 
         (channels || []).forEach((row) => {
+            const lead = row.lead ?? 0;
+            const cost = row.cost ?? 0;
+            const revenue = row.revenue ?? 0;
+            const successfulCustomers = row.successfulCustomers ?? 0;
+            const booking = row.booking ?? 0;
+            const cpl = lead > 0 ? cost / lead : 0;
+            const mcr = revenue > 0 ? (cost / revenue) * 100 : 0;
+            const cac = successfulCustomers > 0 ? cost / successfulCustomers : 0;
+            const dropRate = lead > 0 ? ((lead - booking) / lead) * 100 : 0;
             worksheet.addRow({
                 channel: row.channel || '',
-                lead: row.lead ?? 0,
-                booking: row.booking ?? 0,
+                lead,
+                successfulCustomers,
+                dropRate,
+                cpl,
+                mcr,
+                cac,
+                booking,
                 completed: row.completed ?? 0,
-                revenue: row.revenue ?? 0,
-                cost: row.cost ?? 0,
+                revenue,
+                cost,
                 roi: row.roi ?? 0,
             });
         });
@@ -514,7 +533,7 @@ export default function MarketingReportClient({ sources = [], messageSources = [
                 )}
             </div>
 
-            {/* Bảng Marketing: Kênh | Lead | Booking | Hoàn thành | Doanh thu | Chi phí | ROI */}
+            {/* Bảng Marketing: Kênh | Lead | Khách mua | Tỷ lệ rớt | CPL | MCR | CAC | Booking | Hoàn thành | Doanh thu | Chi phí | ROI */}
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle>Bảng Marketing</CardTitle>
@@ -553,6 +572,11 @@ export default function MarketingReportClient({ sources = [], messageSources = [
                                     <TableRow>
                                         <TableHead className="text-xs">Kênh</TableHead>
                                         <TableHead className="text-xs text-right">Lead</TableHead>
+                                        <TableHead className="text-xs text-right">Khách mua</TableHead>
+                                        <TableHead className="text-xs text-right">Tỷ lệ rớt</TableHead>
+                                        <TableHead className="text-xs text-right">CPL</TableHead>
+                                        <TableHead className="text-xs text-right">MCR</TableHead>
+                                        <TableHead className="text-xs text-right">CAC</TableHead>
                                         <TableHead className="text-xs text-right">Booking</TableHead>
                                         <TableHead className="text-xs text-right">Hoàn thành</TableHead>
                                         <TableHead className="text-xs text-right">Doanh thu</TableHead>
@@ -564,7 +588,7 @@ export default function MarketingReportClient({ sources = [], messageSources = [
                                 <TableBody>
                                     {channels.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={8} className="text-center text-muted-foreground text-sm py-8">
+                                            <TableCell colSpan={13} className="text-center text-muted-foreground text-sm py-8">
                                                 Không có dữ liệu kênh trong khoảng ngày đã chọn
                                             </TableCell>
                                         </TableRow>
@@ -573,6 +597,19 @@ export default function MarketingReportClient({ sources = [], messageSources = [
                                             <TableRow key={row.sourceId ?? idx}>
                                                 <TableCell className="text-xs">{row.channel || '—'}</TableCell>
                                                 <TableCell className="text-xs text-right">{row.lead ?? 0}</TableCell>
+                                                <TableCell className="text-xs text-right">{row.successfulCustomers ?? 0}</TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    {`${((row.lead ?? 0) > 0 ? (((row.lead ?? 0) - (row.booking ?? 0)) / (row.lead ?? 0)) * 100 : 0).toFixed(2)}%`}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    {formatVnd((row.lead ?? 0) > 0 ? (row.cost ?? 0) / (row.lead ?? 0) : 0)}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    {`${((row.revenue ?? 0) > 0 ? ((row.cost ?? 0) / (row.revenue ?? 0)) * 100 : 0).toFixed(2)}%`}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    {formatVnd((row.successfulCustomers ?? 0) > 0 ? (row.cost ?? 0) / (row.successfulCustomers ?? 0) : 0)}
+                                                </TableCell>
                                                 <TableCell className="text-xs text-right">{row.booking ?? 0}</TableCell>
                                                 <TableCell className="text-xs text-right">{row.completed ?? 0}</TableCell>
                                                 <TableCell className="text-xs text-right">{formatVnd(row.revenue ?? 0)}</TableCell>
@@ -797,6 +834,10 @@ export default function MarketingReportClient({ sources = [], messageSources = [
                         <p className="font-medium">Các chỉ số theo từng kênh:</p>
                         <ul className="list-disc pl-5 space-y-1">
                             <li><b>Lead:</b> Số khách hàng được tạo mới thuộc kênh đó.</li>
+                            <li><b>Tỷ lệ rớt:</b> ((Lead - Booking) / Lead) × 100%.</li>
+                            <li><b>CPL:</b> Chi phí marketing / số lead.</li>
+                            <li><b>MCR:</b> (Chi phí marketing / Doanh thu) × 100%.</li>
+                            <li><b>CAC:</b> Chi phí marketing / số khách hàng mua thành công (serviceDetails không rỗng).</li>
                             <li><b>Booking:</b> Số đơn/lịch hẹn được tạo từ khách thuộc kênh.</li>
                             <li><b>Hoàn thành:</b> Số đơn đã hoàn tất dịch vụ.</li>
                             <li><b>Doanh thu:</b> Tổng tiền từ các đơn hoàn thành.</li>

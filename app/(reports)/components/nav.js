@@ -12,6 +12,7 @@ export default function ReportsLayout({ children }) {
         { id: 'revenue', label: 'Báo cáo doanh thu', href: '/reports/revenue' },
         { id: 'marketing', label: 'Báo cáo marketing', href: '/reports/marketing' },
         { id: 'financial', label: 'Báo cáo tài chính', href: '/reports/financial' },
+        { id: 'personnel', label: 'Báo cáo nhân sự', href: '/reports/personnel' },
     ];
 
     return (

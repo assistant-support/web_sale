@@ -669,6 +669,7 @@ export async function updateCustomerInfo(previousState, formData) {
         const service_start_date = formData.get('service_start_date');
         const service_last_date = formData.get('service_last_date');
         const customerCodeInput = formData.get('customerCode');
+        const sourceDetailsInput = formData.get('sourceDetails');
 
         // Lấy khu vực cũ (là _id) để xóa customer khỏi mảng id_customer
         const oldAreaCustomerId = customerDoc.Id_area_customer;
@@ -722,6 +723,16 @@ export async function updateCustomerInfo(previousState, formData) {
                         customerDoc.customerCodeNumber = parsed.customerCodeNumber;
                     }
                 }
+            }
+        }
+
+        // ===== sourceDetails =====
+        // Chỉ cho phép cập nhật khi customer có nguồn là "Trực tiếp" (form ID cố định).
+        const DIRECT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
+        if (sourceDetailsInput !== null && sourceDetailsInput !== undefined) {
+            const currentSourceId = customerDoc.source ? String(customerDoc.source) : '';
+            if (currentSourceId === DIRECT_SOURCE_ID) {
+                customerDoc.sourceDetails = String(sourceDetailsInput).trim();
             }
         }
 

@@ -1,14 +1,19 @@
 import DashboardClient from "./dashboard-client";
 import { Navbar } from "../nav";
 import { history_data } from '@/data/actions/get';
+import checkAuthToken from "@/utils/checktoken";
+import { assertAdminSaleRevenueOnly } from "../adminSaleAccess";
 export default async function AdminPage() {
+    await assertAdminSaleRevenueOnly();
+    const session = await checkAuthToken();
+    const roles = session?.role || [];
     const historyResult = await history_data();
     const historyData = processHistoryData(historyResult.success ? historyResult : { data: [] });
     console.log(historyData);
 
     return (
         <>
-            <Navbar />
+            <Navbar roles={roles} />
             <DashboardClient initialData={historyData} />
         </>
     );

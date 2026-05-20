@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { DollarSign, RefreshCw, Download, Loader2, BookOpenText } from 'lucide-react';
 import Popup from '@/components/ui/popup';
 import CustomSelect from '@/components/ui/CustomSelect.client';
@@ -14,6 +15,12 @@ const TYPE_FILTER_ITEMS = [
     { value: 'ngoai_khoa', label: 'Ngoại khoa' },
     { value: 'da_lieu', label: 'Da li\u1ec5u' },
 ];
+
+const SERVICE_GROUP_LABELS = {
+    noi_khoa: 'Nội khoa',
+    ngoai_khoa: 'Ngoại khoa',
+    da_lieu: 'Da liễu',
+};
 
 const StatCard = ({ title, value, icon: Icon, color }) => (
     <Card className="shadow-lg border-l-4" style={{ borderLeftColor: color }}>
@@ -42,6 +49,13 @@ function formatVnd(num) {
     return num.toLocaleString('vi-VN') + ' VNĐ';
 }
 
+function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString('vi-VN');
+}
+
 export default function RevenueReportClient() {
     const defaultRange = getDefaultMonthRange();
     const [startDate, setStartDate] = useState(defaultRange.from);
@@ -53,6 +67,8 @@ export default function RevenueReportClient() {
     const [data, setData] = useState({
         summary: { totalRevenue: 0, totalOrders: 0, totalCustomers: 0, topService: '—' },
         services: [],
+        serviceGroups: [],
+        orders: [],
     });
 
     const fetchReport = async (from, to, type) => {
@@ -69,6 +85,8 @@ export default function RevenueReportClient() {
             setData((prev) => ({
                 summary: json.summary || prev.summary,
                 services: json.services || [],
+                serviceGroups: json.serviceGroups || [],
+                orders: json.orders || [],
             }));
         } catch (e) {
             setError(e.message);
@@ -89,7 +107,7 @@ export default function RevenueReportClient() {
         setServiceTypeFilter('all');
     };
 
-    const { summary, services } = data;
+    const { summary, services, serviceGroups, orders } = data;
 
     const handleDownload = async () => {
         const workbook = new ExcelJS.Workbook();
@@ -117,6 +135,40 @@ export default function RevenueReportClient() {
         const a = document.createElement('a');
         a.href = url;
         a.download = 'bao-cao-doanh-thu-dich-vu.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadServiceGroups = async () => {
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Doanh thu theo nhóm loại');
+
+        worksheet.columns = [
+            { header: 'Tên nhóm', key: 'name', width: 24 },
+            { header: 'Doanh thu', key: 'totalRevenue', width: 20 },
+            { header: 'Số đơn', key: 'totalOrders', width: 14 },
+            { header: 'Số khách hàng', key: 'totalCustomers', width: 16 },
+        ];
+
+        (serviceGroups || []).forEach((g) => {
+            worksheet.addRow({
+                name: SERVICE_GROUP_LABELS[g.type] || g.type || '',
+                totalRevenue: g.totalRevenue || 0,
+                totalOrders: g.totalOrders ?? 0,
+                totalCustomers: g.totalCustomers ?? 0,
+            });
+        });
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'bao-cao-doanh-thu-nhom-loai.xlsx';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -267,6 +319,139 @@ export default function RevenueReportClient() {
                 </CardContent>
             </Card>
 
+            {/* Bảng nhóm loại dịch vụ (Nội khoa / Ngoại khoa / Da liễu): cùng nguồn đơn đã ghi nhận doanh thu */}
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <CardTitle>Nhóm dịch vụ</CardTitle>
+                    <button
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        type="button"
+                        onClick={handleDownloadServiceGroups}
+                    >
+                        <Download className="w-4 h-4" />
+                    </button>
+                </CardHeader>
+                <CardContent>
+                    <div className="max-h-[400px] overflow-y-auto">
+                        {loading ? (
+                            <div className="flex items-center justify-center py-8 text-muted-foreground">
+                                <Loader2 className="h-6 w-6 animate-spin" />
+                            </div>
+                        ) : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="text-xs">Tên</TableHead>
+                                        <TableHead className="text-xs text-right">Doanh thu</TableHead>
+                                        <TableHead className="text-xs text-right">Số đơn</TableHead>
+                                        <TableHead className="text-xs text-right">Số khách hàng</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {!serviceGroups || serviceGroups.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={4} className="text-center text-muted-foreground text-sm py-8">
+                                                Không có dữ liệu trong khoảng ngày đã chọn
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        serviceGroups.map((g, idx) => (
+                                            <TableRow key={g.type ?? idx}>
+                                                <TableCell className="text-xs">
+                                                    {SERVICE_GROUP_LABELS[g.type] || g.type || '—'}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    {formatVnd(g.totalRevenue || 0)}
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    <Badge variant="secondary" className="text-[10px]">
+                                                        {g.totalOrders ?? 0}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-xs text-right">
+                                                    <Badge variant="default" className="text-[10px]">
+                                                        {g.totalCustomers ?? 0}
+                                                    </Badge>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Bảng đơn */}
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <CardTitle>Bảng đơn</CardTitle>
+                    <button
+                        type="button"
+                        disabled
+                        title="Xuất Excel — sẽ bật khi có dữ liệu"
+                        className="text-xs text-muted-foreground opacity-40 cursor-not-allowed"
+                    >
+                        <Download className="w-4 h-4" />
+                    </button>
+                </CardHeader>
+                <CardContent>
+                    <div className="max-h-[400px] overflow-y-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="text-xs">Thời gian</TableHead>
+                                    <TableHead className="text-xs">Loại khách</TableHead>
+                                    <TableHead className="text-xs">Mã KH</TableHead>
+                                    <TableHead className="text-xs">Tên KH</TableHead>
+                                    <TableHead className="text-xs">Nguồn</TableHead>
+                                    <TableHead className="text-xs">Dịch vụ</TableHead>
+                                    <TableHead className="text-xs text-right">Doanh thu</TableHead>
+                                    <TableHead className="text-xs text-right">Số lượng đơn</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {loading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={8} className="text-center text-muted-foreground text-sm py-10">
+                                            Đang tải dữ liệu đơn...
+                                        </TableCell>
+                                    </TableRow>
+                                ) : !orders || orders.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={8} className="text-center text-muted-foreground text-sm py-10">
+                                            Không có dữ liệu trong khoảng ngày đã chọn
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    orders.map((row, idx) => (
+                                        <TableRow key={`${row.customerCode || 'kh'}-${idx}`}>
+                                            <TableCell className="text-xs">{formatDateTime(row.orderTime)}</TableCell>
+                                            <TableCell className="text-xs">{row.customerType || 'Khách mới'}</TableCell>
+                                            <TableCell className="text-xs">{row.customerCode || '—'}</TableCell>
+                                            <TableCell className="text-xs">{row.customerName || '—'}</TableCell>
+                                            <TableCell className="text-xs">{row.sourceName || '—'}</TableCell>
+                                            <TableCell className="text-xs">
+                                                {Array.isArray(row.services) && row.services.length > 0
+                                                    ? row.services.join(', ')
+                                                    : '—'}
+                                            </TableCell>
+                                            <TableCell className="text-xs text-right">{formatVnd(row.totalRevenue || 0)}</TableCell>
+                                            <TableCell className="text-xs text-right">
+                                                <Badge variant="secondary" className="text-[10px]">
+                                                    {row.totalOrders ?? 0}
+                                                </Badge>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </CardContent>
+            </Card>
+
             <Popup
                 open={docOpen}
                 onClose={() => setDocOpen(false)}
@@ -300,6 +485,13 @@ export default function RevenueReportClient() {
                         <p className="font-medium">Bảng dịch vụ:</p>
                         <p>
                             Là các dịch vụ trong tháng đó phát sinh doanh thu và doanh thu đến từ số lượng đơn có liên quan đến dịch vụ đó .
+                        </p>
+                    </div>
+
+                    <div>
+                        <p className="font-medium">Bảng nhóm dịch vụ:</p>
+                        <p>
+                            Gom theo loại dịch vụ (Nội khoa, Ngoại khoa, Da liễu): tổng doanh thu, tổng số đơn và số khách hàng khác nhau có đơn được ghi nhận trong khoảng thời gian. Tuân theo cùng bộ lọc ngày và loại dịch vụ như phần trên.
                         </p>
                     </div>
 

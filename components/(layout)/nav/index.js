@@ -66,9 +66,10 @@ export default function Nav({ data }) {
   const navItemsForRole = useMemo(() => {
     // Định nghĩa các quyền và danh sách `href` tương ứng
     const rolePermissions = {
-      'Sale': ['/client', '/pancake', '/calendar'],
+      'Sale': ['/client', '/pancake', '/calendar', '/admin'],
       'Docter': [],
-      'Admin Sale': ['/user', '/client', '/pancake', '/admin', '/calendar'],
+      'Admin Sale': ['/client', '/calendar', '/admin'],
+      'Technician': ['/client', '/calendar'],
     };
     // Nếu là Manager hoặc Admin thì trả về tất cả các mục
     if (userRole === 'Manager' || userRole === 'Admin') {

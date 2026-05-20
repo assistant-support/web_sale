@@ -3,8 +3,13 @@ import DashboardClient from "./dashboard-client";
 import { Navbar } from "../nav";
 import { service_data } from "@/data/services/wraperdata.db";
 import { form_data, message_sources_data } from '@/data/form_database/wraperdata.db';
+import checkAuthToken from "@/utils/checktoken";
+import { assertAdminSaleRevenueOnly } from "../adminSaleAccess";
 
 export default async function AdminPage() {
+    await assertAdminSaleRevenueOnly();
+    const session = await checkAuthToken();
+    const roles = session?.role || [];
     const [data, service, sources, messageSources] = await Promise.all([
         customer_data(),
         service_data(),
@@ -14,7 +19,7 @@ export default async function AdminPage() {
 
     return (
         <>
-            <Navbar />
+            <Navbar roles={roles} />
             <DashboardClient initialData={data} service={service} sources={sources} messageSources={messageSources} />
         </>
     );

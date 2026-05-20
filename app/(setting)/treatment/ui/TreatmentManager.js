@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useActionState, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
-import { 
+import {
     createMedicineAction, 
     updateMedicineAction, 
     deleteMedicineAction,
@@ -12,6 +12,11 @@ import {
     updateTreatmentDoctorAction,
     deleteTreatmentDoctorAction
 } from '@/app/actions/treatment.actions';
+import {
+    TREATMENT_DOCTOR_TYPES,
+    TREATMENT_DOCTOR_TYPE_LABELS,
+    TREATMENT_DOCTOR_TYPE_OPTIONS,
+} from '@/lib/treatmentDoctor.constants';
 import AlertPopup from '@/components/(features)/(noti)/alert';
 import CenterPopup from '@/components/(features)/(popup)/popup_center';
 import Noti from '@/components/(features)/(noti)/noti';
@@ -137,15 +142,17 @@ function UnitMedicineForm({ formAction, formState, initialData = null, submitTex
     );
 }
 
-// Form cho Bác sĩ liệu trình
+// Form cho Bác sĩ (liệu trình / tư vấn)
 function TreatmentDoctorForm({ formAction, formState, initialData = null, submitText }) {
     const [name, setName] = useState(initialData?.name || '');
+    const [type, setType] = useState(initialData?.type || TREATMENT_DOCTOR_TYPES.LIEU_TRINH);
     const [expertise, setExpertise] = useState(initialData?.expertise || '');
     const [note, setNote] = useState(initialData?.note || '');
 
     useEffect(() => {
         if (formState.status === true && !initialData) {
             setName('');
+            setType(TREATMENT_DOCTOR_TYPES.LIEU_TRINH);
             setExpertise('');
             setNote('');
         }
@@ -153,6 +160,7 @@ function TreatmentDoctorForm({ formAction, formState, initialData = null, submit
 
     useEffect(() => {
         setName(initialData?.name || '');
+        setType(initialData?.type || TREATMENT_DOCTOR_TYPES.LIEU_TRINH);
         setExpertise(initialData?.expertise || '');
         setNote(initialData?.note || '');
     }, [initialData]);
@@ -173,6 +181,31 @@ function TreatmentDoctorForm({ formAction, formState, initialData = null, submit
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                 />
+            </div>
+            <div>
+                <label htmlFor="type" style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
+                    Loại bác sĩ *
+                </label>
+                <select
+                    id="type"
+                    name="type"
+                    required
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                    style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '6px',
+                        backgroundColor: '#fff',
+                        fontSize: '14px',
+                        height: '36px',
+                    }}
+                >
+                    {TREATMENT_DOCTOR_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </select>
             </div>
             <div>
                 <label htmlFor="expertise" style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
@@ -328,7 +361,23 @@ function SectionManager({
                                 }}
                             >
                                 <div style={{ flex: 1 }}>
-                                    <p style={{ fontWeight: 500, marginBottom: '4px' }}>{item.name}</p>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                                        <p style={{ fontWeight: 500 }}>{item.name}</p>
+                                        {item.type && TREATMENT_DOCTOR_TYPE_LABELS[item.type] && (
+                                            <span
+                                                style={{
+                                                    fontSize: '11px',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '999px',
+                                                    fontWeight: 500,
+                                                    backgroundColor: item.type === TREATMENT_DOCTOR_TYPES.LIEU_TRINH ? '#dbeafe' : '#fef3c7',
+                                                    color: item.type === TREATMENT_DOCTOR_TYPES.LIEU_TRINH ? '#1e40af' : '#92400e',
+                                                }}
+                                            >
+                                                {TREATMENT_DOCTOR_TYPE_LABELS[item.type]}
+                                            </span>
+                                        )}
+                                    </div>
                                     {item.expertise && (
                                         <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
                                             Chuyên môn: {item.expertise}
@@ -491,9 +540,9 @@ export default function TreatmentManager({ medicines = [], unitMedicines = [], t
                     FormComponent={UnitMedicineForm}
                 />
 
-                {/* Phần 3: Bác sĩ liệu trình */}
+                {/* Phần 3: Bác sĩ (liệu trình / tư vấn) */}
                 <SectionManager
-                    title="Bác sĩ liệu trình"
+                    title="Bác sĩ"
                     data={treatmentDoctorList}
                     onCreate={refreshData}
                     onUpdate={refreshData}

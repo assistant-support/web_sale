@@ -4,6 +4,7 @@ import dbConnect from "@/config/connectDB";
 import Medicine from "@/models/medicine.model";
 import UnitMedicine from "@/models/unitMedicine.model";
 import TreatmentDoctor from "@/models/treatmentDoctor.model";
+import { TREATMENT_DOCTOR_TYPES } from "@/lib/treatmentDoctor.constants";
 import checkAuthToken from "@/utils/checktoken";
 import { unstable_cache as nextCache, revalidateTag } from 'next/cache';
 
@@ -302,6 +303,7 @@ export async function createTreatmentDoctorAction(_previousState, formData) {
 
     await dbConnect();
     const name = formData.get('name');
+    const type = formData.get('type');
     const expertise = formData.get('expertise') || '';
     const note = formData.get('note') || '';
 
@@ -317,9 +319,15 @@ export async function createTreatmentDoctorAction(_previousState, formData) {
         return { message: 'Tên bác sĩ là bắt buộc.', status: false };
     }
 
+    const allowedTypes = Object.values(TREATMENT_DOCTOR_TYPES);
+    if (!type || !allowedTypes.includes(type.toString())) {
+        return { message: 'Loại bác sĩ không hợp lệ.', status: false };
+    }
+
     try {
         const doctor = new TreatmentDoctor({
             name: name.toString().trim(),
+            type: type.toString(),
             expertise: expertise.toString().trim(),
             note: note.toString().trim(),
         });
@@ -328,7 +336,7 @@ export async function createTreatmentDoctorAction(_previousState, formData) {
         return { message: `Đã thêm bác sĩ "${doctor.name}" thành công.`, status: true };
     } catch (error) {
         if (error.code === 11000) {
-            return { message: 'Tên bác sĩ đã tồn tại.', status: false };
+            return { message: 'Tên bác sĩ đã tồn tại trong cùng loại.', status: false };
         }
         console.error("Lỗi thêm bác sĩ:", error);
         return { message: 'Lỗi hệ thống, không thể thêm bác sĩ.', status: false };
@@ -343,6 +351,7 @@ export async function updateTreatmentDoctorAction(_previousState, formData) {
     await dbConnect();
     const id = formData.get('id');
     const name = formData.get('name');
+    const type = formData.get('type');
     const expertise = formData.get('expertise') || '';
     const note = formData.get('note') || '';
 
@@ -362,11 +371,17 @@ export async function updateTreatmentDoctorAction(_previousState, formData) {
         return { message: 'Tên bác sĩ là bắt buộc.', status: false };
     }
 
+    const allowedTypes = Object.values(TREATMENT_DOCTOR_TYPES);
+    if (!type || !allowedTypes.includes(type.toString())) {
+        return { message: 'Loại bác sĩ không hợp lệ.', status: false };
+    }
+
     try {
         const doctor = await TreatmentDoctor.findByIdAndUpdate(
             id,
             {
                 name: name.toString().trim(),
+                type: type.toString(),
                 expertise: expertise.toString().trim(),
                 note: note.toString().trim(),
             },
@@ -381,7 +396,7 @@ export async function updateTreatmentDoctorAction(_previousState, formData) {
         return { message: `Đã cập nhật bác sĩ "${doctor.name}" thành công.`, status: true };
     } catch (error) {
         if (error.code === 11000) {
-            return { message: 'Tên bác sĩ đã tồn tại.', status: false };
+            return { message: 'Tên bác sĩ đã tồn tại trong cùng loại.', status: false };
         }
         console.error("Lỗi cập nhật bác sĩ:", error);
         return { message: 'Lỗi hệ thống, không thể cập nhật bác sĩ.', status: false };

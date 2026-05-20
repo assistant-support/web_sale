@@ -5,8 +5,11 @@ import { user_data } from "@/data/actions/get";
 import { discount_data } from "@/app/actions/discount.actions";
 import { service_data } from "@/data/services/wraperdata.db";
 import { form_data, message_sources_data } from '@/data/form_database/wraperdata.db';
+import checkAuthToken from "@/utils/checktoken";
 
 export default async function AdminPage() {
+    const session = await checkAuthToken();
+    const roles = session?.role || [];
     const [data, users, discountPrograms, services, sources, messageSources] = await Promise.all([
         customer_data(),
         user_data({}),
@@ -18,7 +21,7 @@ export default async function AdminPage() {
     
     return (
         <>
-            <Navbar />
+            <Navbar roles={roles} />
             <DashboardClient 
                 initialData={data} 
                 users={users} 

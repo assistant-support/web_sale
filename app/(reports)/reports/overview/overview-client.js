@@ -85,6 +85,18 @@ const StatCard = ({ title, value, icon: Icon, color, loading }) => (
 
 const SCROLL_LOAD_THRESHOLD = 0.5;
 
+function formatPercent(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '0%';
+    return `${value.toFixed(1)}%`;
+}
+
+function formatDateTime(value) {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return '—';
+    return dt.toLocaleString('vi-VN');
+}
+
 export default function OverviewReportClient({
     customers = [],
     appointments = [],
@@ -92,8 +104,13 @@ export default function OverviewReportClient({
     sources = [],
     messageSources = [],
     conversations = [],
+    callLabels = [],
     loadingHeavy = false,
     customersTotal = 0,
+    customersWithAppointmentsTotal = 0,
+    customersWithOrdersTotal = 0,
+    oldCustomersTotal = 0,
+    customersArrivedTotal = 0,
     appointmentsTotal = 0,
     countsLoading = false,
     hasMoreCustomers = false,
@@ -101,10 +118,12 @@ export default function OverviewReportClient({
     loadingMoreCustomers = false,
     loadingMoreAppointments = false,
     onLoadMoreCustomers,
+    onLoadMoreReceptionCustomers,
     onLoadMoreAppointments,
 }) {
     const PAGE_SIZE = 40;
     const scrollHalfReachedCustomers = useRef(false);
+    const scrollHalfReachedReception = useRef(false);
     const scrollHalfReachedAppointments = useRef(false);
 
     // Filters
@@ -113,6 +132,10 @@ export default function OverviewReportClient({
     const [customerTypeFilter, setCustomerTypeFilter] = useState('all');
     const [appointmentTypeFilter, setAppointmentTypeFilter] = useState('all');
     const [conversationTypeFilter, setConversationTypeFilter] = useState('all'); // 'all' | 'lead' | 'not_lead'
+    const [receptionFuFilter, setReceptionFuFilter] = useState('all'); // only for reception table: all|FU1|FU2|FU3
+    const [receptionCallStatusFilter, setReceptionCallStatusFilter] = useState('all'); // only for reception table: all|success|false|await
+    const [receptionAppointmentFilter, setReceptionAppointmentFilter] = useState('all'); // only for reception table: all|has|none
+    const [receptionTagFilter, setReceptionTagFilter] = useState('all'); // only for reception table: labelCall name
     const [docOpen, setDocOpen] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -214,6 +237,20 @@ export default function OverviewReportClient({
         totalAppointments: filteredData.filteredAppointments.length,
     }), [filteredData]);
 
+    const completionRate = customersTotal > 0
+        ? (customersWithOrdersTotal / customersTotal) * 100
+        : 0;
+    const oldRate = customersTotal > 0
+        ? (oldCustomersTotal / customersTotal) * 100
+        : 0;
+
+    const appointmentRate = customersTotal > 0
+        ? (customersWithAppointmentsTotal / customersTotal) * 100
+        : 0;
+    const dropRate = customersTotal > 0
+        ? (customersArrivedTotal / customersTotal) * 100
+        : 0;
+
     // Source map for lookup
     const sourceMap = useMemo(() => {
         const map = new Map();
@@ -228,6 +265,27 @@ export default function OverviewReportClient({
         (services || []).forEach(s => map.set(String(s._id), s.name));
         return map;
     }, [services]);
+
+    const appointmentStatsByCustomer = useMemo(() => {
+        const map = new Map();
+        (filteredData.filteredAppointments || []).forEach((a) => {
+            const customerId = String(a?.customer?._id || a?.customer || '');
+            if (!customerId) return;
+            const currentAt = new Date(a?.appointmentDate || a?.createdAt || 0).getTime();
+            const prev = map.get(customerId);
+            if (!prev) {
+                map.set(customerId, { count: 1, latestStatus: a?.status || '', latestAt: currentAt });
+                return;
+            }
+            const next = { ...prev, count: prev.count + 1 };
+            if (currentAt >= prev.latestAt) {
+                next.latestAt = currentAt;
+                next.latestStatus = a?.status || '';
+            }
+            map.set(customerId, next);
+        });
+        return map;
+    }, [filteredData]);
 
     // Helper function to get customer source name
     const getCustomerSourceName = (customer) => {
@@ -274,6 +332,29 @@ export default function OverviewReportClient({
         });
         
         return serviceNames;
+    };
+
+    const getCustomerServiceUse = (customer) => {
+        if (!Array.isArray(customer?.service_use) || customer.service_use.length === 0) return [];
+        return customer.service_use.map((sv) => {
+            const id = String(sv?._id || sv);
+            return serviceMap.get(id) || id;
+        });
+    };
+
+    const getCustomerCallStatusCode = (customer) => {
+        const fuList = Array.isArray(customer?.FU) ? customer.FU : [];
+        if (fuList.length === 0) return 'Chưa lưu FU';
+        const lastFu = fuList[fuList.length - 1];
+        let fuKey = '';
+        if (lastFu && typeof lastFu === 'object' && !Array.isArray(lastFu)) {
+            fuKey = Object.keys(lastFu)[0] || '';
+        }
+        if (!fuKey) fuKey = `FU${fuList.length}`;
+        let suffix = 'F';
+        if (customer?.statusForCall === 'success') suffix = 'S';
+        else if (customer?.statusForCall === 'await') suffix = 'await';
+        return `${fuKey}_${suffix}`;
     };
 
     // Helper function to get customer order count
@@ -345,16 +426,51 @@ export default function OverviewReportClient({
 
     // Tables data with service stats + lazy loading
     const [customerLimit, setCustomerLimit] = useState(PAGE_SIZE);
+    const [receptionLimit, setReceptionLimit] = useState(PAGE_SIZE);
     const [appointmentLimit, setAppointmentLimit] = useState(PAGE_SIZE);
     const [serviceLimit, setServiceLimit] = useState(PAGE_SIZE);
     const [conversationLimit, setConversationLimit] = useState(PAGE_SIZE);
 
+    const receptionCustomersFiltered = useMemo(() => {
+        let next = filteredData.filteredCustomers;
+
+        if (receptionFuFilter !== 'all') {
+            const fuLen = Number(String(receptionFuFilter).replace('FU', ''));
+            if (Number.isFinite(fuLen) && fuLen > 0) {
+                next = next.filter((c) => {
+                    const list = Array.isArray(c?.FU) ? c.FU : [];
+                    return list.length === fuLen;
+                });
+            }
+        }
+
+        if (receptionCallStatusFilter !== 'all') {
+            next = next.filter((c) => String(c?.statusForCall || '') === receptionCallStatusFilter);
+        }
+
+        if (receptionAppointmentFilter !== 'all') {
+            next = next.filter((c) => {
+                const pipeline = Array.isArray(c?.pipelineStatus) ? c.pipelineStatus : [];
+                const hasAppointment = pipeline.length > 5 && pipeline[5] === 'scheduled_unconfirmed_4';
+                return receptionAppointmentFilter === 'has' ? hasAppointment : !hasAppointment;
+            });
+        }
+
+        if (receptionTagFilter !== 'all') {
+            next = next.filter((c) => String(c?.Call_Label?.name || '') === receptionTagFilter);
+        }
+
+        return next;
+    }, [filteredData, receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
+
     // Mỗi lần bộ lọc thay đổi, reset lại số dòng hiển thị
     useEffect(() => {
         setCustomerLimit(PAGE_SIZE);
+        setReceptionLimit(PAGE_SIZE);
         setAppointmentLimit(PAGE_SIZE);
+        setServiceLimit(PAGE_SIZE);
         setConversationLimit(PAGE_SIZE);
-    }, [filteredData]);
+    }, [filteredData, receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
 
     // Tính thống kê dịch vụ cho TẤT CẢ services (dùng cho bảng + export)
     const servicesWithStatsAll = useMemo(() => {
@@ -392,19 +508,23 @@ export default function OverviewReportClient({
 
     const tableData = useMemo(() => {
         const servicesWithStats = servicesWithStatsAll.slice(0, serviceLimit);
-        
+
         return {
             customers: filteredData.filteredCustomers.slice(0, customerLimit),
+            receptionCustomers: receptionCustomersFiltered.slice(0, receptionLimit),
             appointments: filteredData.filteredAppointments.slice(0, appointmentLimit),
             services: servicesWithStats,
             conversations: filteredData.filteredConversations.slice(0, conversationLimit),
             sources: [...sources, ...messageSources].slice(0, 20),
         };
-    }, [filteredData, servicesWithStatsAll, sources, messageSources, customerLimit, appointmentLimit, serviceLimit, conversationLimit]);
+    }, [filteredData, receptionCustomersFiltered, servicesWithStatsAll, sources, messageSources, customerLimit, receptionLimit, appointmentLimit, serviceLimit, conversationLimit]);
 
     // Reset ref khi load xong để lần kéo tiếp có thể load tiếp
     useEffect(() => {
         if (!loadingMoreCustomers) scrollHalfReachedCustomers.current = false;
+    }, [loadingMoreCustomers]);
+    useEffect(() => {
+        if (!loadingMoreCustomers) scrollHalfReachedReception.current = false;
     }, [loadingMoreCustomers]);
     useEffect(() => {
         if (!loadingMoreAppointments) scrollHalfReachedAppointments.current = false;
@@ -439,6 +559,9 @@ export default function OverviewReportClient({
         if (type === 'customers') {
             const maxLen = filteredData.filteredCustomers.length;
             setCustomerLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
+        } else if (type === 'reception') {
+            const maxLen = receptionCustomersFiltered.length;
+            setReceptionLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         } else if (type === 'appointments') {
             const maxLen = filteredData.filteredAppointments.length;
             setAppointmentLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
@@ -460,6 +583,23 @@ export default function OverviewReportClient({
         handleScrollLoadFromApi(e, 'appointments');
         handleScrollLoadMore(e, 'appointments');
     }, [handleScrollLoadFromApi]);
+    const handleReceptionScroll = useCallback((e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+        if (scrollHeight > 0) {
+            const ratio = (scrollTop + clientHeight) / scrollHeight;
+            if (
+                ratio >= SCROLL_LOAD_THRESHOLD &&
+                hasMoreCustomers &&
+                !loadingMoreCustomers &&
+                onLoadMoreReceptionCustomers &&
+                !scrollHalfReachedReception.current
+            ) {
+                scrollHalfReachedReception.current = true;
+                onLoadMoreReceptionCustomers();
+            }
+        }
+        handleScrollLoadMore(e, 'reception');
+    }, [hasMoreCustomers, loadingMoreCustomers, onLoadMoreReceptionCustomers]);
 
     // Export Excel: luôn lấy TOÀN BỘ dữ liệu đã lọc (không theo limit)
     const handleDownload = async (type) => {
@@ -467,7 +607,8 @@ export default function OverviewReportClient({
         const sheetName =
             type === 'customers' ? 'Khach hang' :
             type === 'appointments' ? 'Lich hen' :
-            'Dich vu';
+            type === 'services' ? 'Dich vu' :
+            'Hoi thoai';
 
         const worksheet = workbook.addWorksheet(sheetName);
 
@@ -585,6 +726,10 @@ export default function OverviewReportClient({
                                 setCustomerTypeFilter('all');
                                 setAppointmentTypeFilter('all');
                                 setConversationTypeFilter('all');
+                                setReceptionFuFilter('all');
+                                setReceptionCallStatusFilter('all');
+                                setReceptionAppointmentFilter('all');
+                                setReceptionTagFilter('all');
                                 setStartDate('');
                                 setEndDate('');
                             }}
@@ -660,6 +805,49 @@ export default function OverviewReportClient({
                         value={conversationTypeFilter}
                         onChange={setConversationTypeFilter}
                     />
+                    <Listbox
+                        label="FU (Bảng tiếp nhận)"
+                        options={[
+                            { value: 'all', label: 'Tất cả FU' },
+                            { value: 'FU1', label: 'FU1' },
+                            { value: 'FU2', label: 'FU2' },
+                            { value: 'FU3', label: 'FU3' },
+                        ]}
+                        value={receptionFuFilter}
+                        onChange={setReceptionFuFilter}
+                    />
+                    <Listbox
+                        label="Thẻ (Bảng tiếp nhận)"
+                        options={[
+                            { value: 'all', label: 'Tất cả thẻ' },
+                            ...(callLabels || [])
+                                .filter((x) => x?.name)
+                                .map((x) => ({ value: x.name, label: x.name })),
+                        ]}
+                        value={receptionTagFilter}
+                        onChange={setReceptionTagFilter}
+                    />
+                    <Listbox
+                        label="Trạng thái cuộc gọi"
+                        options={[
+                            { value: 'all', label: 'Tất cả trạng thái' },
+                            { value: 'success', label: 'Thành công' },
+                            { value: 'false', label: 'Thất bại' },
+                            { value: 'await', label: 'Chờ đợi' },
+                        ]}
+                        value={receptionCallStatusFilter}
+                        onChange={setReceptionCallStatusFilter}
+                    />
+                    <Listbox
+                        label="Lịch hẹn KH (Bảng tiếp nhận)"
+                        options={[
+                            { value: 'all', label: 'Tất cả' },
+                            { value: 'has', label: 'Có' },
+                            { value: 'none', label: 'Không' },
+                        ]}
+                        value={receptionAppointmentFilter}
+                        onChange={setReceptionAppointmentFilter}
+                    />
                 </CardContent>
             </Card>
 
@@ -721,12 +909,40 @@ export default function OverviewReportClient({
             </Popup>
 
             {/* Cards: số lượng thật từ DB, không phụ thuộc số mẫu đã load */}
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <StatCard
                     title="Tổng số khách hàng"
                     value={customersTotal}
                     icon={Users}
                     color="#6366f1"
+                    loading={countsLoading}
+                />
+                <StatCard
+                    title="Tỷ lệ hoàn thành đơn"
+                    value={`${formatPercent(completionRate)} (${customersWithOrdersTotal}/${customersTotal})`}
+                    icon={Users}
+                    color="#f59e0b"
+                    loading={countsLoading}
+                />
+                <StatCard
+                    title="Tỷ lệ khách cũ"
+                    value={(
+                        <div>
+                            <div>{`${formatPercent(oldRate)} (${oldCustomersTotal}/${customersTotal})`}</div>
+                            <div className="mt-1 text-xs font-normal text-muted-foreground">
+                                {`Khách cũ: ${oldCustomersTotal} | Khách mới: ${Math.max(0, customersTotal - oldCustomersTotal)}`}
+                            </div>
+                        </div>
+                    )}
+                    icon={Users}
+                    color="#f97316"
+                    loading={countsLoading}
+                />
+                <StatCard
+                    title="Tỷ lệ hẹn"
+                    value={`${formatPercent(appointmentRate)} (${customersWithAppointmentsTotal}/${customersTotal})`}
+                    icon={Calendar}
+                    color="#3b82f6"
                     loading={countsLoading}
                 />
                 <StatCard
@@ -736,10 +952,100 @@ export default function OverviewReportClient({
                     color="#10b981"
                     loading={countsLoading}
                 />
+                <StatCard
+                    title="Tỷ lệ rớt"
+                    value={`${formatPercent(dropRate)} (${customersArrivedTotal}/${customersTotal})`}
+                    icon={Users}
+                    color="#ef4444"
+                    loading={countsLoading}
+                />
             </div>
 
             {/* Tables */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {/* Table Khách hàng tiếp nhận */}
+                <Card className="md:col-span-2 lg:col-span-3">
+                    <CardHeader>
+                        <CardTitle className="text-sm">Khách hàng tiếp nhận</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="max-h-[420px] overflow-y-auto" onScroll={handleReceptionScroll}>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="text-xs">Thời gian</TableHead>
+                                        <TableHead className="text-xs">Loại khách hàng</TableHead>
+                                        <TableHead className="text-xs">Mã KH</TableHead>
+                                        <TableHead className="text-xs">Tên KH</TableHead>
+                                        <TableHead className="text-xs">Nguồn</TableHead>
+                                        <TableHead className="text-xs">Dịch vụ</TableHead>
+                                        <TableHead className="text-xs">Lịch hẹn</TableHead>
+                                        <TableHead className="text-xs">Trạng thái</TableHead>
+                                        <TableHead className="text-xs">Trạng thái cuộc gọi</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {loadingHeavy ? (
+                                        <TableRow>
+                                            <TableCell colSpan={9} className="text-center text-muted-foreground text-sm py-8">
+                                                Đang tải dữ liệu...
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : tableData.receptionCustomers.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={9} className="text-center text-muted-foreground text-sm py-8">
+                                                Không có dữ liệu khách hàng
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        tableData.receptionCustomers.map((c) => {
+                                            const customerId = String(c?._id || '');
+                                            const appointmentStats = appointmentStatsByCustomer.get(customerId);
+                                            const appointmentCount = appointmentStats?.count || 0;
+                                            const latestStatus = appointmentStats?.latestStatus || '';
+                                            const typeText = c?.customerType === 'old' ? 'Khách cũ' : 'Khách mới';
+                                            const serviceUse = getCustomerServiceUse(c);
+                                            const callStatusCode = getCustomerCallStatusCode(c);
+                                            const callStatusIsSuccess = callStatusCode.endsWith('_S');
+                                            const callStatusIsPending = callStatusCode === 'Chưa lưu FU' || callStatusCode.endsWith('_await');
+
+                                            return (
+                                                <TableRow key={`reception-${customerId}`}>
+                                                    <TableCell className="text-xs">{formatDateTime(c?.createAt)}</TableCell>
+                                                    <TableCell className="text-xs">{typeText}</TableCell>
+                                                    <TableCell className="text-xs">{c?.customerCode || '—'}</TableCell>
+                                                    <TableCell className="text-xs">{c?.name || '—'}</TableCell>
+                                                    <TableCell className="text-xs">{c?.sourceDetails || '—'}</TableCell>
+                                                    <TableCell className="text-xs">
+                                                        {serviceUse.length > 0 ? serviceUse.join(', ') : '—'}
+                                                    </TableCell>
+                                                    <TableCell className="text-xs">
+                                                        {appointmentCount > 0 ? `Có ${appointmentCount} lịch hẹn` : 'Không có lịch hẹn'}
+                                                    </TableCell>
+                                                    <TableCell className="text-xs">
+                                                        {appointmentCount > 0 ? getAppointmentStatusText(latestStatus) : '—'}
+                                                    </TableCell>
+                                                    <TableCell className="text-xs">
+                                                        <span className={
+                                                            callStatusIsPending
+                                                                ? 'text-muted-foreground'
+                                                                : callStatusIsSuccess
+                                                                    ? 'text-green-600 font-medium'
+                                                                    : 'text-red-600 font-medium'
+                                                        }>
+                                                            {callStatusCode}
+                                                        </span>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </CardContent>
+                </Card>
+
                 {/* Table Khách hàng */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">

@@ -3,6 +3,7 @@ import connectDB from '@/config/connectDB';
 import { service_data } from '@/data/services/wraperdata.db';
 import { form_data, message_sources_data } from '@/data/form_database/wraperdata.db';
 import ConversationLeadStatus from '@/models/conversationLeadStatus.model';
+import LabelCall from '@/models/labelCall.model';
 
 /**
  * Dữ liệu nhẹ cho Báo cáo tổng quan: services, sources, messageSources, conversations.
@@ -12,13 +13,17 @@ export async function GET() {
     try {
         await connectDB();
 
-        const [services, sources, messageSources, conversationsRaw] = await Promise.all([
+        const [services, sources, messageSources, conversationsRaw, callLabelsRaw] = await Promise.all([
             service_data(),
             form_data(),
             message_sources_data(),
             ConversationLeadStatus.find({})
                 .select('name pageDisplayName status createdAt updatedAt')
                 .sort({ updatedAt: -1 })
+                .lean(),
+            LabelCall.find({})
+                .select('name')
+                .sort({ name: 1 })
                 .lean(),
         ]);
 
@@ -30,6 +35,10 @@ export async function GET() {
             createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt ?? null,
             updatedAt: c.updatedAt instanceof Date ? c.updatedAt.toISOString() : c.updatedAt ?? null,
         }));
+        const callLabels = (callLabelsRaw || []).map((l) => ({
+            _id: l._id ? String(l._id) : undefined,
+            name: l.name ?? '',
+        }));
 
         return NextResponse.json({
             success: true,
@@ -38,6 +47,7 @@ export async function GET() {
                 sources: sources || [],
                 messageSources: messageSources || [],
                 conversations: conversations || [],
+                callLabels: callLabels || [],
             },
         });
     } catch (error) {

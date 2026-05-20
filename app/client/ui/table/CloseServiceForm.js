@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useWatch } from 'react-hook-form';
-import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw, Loader2 } from 'lucide-react';
+import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw, Loader2, Lock } from 'lucide-react';
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { TREATMENT_DOCTOR_TYPES } from '@/lib/treatmentDoctor.constants';
 
 export default function CloseServiceForm({
     form,
@@ -23,6 +24,7 @@ export default function CloseServiceForm({
     discountType,
     discountPrograms = [],
     currentUserName = '',
+    currentUserRoles = [],
     unitMedicines = [],
     treatmentDoctors = [],
     fileReg,                 // form.register('invoiceImage')
@@ -43,6 +45,7 @@ export default function CloseServiceForm({
     onRemoveCustomerPhoto,
     onSubmit,
     readOnly = false,
+    isCreating = false,
     unifiedInvoiceImages = [],
     setUnifiedInvoiceImages,
     onReorderInvoiceImages,
@@ -56,6 +59,12 @@ export default function CloseServiceForm({
 
     const currencyVN = (n) => new Intl.NumberFormat('vi-VN').format(Number(n || 0));
 
+    // Quyền Technician: chỉ Technician mới được chọn Bác sĩ Liệu trình; tên KTV tự lấy từ tài khoản đăng nhập
+    const isTechnician = Array.isArray(currentUserRoles) && currentUserRoles.includes('Technician');
+    // Chỉ Technician được phép chỉnh sửa (thêm/xoá/sắp xếp) ảnh sau khi đã tạo đơn.
+    // Các quyền khác chỉ thao tác xem/tải ảnh giống chế độ readOnly.
+    const imageReadOnly = readOnly || !isTechnician;
+
     // State cho autocomplete tên thuốc
     const [medicineInputValue, setMedicineInputValue] = useState(''); // Giá trị hiển thị trong input
     const [medicineSearchValue, setMedicineSearchValue] = useState(''); // Giá trị dùng để search
@@ -66,9 +75,9 @@ export default function CloseServiceForm({
     const medicineInputRef = useRef(null);
     const medicineDropdownRef = useRef(null);
 
-    // State cho checkbox trong chế độ xem - ảnh minh chứng (readOnly để download)
+    // State cho checkbox trong chế độ xem hoặc khi không có quyền chỉnh sửa ảnh - ảnh minh chứng (để download)
     const [selectedImageIndices, setSelectedImageIndices] = useState(() => {
-        if (readOnly && existingImageUrls.length > 0) {
+        if (imageReadOnly && existingImageUrls.length > 0) {
             return existingImageUrls.map((_, i) => i);
         }
         return [];
@@ -101,27 +110,27 @@ export default function CloseServiceForm({
         }
     };
 
-    // Reset selected indices khi existingImageUrls thay đổi trong chế độ xem
+    // Reset selected indices khi existingImageUrls thay đổi trong chế độ xem/không có quyền chỉnh sửa ảnh
     useEffect(() => {
-        if (readOnly && existingImageUrls.length > 0) {
+        if (imageReadOnly && existingImageUrls.length > 0) {
             setSelectedImageIndices(existingImageUrls.map((_, i) => i));
         }
-    }, [existingImageUrls.length, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [existingImageUrls.length, imageReadOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // State cho checkbox trong chế độ xem - ảnh khách hàng (readOnly để download)
+    // State cho checkbox trong chế độ xem hoặc khi không có quyền chỉnh sửa ảnh - ảnh khách hàng (để download)
     const [selectedCustomerPhotoIndices, setSelectedCustomerPhotoIndices] = useState(() => {
-        if (readOnly && existingCustomerPhotoUrls.length > 0) {
+        if (imageReadOnly && existingCustomerPhotoUrls.length > 0) {
             return existingCustomerPhotoUrls.map((_, i) => i);
         }
         return [];
     });
 
-    // Reset selected indices khi existingCustomerPhotoUrls thay đổi trong chế độ xem
+    // Reset selected indices khi existingCustomerPhotoUrls thay đổi trong chế độ xem/không có quyền chỉnh sửa ảnh
     useEffect(() => {
-        if (readOnly && existingCustomerPhotoUrls.length > 0) {
+        if (imageReadOnly && existingCustomerPhotoUrls.length > 0) {
             setSelectedCustomerPhotoIndices(existingCustomerPhotoUrls.map((_, i) => i));
         }
-    }, [existingCustomerPhotoUrls.length, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [existingCustomerPhotoUrls.length, imageReadOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // State cho các ID ảnh được chọn để xóa (chế độ edit - ảnh đã lưu)
     const [selectedImageIdsToDelete, setSelectedImageIdsToDelete] = useState([]);
@@ -169,8 +178,8 @@ export default function CloseServiceForm({
     };
 
     const toggleImageSelection = (index) => {
-        if (readOnly) {
-            // Chế độ xem: để download
+        if (imageReadOnly) {
+            // Chế độ xem hoặc không có quyền chỉnh sửa: để download
             setSelectedImageIndices(prev => 
                 prev.includes(index) 
                     ? prev.filter(i => i !== index)
@@ -179,9 +188,9 @@ export default function CloseServiceForm({
         }
     };
 
-    // Toggle chọn ảnh để xóa (chế độ edit)
+    // Toggle chọn ảnh để xóa (chế độ edit, chỉ cho phép Technician)
     const toggleImageSelectionForDelete = (imageId) => {
-        if (readOnly) return;
+        if (imageReadOnly) return;
         setSelectedImageIdsToDelete(prev => 
             prev.includes(imageId) 
                 ? prev.filter(id => id !== imageId)
@@ -203,8 +212,8 @@ export default function CloseServiceForm({
     };
 
     const toggleCustomerPhotoSelection = (index) => {
-        if (readOnly) {
-            // Chế độ xem: để download
+        if (imageReadOnly) {
+            // Chế độ xem hoặc không có quyền chỉnh sửa: để download
             setSelectedCustomerPhotoIndices(prev => 
                 prev.includes(index) 
                     ? prev.filter(i => i !== index)
@@ -213,9 +222,9 @@ export default function CloseServiceForm({
         }
     };
 
-    // Toggle chọn ảnh khách hàng để xóa (chế độ edit)
+    // Toggle chọn ảnh khách hàng để xóa (chế độ edit, chỉ cho phép Technician)
     const toggleCustomerPhotoSelectionForDelete = (photoId) => {
-        if (readOnly) return;
+        if (imageReadOnly) return;
         setSelectedCustomerPhotoIdsToDelete(prev => 
             prev.includes(photoId) 
                 ? prev.filter(id => id !== photoId)
@@ -326,9 +335,9 @@ export default function CloseServiceForm({
         setSelectedCustomerPhotoIdsToDelete([]);
     };
 
-    // Drag & Drop cho ảnh (unified - cả existing và new)
+    // Drag & Drop cho ảnh (unified - cả existing và new), chỉ cho phép khi có quyền chỉnh sửa ảnh
     const handleDragStart = (e, index) => {
-        if (readOnly || !onReorderInvoiceImages) return;
+        if (imageReadOnly || !onReorderInvoiceImages) return;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', index.toString());
         e.currentTarget.style.opacity = '0.5';
@@ -339,13 +348,13 @@ export default function CloseServiceForm({
     };
 
     const handleDragOver = (e) => {
-        if (readOnly || !onReorderInvoiceImages) return;
+        if (imageReadOnly || !onReorderInvoiceImages) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
     };
 
     const handleDrop = (e, dropIndex) => {
-        if (readOnly || !onReorderInvoiceImages) return;
+        if (imageReadOnly || !onReorderInvoiceImages) return;
         e.preventDefault();
         
         const dragIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
@@ -354,9 +363,9 @@ export default function CloseServiceForm({
         onReorderInvoiceImages(dragIndex, dropIndex);
     };
 
-    // Drag & Drop cho ảnh khách hàng (unified)
+    // Drag & Drop cho ảnh khách hàng (unified), chỉ cho phép khi có quyền chỉnh sửa ảnh
     const handleCustomerPhotoDragStart = (e, index) => {
-        if (readOnly || !onReorderCustomerPhotos) return;
+        if (imageReadOnly || !onReorderCustomerPhotos) return;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', index.toString());
         e.currentTarget.style.opacity = '0.5';
@@ -367,13 +376,13 @@ export default function CloseServiceForm({
     };
 
     const handleCustomerPhotoDragOver = (e) => {
-        if (readOnly || !onReorderCustomerPhotos) return;
+        if (imageReadOnly || !onReorderCustomerPhotos) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
     };
 
     const handleCustomerPhotoDrop = (e, dropIndex) => {
-        if (readOnly || !onReorderCustomerPhotos) return;
+        if (imageReadOnly || !onReorderCustomerPhotos) return;
         e.preventDefault();
         
         const dragIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
@@ -386,6 +395,25 @@ export default function CloseServiceForm({
     useEffect(() => {
         form.setValue('hasExistingInvoice', (existingImageUrls?.length ?? 0) > 0, { shouldValidate: true });
     }, [existingImageUrls, form]);
+
+    // Khi tạo mới đơn: bắt buộc trống Kỹ thuật viên & Bác sĩ Liệu trình (chỉ điền khi chỉnh sửa đơn)
+    useEffect(() => {
+        if (isCreating) {
+            form.setValue('technician', '');
+            form.setValue('treatmentDoctorsName', '');
+        }
+    }, [isCreating, form]);
+
+    // Khi mở form Sửa và user là Technician: nếu đơn chưa có technician, auto-fill bằng tên user hiện tại
+    // để khi họ chọn Bác sĩ Liệu trình và bấm Lưu thì DB lưu đúng tên KTV thao tác.
+    useEffect(() => {
+        if (!isCreating && isTechnician && currentUserName) {
+            const current = form.getValues('technician');
+            if (!current || !String(current).trim()) {
+                form.setValue('technician', currentUserName);
+            }
+        }
+    }, [isCreating, isTechnician, currentUserName, form]);
 
     // input file ẩn + ref kép để click từ tile
     const reg = fileReg || {};
@@ -759,30 +787,106 @@ export default function CloseServiceForm({
                                 />
                             </FormItem>
 
-                            <FormField control={form.control} name="doctorName" render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="text-xs">Bác sĩ Tư vấn</FormLabel>
-                                    <Select
-                                        onValueChange={readOnly ? undefined : field.onChange}
-                                        value={field.value ?? ''}
-                                        disabled={readOnly || status === 'rejected'}
-                                    >
+                            <FormField control={form.control} name="technician" render={({ field }) => {
+                                let displayValue = '';
+                                if (isCreating) displayValue = '';
+                                else if (field.value) displayValue = field.value;
+                                else if (isTechnician) displayValue = currentUserName || '';
+                                let placeholder = '— Tự động lấy từ Kỹ thuật viên thao tác —';
+                                if (isCreating) placeholder = 'Chỉ được cập nhật khi chỉnh sửa đơn';
+                                return (
+                                    <FormItem>
+                                        <FormLabel className="text-xs">Kỹ thuật viên</FormLabel>
                                         <FormControl>
-                                            <SelectTrigger className="w-full">
-                                                <SelectValue placeholder="-- Chọn bác sĩ --" />
-                                            </SelectTrigger>
+                                            <Input
+                                                type="text"
+                                                placeholder={placeholder}
+                                                value={displayValue}
+                                                disabled
+                                                className="bg-muted"
+                                            />
                                         </FormControl>
-                                        <SelectContent>
-                                            {treatmentDoctors.map((doctor) => (
-                                                <SelectItem key={doctor._id} value={doctor.name}>
-                                                    {doctor.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )} />
+                                        <FormMessage />
+                                    </FormItem>
+                                );
+                            }} />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FormField control={form.control} name="doctorName" render={({ field }) => {
+                                const consultDoctors = (treatmentDoctors || []).filter(d => d.type === TREATMENT_DOCTOR_TYPES.TU_VAN);
+                                return (
+                                    <FormItem>
+                                        <FormLabel className="text-xs">Bác sĩ Tư vấn</FormLabel>
+                                        <Select
+                                            onValueChange={readOnly ? undefined : field.onChange}
+                                            value={field.value ?? ''}
+                                            disabled={readOnly || status === 'rejected'}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder="-- Chọn bác sĩ tư vấn --" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {consultDoctors.length === 0 ? (
+                                                    <div className="p-2 text-sm text-muted-foreground">Chưa có bác sĩ tư vấn</div>
+                                                ) : (
+                                                    consultDoctors.map((doctor) => (
+                                                        <SelectItem key={doctor._id} value={doctor.name}>
+                                                            {doctor.name}
+                                                        </SelectItem>
+                                                    ))
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                );
+                            }} />
+
+                            <FormField control={form.control} name="treatmentDoctorsName" render={({ field }) => {
+                                const treatmentOnlyDoctors = (treatmentDoctors || []).filter(d => d.type === TREATMENT_DOCTOR_TYPES.LIEU_TRINH);
+                                const lockedByRole = !isTechnician;
+                                const isDisabled = readOnly || isCreating || lockedByRole || status === 'rejected';
+                                let placeholder = '-- Chọn bác sĩ liệu trình --';
+                                if (isCreating) placeholder = 'Chỉ được chọn khi chỉnh sửa đơn';
+                                else if (lockedByRole) placeholder = 'Chỉ Kỹ thuật viên được chọn';
+                                return (
+                                    <FormItem>
+                                        <FormLabel className="text-xs">Bác sĩ Liệu trình</FormLabel>
+                                        <Select
+                                            onValueChange={isDisabled ? undefined : (val) => {
+                                                field.onChange(val);
+                                                // Khi Technician chọn bác sĩ liệu trình → tự ghi tên KTV thao tác vào field technician
+                                                if (isTechnician && currentUserName) {
+                                                    form.setValue('technician', currentUserName, { shouldDirty: true });
+                                                }
+                                            }}
+                                            value={isCreating ? '' : (field.value ?? '')}
+                                            disabled={isDisabled}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger className="w-full">
+                                                    <SelectValue placeholder={placeholder} />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {treatmentOnlyDoctors.length === 0 ? (
+                                                    <div className="p-2 text-sm text-muted-foreground">Chưa có bác sĩ liệu trình</div>
+                                                ) : (
+                                                    treatmentOnlyDoctors.map((doctor) => (
+                                                        <SelectItem key={doctor._id} value={doctor.name}>
+                                                            {doctor.name}
+                                                        </SelectItem>
+                                                    ))
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                );
+                            }} />
                         </div>
                     </div>
                 </div>
@@ -995,7 +1099,7 @@ export default function CloseServiceForm({
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                     Tải lại ảnh
                                 </Button>
-                                {!readOnly && existingImageIds.length > 0 && selectedImageIdsToDelete.length > 0 && (
+                                {!imageReadOnly && existingImageIds.length > 0 && selectedImageIdsToDelete.length > 0 && (
                                     <Button 
                                         type="button"
                                         size="sm"
@@ -1006,7 +1110,7 @@ export default function CloseServiceForm({
                                         Xóa đã chọn ({selectedImageIdsToDelete.length})
                                     </Button>
                                 )}
-                                {readOnly && existingImageUrls.length > 0 && (
+                                {imageReadOnly && existingImageUrls.length > 0 && (
                                     <Button 
                                         type="button"
                                         size="sm"
@@ -1022,6 +1126,13 @@ export default function CloseServiceForm({
                             </div>
                         </div>
 
+                        {!readOnly && !isTechnician && (
+                            <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                <Lock className="h-3.5 w-3.5" />
+                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh sau khi đã tạo đơn. Bạn vẫn có thể xem và tải ảnh.
+                            </div>
+                        )}
+
                         {/* input file ẩn */}
                         <input
                             type="file"
@@ -1032,12 +1143,12 @@ export default function CloseServiceForm({
                             ref={attachRef}
                             onChange={handleFileChange}
                             className="hidden"
-                            disabled={readOnly}
+                            disabled={imageReadOnly}
                         />
 
                         {/* grid preview + tile Thêm ảnh */}
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-2">
-                            {!readOnly && (
+                            {!imageReadOnly && (
                                 <button
                                     type="button"
                                     onClick={openFileDialog}
@@ -1070,15 +1181,15 @@ export default function CloseServiceForm({
                                         <div 
                                             key={isExisting ? `existing-${unifiedIndex}` : `new-${unifiedIndex}`} 
                                             className="relative aspect-square group"
-                                            {...(!readOnly && onReorderInvoiceImages ? { draggable: true } : {})}
-                                            onDragStart={(!readOnly && onReorderInvoiceImages) ? (e) => handleDragStart(e, unifiedIndex) : undefined}
-                                            onDragEnd={(!readOnly && onReorderInvoiceImages) ? handleDragEnd : undefined}
-                                            onDragOver={(!readOnly && onReorderInvoiceImages) ? handleDragOver : undefined}
-                                            onDrop={(!readOnly && onReorderInvoiceImages) ? (e) => handleDrop(e, unifiedIndex) : undefined}
-                                            style={{ cursor: readOnly ? 'pointer' : (onReorderInvoiceImages ? 'move' : 'default') }}
+                                            {...(!imageReadOnly && onReorderInvoiceImages ? { draggable: true } : {})}
+                                            onDragStart={(!imageReadOnly && onReorderInvoiceImages) ? (e) => handleDragStart(e, unifiedIndex) : undefined}
+                                            onDragEnd={(!imageReadOnly && onReorderInvoiceImages) ? handleDragEnd : undefined}
+                                            onDragOver={(!imageReadOnly && onReorderInvoiceImages) ? handleDragOver : undefined}
+                                            onDrop={(!imageReadOnly && onReorderInvoiceImages) ? (e) => handleDrop(e, unifiedIndex) : undefined}
+                                            style={{ cursor: imageReadOnly ? 'pointer' : (onReorderInvoiceImages ? 'move' : 'default') }}
                                         >
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            {readOnly ? (
+                                            {imageReadOnly ? (
                                                 <a href={displayUrl} target="_blank" rel="noopener noreferrer" download>
                                                     <img
                                                         src={displayUrl}
@@ -1100,7 +1211,7 @@ export default function CloseServiceForm({
                                             {isExisting && (
                                                 <Badge variant="secondary" className="absolute top-1 left-1 text-xs">Đã lưu</Badge>
                                             )}
-                                            {!readOnly && !isExisting && onRemoveNewImage && (
+                                            {!imageReadOnly && !isExisting && onRemoveNewImage && (
                                                 <button
                                                     type="button"
                                                     onClick={() => onRemoveNewImage(newIndex)}
@@ -1110,7 +1221,7 @@ export default function CloseServiceForm({
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             )}
-                                            {!readOnly && isExisting && img.id && (
+                                            {!imageReadOnly && isExisting && img.id && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1121,7 +1232,7 @@ export default function CloseServiceForm({
                                                     </div>
                                                 </div>
                                             )}
-                                            {readOnly && isExisting && existingIndex !== -1 && (
+                                            {imageReadOnly && isExisting && existingIndex !== -1 && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1148,15 +1259,15 @@ export default function CloseServiceForm({
                                             <div 
                                                 key={`existing-${index}`} 
                                                 className="relative aspect-square group"
-                                                {...(!readOnly ? { draggable: true } : {})}
-                                                onDragStart={!readOnly ? (e) => handleDragStart(e, index) : undefined}
-                                                onDragEnd={!readOnly ? handleDragEnd : undefined}
-                                                onDragOver={!readOnly ? handleDragOver : undefined}
-                                                onDrop={!readOnly ? (e) => handleDrop(e, index) : undefined}
-                                                style={{ cursor: readOnly ? 'pointer' : 'move' }}
+                                                {...(!imageReadOnly ? { draggable: true } : {})}
+                                                onDragStart={!imageReadOnly ? (e) => handleDragStart(e, index) : undefined}
+                                                onDragEnd={!imageReadOnly ? handleDragEnd : undefined}
+                                                onDragOver={!imageReadOnly ? handleDragOver : undefined}
+                                                onDrop={!imageReadOnly ? (e) => handleDrop(e, index) : undefined}
+                                                style={{ cursor: imageReadOnly ? 'pointer' : 'move' }}
                                             >
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            {readOnly ? (
+                                            {imageReadOnly ? (
                                                 <a href={displayUrl} target="_blank" rel="noopener noreferrer" download>
                                                 <img
                                                     src={displayUrl}
@@ -1176,7 +1287,7 @@ export default function CloseServiceForm({
                                                 />
                                             )}
                                             <Badge variant="secondary" className="absolute top-1 left-1 text-xs">Đã lưu</Badge>
-                                            {readOnly && (
+                                            {imageReadOnly && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1194,7 +1305,7 @@ export default function CloseServiceForm({
                                         <div key={`new-${index}`} className="relative aspect-square">
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
                                             <img src={preview.url} alt={`Xem trước ảnh ${index + 1}`} className="h-full w-full object-cover rounded-md border" />
-                                            {!readOnly && (
+                                            {!imageReadOnly && (
                                                 <button
                                                     type="button"
                                                     onClick={() => onRemoveNewImage(index)}
@@ -1236,7 +1347,7 @@ export default function CloseServiceForm({
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                     Tải lại ảnh
                                 </Button>
-                                {!readOnly && existingCustomerPhotoIds.length > 0 && selectedCustomerPhotoIdsToDelete.length > 0 && (
+                                {!imageReadOnly && existingCustomerPhotoIds.length > 0 && selectedCustomerPhotoIdsToDelete.length > 0 && (
                                     <Button 
                                         type="button"
                                         size="sm"
@@ -1247,7 +1358,7 @@ export default function CloseServiceForm({
                                         Xóa đã chọn ({selectedCustomerPhotoIdsToDelete.length})
                                     </Button>
                                 )}
-                                {readOnly && existingCustomerPhotoUrls.length > 0 && (
+                                {imageReadOnly && existingCustomerPhotoUrls.length > 0 && (
                                     <Button 
                                         type="button"
                                         size="sm"
@@ -1263,6 +1374,13 @@ export default function CloseServiceForm({
                             </div>
                         </div>
 
+                        {!readOnly && !isTechnician && (
+                            <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                <Lock className="h-3.5 w-3.5" />
+                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh sau khi đã tạo đơn. Bạn vẫn có thể xem và tải ảnh.
+                            </div>
+                        )}
+
                         {/* input file ẩn */}
                         <input
                             type="file"
@@ -1273,12 +1391,12 @@ export default function CloseServiceForm({
                             ref={attachCustomerPhotoRef}
                             onChange={handleCustomerPhotoFileChange}
                             className="hidden"
-                            disabled={readOnly}
+                            disabled={imageReadOnly}
                         />
 
                         {/* grid preview + tile Thêm ảnh */}
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-2">
-                            {!readOnly && (
+                            {!imageReadOnly && (
                                 <button
                                     type="button"
                                     onClick={openCustomerPhotoDialog}
@@ -1310,15 +1428,15 @@ export default function CloseServiceForm({
                                         <div 
                                             key={isExisting ? `customer-photo-existing-${unifiedIndex}` : `customer-photo-new-${unifiedIndex}`} 
                                             className="relative aspect-square group"
-                                            {...(!readOnly && onReorderCustomerPhotos ? { draggable: true } : {})}
-                                            onDragStart={(!readOnly && onReorderCustomerPhotos) ? (e) => handleCustomerPhotoDragStart(e, unifiedIndex) : undefined}
-                                            onDragEnd={(!readOnly && onReorderCustomerPhotos) ? handleCustomerPhotoDragEnd : undefined}
-                                            onDragOver={(!readOnly && onReorderCustomerPhotos) ? handleCustomerPhotoDragOver : undefined}
-                                            onDrop={(!readOnly && onReorderCustomerPhotos) ? (e) => handleCustomerPhotoDrop(e, unifiedIndex) : undefined}
-                                            style={{ cursor: readOnly ? 'pointer' : (onReorderCustomerPhotos ? 'move' : 'default') }}
+                                            {...(!imageReadOnly && onReorderCustomerPhotos ? { draggable: true } : {})}
+                                            onDragStart={(!imageReadOnly && onReorderCustomerPhotos) ? (e) => handleCustomerPhotoDragStart(e, unifiedIndex) : undefined}
+                                            onDragEnd={(!imageReadOnly && onReorderCustomerPhotos) ? handleCustomerPhotoDragEnd : undefined}
+                                            onDragOver={(!imageReadOnly && onReorderCustomerPhotos) ? handleCustomerPhotoDragOver : undefined}
+                                            onDrop={(!imageReadOnly && onReorderCustomerPhotos) ? (e) => handleCustomerPhotoDrop(e, unifiedIndex) : undefined}
+                                            style={{ cursor: imageReadOnly ? 'pointer' : (onReorderCustomerPhotos ? 'move' : 'default') }}
                                         >
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            {readOnly ? (
+                                            {imageReadOnly ? (
                                                 <a href={displayUrl} target="_blank" rel="noopener noreferrer" download>
                                                     <img
                                                         src={displayUrl}
@@ -1340,7 +1458,7 @@ export default function CloseServiceForm({
                                             {isExisting && (
                                                 <Badge variant="secondary" className="absolute top-1 left-1 text-xs">Đã lưu</Badge>
                                             )}
-                                            {!readOnly && !isExisting && onRemoveCustomerPhoto && (
+                                            {!imageReadOnly && !isExisting && onRemoveCustomerPhoto && (
                                                 <button
                                                     type="button"
                                                     onClick={() => onRemoveCustomerPhoto(newIndex)}
@@ -1350,7 +1468,7 @@ export default function CloseServiceForm({
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             )}
-                                            {!readOnly && isExisting && img.id && (
+                                            {!imageReadOnly && isExisting && img.id && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1361,7 +1479,7 @@ export default function CloseServiceForm({
                                                     </div>
                                                 </div>
                                             )}
-                                            {readOnly && isExisting && existingIndex !== -1 && (
+                                            {imageReadOnly && isExisting && existingIndex !== -1 && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1388,15 +1506,15 @@ export default function CloseServiceForm({
                                             <div 
                                                 key={`customer-photo-${index}`} 
                                                 className="relative aspect-square group"
-                                                {...(!readOnly ? { draggable: true } : {})}
-                                                onDragStart={!readOnly ? (e) => handleCustomerPhotoDragStart(e, index) : undefined}
-                                                onDragEnd={!readOnly ? handleCustomerPhotoDragEnd : undefined}
-                                                onDragOver={!readOnly ? handleCustomerPhotoDragOver : undefined}
-                                                onDrop={!readOnly ? (e) => handleCustomerPhotoDrop(e, index) : undefined}
-                                                style={{ cursor: readOnly ? 'pointer' : 'move' }}
+                                                {...(!imageReadOnly ? { draggable: true } : {})}
+                                                onDragStart={!imageReadOnly ? (e) => handleCustomerPhotoDragStart(e, index) : undefined}
+                                                onDragEnd={!imageReadOnly ? handleCustomerPhotoDragEnd : undefined}
+                                                onDragOver={!imageReadOnly ? handleCustomerPhotoDragOver : undefined}
+                                                onDrop={!imageReadOnly ? (e) => handleCustomerPhotoDrop(e, index) : undefined}
+                                                style={{ cursor: imageReadOnly ? 'pointer' : 'move' }}
                                             >
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            {readOnly ? (
+                                            {imageReadOnly ? (
                                                 <a href={displayUrl} target="_blank" rel="noopener noreferrer" download>
                                                     <img
                                                         src={displayUrl}
@@ -1416,7 +1534,7 @@ export default function CloseServiceForm({
                                                 />
                                             )}
                                             <Badge variant="secondary" className="absolute top-1 left-1 text-xs">Đã lưu</Badge>
-                                            {readOnly && (
+                                            {imageReadOnly && (
                                                 <div className="absolute top-2 right-2 pointer-events-none">
                                                     <div className="pointer-events-auto" onClick={(e) => e.preventDefault()}>
                                                         <Checkbox
@@ -1434,7 +1552,7 @@ export default function CloseServiceForm({
                                         <div key={`customer-photo-new-${index}`} className="relative aspect-square">
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
                                             <img src={preview.url} alt={`Xem trước ảnh ${index + 1}`} className="h-full w-full object-cover rounded-md border" />
-                                            {!readOnly && onRemoveCustomerPhoto && (
+                                            {!imageReadOnly && onRemoveCustomerPhoto && (
                                                 <button
                                                     type="button"
                                                     onClick={() => onRemoveCustomerPhoto(index)}

@@ -5,6 +5,7 @@ import OverviewReportClient from './overview-client';
 
 const INITIAL_PAGE_SIZE = 10;
 const SECOND_PAGE_SIZE = 20;
+const RECEPTION_PAGE_SIZE = 30;
 
 /**
  * Mở trang: load giao diện (light) → load 10 khách + 10 lịch hẹn → load tiếp 20+20 (dừng).
@@ -20,6 +21,10 @@ export default function OverviewReportWrapper() {
 
     const [customers, setCustomers] = useState([]);
     const [customersTotal, setCustomersTotal] = useState(0);
+    const [customersWithAppointmentsTotal, setCustomersWithAppointmentsTotal] = useState(0);
+    const [customersWithOrdersTotal, setCustomersWithOrdersTotal] = useState(0);
+    const [oldCustomersTotal, setOldCustomersTotal] = useState(0);
+    const [customersArrivedTotal, setCustomersArrivedTotal] = useState(0);
     const [loadingCustomers, setLoadingCustomers] = useState(true);
     const [loadingMoreCustomers, setLoadingMoreCustomers] = useState(false);
     const [errorCustomers, setErrorCustomers] = useState(null);
@@ -41,7 +46,7 @@ export default function OverviewReportWrapper() {
                 if (cancelled) return;
                 if (!res.ok || !json?.success) {
                     setErrorLight(json?.error || 'Không tải được dữ liệu.');
-                    setLightData({ services: [], sources: [], messageSources: [], conversations: [] });
+                    setLightData({ services: [], sources: [], messageSources: [], conversations: [], callLabels: [] });
                 } else {
                     setErrorLight(null);
                     setLightData(json.data || {});
@@ -49,7 +54,7 @@ export default function OverviewReportWrapper() {
             } catch (e) {
                 if (!cancelled) {
                     setErrorLight(e?.message || 'Lỗi kết nối.');
-                    setLightData({ services: [], sources: [], messageSources: [], conversations: [] });
+                    setLightData({ services: [], sources: [], messageSources: [], conversations: [], callLabels: [] });
                 }
             } finally {
                 if (!cancelled) setLoadingLight(false);
@@ -70,6 +75,10 @@ export default function OverviewReportWrapper() {
                     setCounts(json.data);
                     setCustomersTotal(json.data.customersTotal ?? 0);
                     setAppointmentsTotal(json.data.appointmentsTotal ?? 0);
+                    setCustomersWithAppointmentsTotal(json.data.customersWithAppointmentsTotal ?? 0);
+                    setCustomersWithOrdersTotal(json.data.customersWithOrdersTotal ?? 0);
+                    setOldCustomersTotal(json.data.oldCustomersTotal ?? 0);
+                    setCustomersArrivedTotal(json.data.customersArrivedTotal ?? 0);
                 }
             } catch (_e) {}
             finally {
@@ -159,6 +168,11 @@ export default function OverviewReportWrapper() {
         loadCustomers(customers.length, SECOND_PAGE_SIZE);
     }, [loadingMoreCustomers, customers.length, customersTotal, loadCustomers]);
 
+    const onLoadMoreReceptionCustomers = useCallback(() => {
+        if (loadingMoreCustomers || customers.length >= customersTotal) return;
+        loadCustomers(customers.length, RECEPTION_PAGE_SIZE);
+    }, [loadingMoreCustomers, customers.length, customersTotal, loadCustomers]);
+
     const onLoadMoreAppointments = useCallback(() => {
         if (loadingMoreAppointments || appointments.length >= appointmentsTotal) return;
         loadAppointments(appointments.length, SECOND_PAGE_SIZE);
@@ -168,6 +182,7 @@ export default function OverviewReportWrapper() {
     const sources = lightData?.sources ?? [];
     const messageSources = lightData?.messageSources ?? [];
     const conversations = lightData?.conversations ?? [];
+    const callLabels = lightData?.callLabels ?? [];
 
     const loadingHeavy = loadingCustomers || loadingAppointments;
     const countsReady = counts != null || !loadingCounts;
@@ -209,8 +224,13 @@ export default function OverviewReportWrapper() {
                 sources={sources}
                 messageSources={messageSources}
                 conversations={conversations}
+                callLabels={callLabels}
                 loadingHeavy={loadingHeavy}
                 customersTotal={customersTotal}
+                customersWithAppointmentsTotal={customersWithAppointmentsTotal}
+                customersWithOrdersTotal={customersWithOrdersTotal}
+                oldCustomersTotal={oldCustomersTotal}
+                customersArrivedTotal={customersArrivedTotal}
                 appointmentsTotal={appointmentsTotal}
                 countsLoading={loadingCounts && counts == null}
                 hasMoreCustomers={customers.length < customersTotal}
@@ -218,6 +238,7 @@ export default function OverviewReportWrapper() {
                 loadingMoreCustomers={loadingMoreCustomers}
                 loadingMoreAppointments={loadingMoreAppointments}
                 onLoadMoreCustomers={onLoadMoreCustomers}
+                onLoadMoreReceptionCustomers={onLoadMoreReceptionCustomers}
                 onLoadMoreAppointments={onLoadMoreAppointments}
             />
         </>

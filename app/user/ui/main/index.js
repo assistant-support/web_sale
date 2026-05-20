@@ -12,13 +12,14 @@ import Image from 'next/image';
 
 // CẬP NHẬT: Form thêm mới
 function AddTeacherForm({ onSubmit, onClose, isLoading }) {
+    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager", "Technician"];
     const [formData, setFormData] = useState({
         name: '',
         email: '',
         password: '',
         phone: '',
         address: '',
-        role: ['Sale'],
+        role: 'Sale',
         group: 'noi_khoa', // MỚI: Thêm trường group với giá trị mặc định
     });
     const handleChange = (e) => {
@@ -27,7 +28,7 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
     };
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit(formData);
+        onSubmit({ ...formData, role: [formData.role] });
     };
     return (
         <form onSubmit={handleSubmit} className={styles.addTeacherForm}>
@@ -43,12 +44,21 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
                 <label>Mật khẩu<span>*</span></label>
                 <input type="password" name="password" onChange={handleChange} value={formData.password} className='input' required />
             </div>
+            <div className={styles.formGroup}>
+                <label>Cài đặt quyền<span>*</span></label>
+                <select name="role" value={formData.role} onChange={handleChange} className='input' required>
+                    {ROLES.map(role => (
+                        <option key={role} value={role}>{role}</option>
+                    ))}
+                </select>
+            </div>
             {/* MỚI: Thêm trường chọn Group */}
             <div className={styles.formGroup}>
                 <label>Nhóm<span>*</span></label>
                 <select name="group" value={formData.group} onChange={handleChange} className='input' required>
                     <option value="noi_khoa">Nội khoa</option>
                     <option value="ngoai_khoa">Ngoại khoa</option>
+                    <option value="noi_khoa_va_ngoai_khoa">Nội khoa và Ngoại khoa</option>
                 </select>
             </div>
             <div className={styles.formGroup}>
@@ -99,7 +109,7 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
         e.preventDefault();
         onSubmit(teacherData._id, formData);
     };
-    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager"];
+    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager", "Technician"];
     return (
         <form onSubmit={handleSubmit} className={styles.addTeacherForm}>
             <div className={styles.formGroup}>
@@ -128,6 +138,7 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
                 <select name="group" value={formData.group} onChange={handleChange} className='input'>
                     <option value="noi_khoa">Nội khoa</option>
                     <option value="ngoai_khoa">Ngoại khoa</option>
+                    <option value="noi_khoa_va_ngoai_khoa">Nội khoa và Ngoại khoa</option>
                 </select>
             </div>
             <div className={styles.formActions}>
@@ -294,7 +305,7 @@ const Main = ({ initialTeachers }) => {
                                         <p className='text_6_400'><strong>SĐT:</strong> {teacher.phone}</p>
                                         <p className='text_6_400'><strong>Địa chỉ:</strong> {teacher.address}</p>
                                         {/* MỚI: Hiển thị thông tin nhóm */}
-                                        <p className='text_6_400'><strong>Nhóm:</strong> {teacher.group === 'noi_khoa' ? 'Nội khoa' : teacher.group === 'ngoai_khoa' ? 'Ngoại khoa' : 'Tất cả'}</p>
+                                        <p className='text_6_400'><strong>Nhóm:</strong> {teacher.group === 'noi_khoa' ? 'Nội khoa' : teacher.group === 'ngoai_khoa' ? 'Ngoại khoa' : teacher.group === 'noi_khoa_va_ngoai_khoa' ? 'Nội khoa và Ngoại khoa' : 'Tất cả'}</p>
                                     </div>
                                 </div>
                             </div>

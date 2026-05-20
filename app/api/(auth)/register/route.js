@@ -11,7 +11,9 @@ import checkAuthToken from '@/utils/checktoken';
 
 export async function POST(req) {
     const user = await checkAuthToken();
-    if (!user.role.includes('Admin') || !user.role.includes('Manager')) return jsonRes(403, { error: 'Bạn không có quyền thực hiện hành động này' });
+    if (!user.role.includes('Admin') && !user.role.includes('Manager')) {
+        return jsonRes(403, { error: 'Bạn không có quyền thực hiện hành động này' });
+    }
 
     try {
         await connectDB();
@@ -32,7 +34,7 @@ export async function POST(req) {
         }
 
         // CẬP NHẬT: Kiểm tra giá trị của group có hợp lệ không
-        if (!['noi_khoa', 'ngoai_khoa'].includes(group)) {
+        if (!['noi_khoa', 'ngoai_khoa', 'noi_khoa_va_ngoai_khoa'].includes(group)) {
             return jsonRes(400, { error: 'Giá trị của nhóm không hợp lệ.' });
         }
 
