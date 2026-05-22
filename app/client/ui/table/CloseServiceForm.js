@@ -61,9 +61,9 @@ export default function CloseServiceForm({
 
     // Quyền Technician: chỉ Technician mới được chọn Bác sĩ Liệu trình; tên KTV tự lấy từ tài khoản đăng nhập
     const isTechnician = Array.isArray(currentUserRoles) && currentUserRoles.includes('Technician');
-    // Chỉ Technician được phép chỉnh sửa (thêm/xoá/sắp xếp) ảnh sau khi đã tạo đơn.
-    // Các quyền khác chỉ thao tác xem/tải ảnh giống chế độ readOnly.
-    const imageReadOnly = readOnly || !isTechnician;
+    // Tạo đơn mới: mọi tài khoản được thêm/xóa/sắp xếp ảnh.
+    // Đơn đã lưu: chỉ Kỹ thuật viên được chỉnh sửa ảnh; các quyền khác chỉ xem/tải.
+    const imageReadOnly = readOnly || (!isCreating && !isTechnician);
 
     // State cho autocomplete tên thuốc
     const [medicineInputValue, setMedicineInputValue] = useState(''); // Giá trị hiển thị trong input
@@ -1126,10 +1126,10 @@ export default function CloseServiceForm({
                             </div>
                         </div>
 
-                        {!readOnly && !isTechnician && (
+                        {!readOnly && !isCreating && !isTechnician && (
                             <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                                 <Lock className="h-3.5 w-3.5" />
-                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh sau khi đã tạo đơn. Bạn vẫn có thể xem và tải ảnh.
+                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu. Bạn vẫn có thể xem và tải ảnh.
                             </div>
                         )}
 
@@ -1374,10 +1374,10 @@ export default function CloseServiceForm({
                             </div>
                         </div>
 
-                        {!readOnly && !isTechnician && (
+                        {!readOnly && !isCreating && !isTechnician && (
                             <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                                 <Lock className="h-3.5 w-3.5" />
-                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh sau khi đã tạo đơn. Bạn vẫn có thể xem và tải ảnh.
+                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu. Bạn vẫn có thể xem và tải ảnh.
                             </div>
                         )}
 
