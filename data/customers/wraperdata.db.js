@@ -1253,6 +1253,32 @@ export async function updateServiceDetailAction(prevState, formData) {
         // Lấy existingImageIds từ formData (ảnh đã lưu theo thứ tự mới từ unified state)
         const existingIdsRaw = formData.getAll('existingImageIds') || [];
         let existingIds = Array.isArray(existingIdsRaw) ? existingIdsRaw.filter(id => id) : [];
+
+        const deletedCustomerPhotoIdsRaw = formData.getAll('deletedCustomerPhotoIds') || [];
+        const deletedCustomerPhotoIds = Array.isArray(deletedCustomerPhotoIdsRaw) ? deletedCustomerPhotoIdsRaw.filter(id => id) : [];
+
+        const existingCustomerPhotoIdsRaw = formData.getAll('existingCustomerPhotoIds') || [];
+        let existingCustomerPhotoIds = Array.isArray(existingCustomerPhotoIdsRaw) ? existingCustomerPhotoIdsRaw.filter(id => id) : [];
+
+        const userRoles = Array.isArray(session?.role) ? session.role : (session?.role ? [session.role] : []);
+        const isTechnician = userRoles.includes('Technician');
+        const baselineInvoiceIds = (serviceDetail.invoiceDriveIds || []).map(String);
+        const baselineCustomerPhotoIds = (serviceDetail.customerPhotosDriveIds || []).map(String);
+        const invoiceOrderChanged = existingIds.length > 0
+            && existingIds.map(String).join('|') !== baselineInvoiceIds.join('|');
+        const customerPhotoOrderChanged = existingCustomerPhotoIds.length > 0
+            && existingCustomerPhotoIds.map(String).join('|') !== baselineCustomerPhotoIds.join('|');
+        const hasImageModification =
+            invoiceImages.length > 0 ||
+            customerPhotos.length > 0 ||
+            deletedImageIds.length > 0 ||
+            deletedCustomerPhotoIds.length > 0 ||
+            invoiceOrderChanged ||
+            customerPhotoOrderChanged;
+
+        if (!isTechnician && hasImageModification) {
+            return { success: false, error: 'Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu.' };
+        }
         
         // Xóa các ID đã chọn xóa khỏi existingIds trước khi xử lý
         if (deletedImageIds.length > 0) {
@@ -1292,13 +1318,6 @@ export async function updateServiceDetailAction(prevState, formData) {
         }
 
         // 📸 Xử lý xóa ảnh khách hàng và cập nhật danh sách ảnh
-        const deletedCustomerPhotoIdsRaw = formData.getAll('deletedCustomerPhotoIds') || [];
-        const deletedCustomerPhotoIds = Array.isArray(deletedCustomerPhotoIdsRaw) ? deletedCustomerPhotoIdsRaw.filter(id => id) : [];
-        
-        // Lấy existingCustomerPhotoIds từ formData (ảnh đã lưu theo thứ tự mới từ unified state)
-        const existingCustomerPhotoIdsRaw = formData.getAll('existingCustomerPhotoIds') || [];
-        let existingCustomerPhotoIds = Array.isArray(existingCustomerPhotoIdsRaw) ? existingCustomerPhotoIdsRaw.filter(id => id) : [];
-        
         // Xóa các ID đã chọn xóa khỏi existingCustomerPhotoIds trước khi xử lý
         if (deletedCustomerPhotoIds.length > 0) {
             existingCustomerPhotoIds = existingCustomerPhotoIds.filter(id => !deletedCustomerPhotoIds.includes(id));
