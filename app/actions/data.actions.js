@@ -8,11 +8,21 @@ import Customer from '@/models/customer.model';
 import initAgenda from '@/config/agenda';
 import mongoose from 'mongoose';
 import { revalidateData } from '@/app/actions/customer.actions';
+import {
+    DEFAULT_MANUAL_SOURCE_DETAIL,
+} from '@/utils/customerSourceConstants';
+import {
+    resolveCustomerSourceFromFormId,
+    resolveCustomerSourceFromDetailName,
+} from '@/utils/resolveCustomerSource.server';
 import { sendGP } from "@/function/drive/appscript";
 import { sendUserMessage, changeFriendAlias } from '@/data/zalo/chat.actions';
 import { service_data } from '@/data/services/wraperdata.db'
 import { se } from "date-fns/locale";
 import autoAssignForCustomer from '@/utils/autoAssign';
+import {
+    assignCreatorAsSaleResponsible,
+} from '@/utils/assignSaleResponsible';
 import User from '@/models/users';
 import ZaloAccount from '@/models/zalo.model';
 import { ZaloAccount as ZaloAccountNew } from '@/models/zalo-account.model';
@@ -22,6 +32,59 @@ import Variant from '@/models/variant.model';
 import { findUserUid } from '@/data/zalo/chat.actions';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 import { generateCustomerCodeByType, isDuplicateKeyError, parseCustomerCode } from '@/utils/customerCode';
+
+/** Tạo nguồn mới (collection forms) — dùng từ CustomerInfo / Nguồn chi tiết */
+export async function createSourceFormAction(_previousState, formData) {
+    await dbConnect();
+    const user = await checkAuthToken();
+    if (!user?.id) {
+        return { message: 'Bạn cần đăng nhập để thực hiện hành động này.', status: false };
+    }
+
+    const nameRaw = formData.get('name');
+    const describeRaw = formData.get('describe') ?? '';
+    if (!nameRaw || !String(nameRaw).trim()) {
+        return { message: 'Tên nguồn là bắt buộc.', status: false };
+    }
+
+    const processedName = String(nameRaw).toLowerCase().trim();
+    if (processedName.length > 50) {
+        return { message: 'Tên nguồn phải ít hơn 50 ký tự.', status: false };
+    }
+    const describe = String(describeRaw).trim();
+    if (describe.length > 1000) {
+        return { message: 'Mô tả phải ít hơn 1000 ký tự.', status: false };
+    }
+
+    try {
+        const existing = await Form.findOne({ name: processedName }).lean();
+        if (existing) {
+            return {
+                message: 'Nguồn này đã tồn tại, đã gán vào Nguồn chi tiết.',
+                status: true,
+                data: { _id: String(existing._id), name: existing.name },
+            };
+        }
+
+        const newForm = await Form.create({
+            name: processedName,
+            describe,
+            createdBy: user.id,
+            formInput: [],
+        });
+
+        reloadForm();
+        revalidateData();
+        return {
+            message: `Đã thêm nguồn "${processedName}".`,
+            status: true,
+            data: JSON.parse(JSON.stringify({ _id: String(newForm._id), name: newForm.name })),
+        };
+    } catch (error) {
+        console.error('Lỗi tạo nguồn (forms):', error);
+        return { message: 'Lỗi hệ thống, không thể tạo nguồn.', status: false };
+    }
+}
 
 export async function createAreaAction(_previousState, formData) {
     await dbConnect();
@@ -164,7 +227,6 @@ export async function addRegistrationToAction(_previousState, inputData) {
             )
         );
 
-        // Chuẩn hóa dữ liệu đầu vào
         const rawData = {
             name: isFormData ? inputData.get('name')?.trim() : inputData.fullName?.trim(),
             address: isFormData ? inputData.get('address')?.trim() : inputData.address?.trim(),
@@ -176,8 +238,23 @@ export async function addRegistrationToAction(_previousState, inputData) {
             services: serviceIds,
             source: isFormData ? inputData.get('source')?.trim() : '68b5ebb3658a1123798c0ce4',
             sourceName: isFormData ? inputData.get('sourceName')?.trim() : 'Trực tiếp',
+            sourceFormId: isFormData
+                ? inputData.get('sourceFormId')?.trim()
+                : inputData.sourceFormId?.trim(),
+            sourceDetails: isFormData
+                ? (inputData.get('sourceDetails')?.trim() || DEFAULT_MANUAL_SOURCE_DETAIL)
+                : (inputData.sourceDetails?.trim() || DEFAULT_MANUAL_SOURCE_DETAIL),
             customerCode: isFormData ? inputData.get('customerCode')?.trim() : inputData.customerCode?.trim(),
         };
+
+        if (isManualEntry) {
+            const resolved = rawData.sourceFormId
+                ? await resolveCustomerSourceFromFormId(rawData.sourceFormId)
+                : await resolveCustomerSourceFromDetailName(rawData.sourceDetails);
+            rawData.source = String(resolved.source);
+            rawData.sourceDetails = resolved.sourceDetails;
+            rawData.sourceName = resolved.sourceName;
+        }
 
         let user = null;
         if (isManualEntry) {
@@ -247,12 +324,14 @@ export async function addRegistrationToAction(_previousState, inputData) {
             }
             
             try {
-                if (!Array.isArray(existingCustomer.assignees) || existingCustomer.assignees.length === 0) {
+                if (isManualEntry && user?.id) {
+                    await assignCreatorAsSaleResponsible(existingCustomer._id, user.id);
+                } else if (!Array.isArray(existingCustomer.assignees) || existingCustomer.assignees.length === 0) {
                     const svcId = rawData.service || (existingCustomer.tags?.[0] || null);
                     await autoAssignForCustomer(existingCustomer._id, { serviceId: svcId });
                 }
             } catch (e) {
-                console.error('[Action] Duplicate merge - auto-assign error:', e?.message || e);
+                console.error('[Action] Duplicate merge - assign sale error:', e?.message || e);
             }
             
             revalidateData();
@@ -288,7 +367,7 @@ export async function addRegistrationToAction(_previousState, inputData) {
             pipelineStatus: ['new_unconfirmed_1', 'new_unconfirmed_1'],
             care: [{ content: 'Khách hàng được nhận hồ sơ vào hệ thống', createBy: user?.id || '68b0af5cf58b8340827174e0', step: 1 }],
             source: rawData.source,
-            sourceDetails: rawData.sourceName,
+            sourceDetails: rawData.sourceDetails || DEFAULT_MANUAL_SOURCE_DETAIL,
             ...(user && { createdBy: user.id }),
         };
 
@@ -330,9 +409,13 @@ export async function addRegistrationToAction(_previousState, inputData) {
         }
         
         try {
-            await autoAssignForCustomer(newCustomer._id, { serviceId: rawData.service || null });
+            if (isManualEntry && user?.id) {
+                await assignCreatorAsSaleResponsible(newCustomer._id, user.id);
+            } else {
+                await autoAssignForCustomer(newCustomer._id, { serviceId: rawData.service || null });
+            }
         } catch (e) {
-            console.error('[Action] Auto-assign theo dịch vụ lỗi:', e?.message || e);
+            console.error('[Action] Gán Sale phụ trách lỗi:', e?.message || e);
         }
         
         revalidateData();

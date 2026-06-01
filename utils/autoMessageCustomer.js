@@ -1,6 +1,7 @@
 import connectDB from '@/config/connectDB';
 import Customer from '@/models/customer.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
+import { markMessageCustomerAutoAssigned } from '@/utils/assignSaleResponsible';
 import { revalidateData } from '@/app/actions/customer.actions';
 import mongoose from 'mongoose';
 import { getPagesFromAPI } from '@/lib/pancake-api';
@@ -278,6 +279,7 @@ export async function processMessageConversation(conversation, pageInfo = null) 
         // Gán tự động Sale phụ trách cho nhóm "Nội khoa"
         try {
             await autoAssignForCustomer(newCustomer._id, { targetGroup: 'noi_khoa' });
+            await markMessageCustomerAutoAssigned(newCustomer._id);
         } catch (e) {
             console.error('[Auto Message Customer] Lỗi khi gán Sale:', e?.message || e);
         }

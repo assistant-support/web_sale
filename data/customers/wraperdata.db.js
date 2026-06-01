@@ -18,6 +18,7 @@ import {
 import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
+import { claimSaleOnFirstCustomerAction } from '@/utils/assignSaleResponsible';
 
 // Helper function để đảm bảo kết nối MongoDB
 async function ensureMongo() {
@@ -873,6 +874,7 @@ export async function closeServiceAction(prevState, formData) {
             approvalStatus: 'pending',
             status: status,
             closedAt: new Date(),
+            closedBy: new mongoose.Types.ObjectId(session.id),
             amountReceivedTotal: 0,
             outstandingAmount: finalPrice,
             pricing: { listPrice, discountType, discountValue, adjustmentType, adjustmentValue, finalPrice },
@@ -926,6 +928,12 @@ export async function closeServiceAction(prevState, formData) {
             { _id: new mongoose.Types.ObjectId(customerId) },
             updateData
         );
+
+        try {
+            await claimSaleOnFirstCustomerAction(customerId, session.id, 'Tạo đơn chốt dịch vụ');
+        } catch (claimErr) {
+            console.error('[closeServiceAction] claim sale:', claimErr?.message || claimErr);
+        }
 
         await rebuildHistoryServiceForCustomer(customerId);
 
@@ -1260,26 +1268,6 @@ export async function updateServiceDetailAction(prevState, formData) {
         const existingCustomerPhotoIdsRaw = formData.getAll('existingCustomerPhotoIds') || [];
         let existingCustomerPhotoIds = Array.isArray(existingCustomerPhotoIdsRaw) ? existingCustomerPhotoIdsRaw.filter(id => id) : [];
 
-        const userRoles = Array.isArray(session?.role) ? session.role : (session?.role ? [session.role] : []);
-        const isTechnician = userRoles.includes('Technician');
-        const baselineInvoiceIds = (serviceDetail.invoiceDriveIds || []).map(String);
-        const baselineCustomerPhotoIds = (serviceDetail.customerPhotosDriveIds || []).map(String);
-        const invoiceOrderChanged = existingIds.length > 0
-            && existingIds.map(String).join('|') !== baselineInvoiceIds.join('|');
-        const customerPhotoOrderChanged = existingCustomerPhotoIds.length > 0
-            && existingCustomerPhotoIds.map(String).join('|') !== baselineCustomerPhotoIds.join('|');
-        const hasImageModification =
-            invoiceImages.length > 0 ||
-            customerPhotos.length > 0 ||
-            deletedImageIds.length > 0 ||
-            deletedCustomerPhotoIds.length > 0 ||
-            invoiceOrderChanged ||
-            customerPhotoOrderChanged;
-
-        if (!isTechnician && hasImageModification) {
-            return { success: false, error: 'Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu.' };
-        }
-        
         // Xóa các ID đã chọn xóa khỏi existingIds trước khi xử lý
         if (deletedImageIds.length > 0) {
             existingIds = existingIds.filter(id => !deletedImageIds.includes(id));

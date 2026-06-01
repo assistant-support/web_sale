@@ -58,7 +58,7 @@ const useBreakpoint = () => {
 // =============================================================
 // == 2. COMPONENT BẢNG DỮ LIỆU CHÍNH
 // =============================================================
-export default function CustomerTable({ zalo, data = [], service, total = 0, user, selectedCustomers, setSelectedCustomers, viewMode, discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
+export default function CustomerTable({ zalo, data = [], service, total = 0, user, allUsers = [], formSources = [], selectedCustomers, setSelectedCustomers, viewMode, discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { replace } = useRouter();
@@ -171,6 +171,8 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
                                     renderCellContent={renderCellContent}
                                     zalo={zalo}
                                     user={user}
+                                    allUsers={allUsers}
+                                    formSources={formSources}
                                     service={service}
                                 />
                             ))

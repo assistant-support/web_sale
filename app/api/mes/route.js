@@ -1,5 +1,6 @@
 import Customer from '@/models/customer.model';
 import autoAssignForCustomer from '@/utils/autoAssign';
+import { markMessageCustomerAutoAssigned } from '@/utils/assignSaleResponsible';
 import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
 export const runtime = 'nodejs';
@@ -209,6 +210,8 @@ export async function GET() {
                     // Gán tĩnh người phụ trách
                     try {
                         await autoAssignForCustomer(createdCustomer._id, { forceStaticAssign: true });
+                        const cid = createdCustomer._id ?? createdCustomer.id;
+                        if (cid) await markMessageCustomerAutoAssigned(cid);
                     } catch (e) {
                         // ignore
                     }

@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Users, Calendar, RefreshCw, Download, DollarSign, BookOpenText } from 'lucide-react';
 import Popup from '@/components/ui/popup';
+import { customerMatchesSourceFilter } from '@/utils/customerSourceConstants';
 
 // Listbox component (từ appointment-stats)
 function Listbox({ label, options, value, onChange, placeholder = 'Chọn...' }) {
@@ -192,13 +193,10 @@ export default function OverviewReportClient({
             });
         }
 
-        // Source filter
         if (sourceFilter !== 'all') {
-            filteredCustomers = filteredCustomers.filter(c => {
-                const sourceId = c.source ? String(c.source._id || c.source) : '';
-                const sourceDetails = c.sourceDetails ? String(c.sourceDetails).trim() : '';
-                return sourceId === sourceFilter || sourceDetails === sourceFilter;
-            });
+            filteredCustomers = filteredCustomers.filter(c =>
+                customerMatchesSourceFilter(c, sourceFilter, sources)
+            );
         }
 
         // Service filter
@@ -229,7 +227,7 @@ export default function OverviewReportClient({
         }
 
         return { filteredCustomers, filteredAppointments, filteredConversations };
-    }, [customers, appointments, conversations, startDate, endDate, sourceFilter, serviceFilter, customerTypeFilter, appointmentTypeFilter, conversationTypeFilter]);
+    }, [customers, appointments, conversations, startDate, endDate, sourceFilter, serviceFilter, customerTypeFilter, appointmentTypeFilter, conversationTypeFilter, sources]);
 
     // Stats
     const stats = useMemo(() => ({

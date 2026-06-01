@@ -5,6 +5,35 @@ import ServiceDetail from '@/models/service_details.model';
 import Customer from '@/models/customer.model';
 import mongoose from 'mongoose';
 import { unstable_cache as nextCache } from 'next/cache';
+import { buildCustomerSourceFilter, mapCustomerSourceFilterToServiceDetail } from '@/utils/customerSourceFilter';
+
+/** Sale chỉ xem đơn do mình tạo (createdBy) hoặc chốt (closedBy). */
+function applySaleServiceDetailScope(query, saleUserId) {
+    if (!saleUserId) return;
+    if (!mongoose.Types.ObjectId.isValid(String(saleUserId))) {
+        query._id = { $in: [] };
+        return;
+    }
+    const saleOid = new mongoose.Types.ObjectId(String(saleUserId));
+    const clause = { $or: [{ createdBy: saleOid }, { closedBy: saleOid }] };
+    if (Array.isArray(query.$and)) {
+        query.$and.push(clause);
+    } else {
+        query.$and = [clause];
+    }
+}
+
+async function applyServiceDetailSourceFilter(query, sourceId) {
+    if (!sourceId || sourceId === 'all') return;
+    const customerSourceFilter = await buildCustomerSourceFilter(sourceId);
+    const mapped = mapCustomerSourceFilterToServiceDetail(customerSourceFilter);
+    if (!mapped) return;
+    if (mapped.$or) {
+        query.$and = [...(query.$and || []), mapped];
+    } else {
+        Object.assign(query, mapped);
+    }
+}
 
 /**
  * Lấy danh sách đơn chờ duyệt từ service_details với filter thời gian và pagination
@@ -21,28 +50,16 @@ export async function getPendingApprovals(params = {}) {
     try {
         await connectDB();
         
-        const { fromDate, toDate, sourceId, serviceId, limit = 10, skip = 0 } = params;
+        const { fromDate, toDate, sourceId, serviceId, limit = 10, skip = 0, saleUserId } = params;
         
         // Build query
         const query = {
             approvalStatus: 'pending'
         };
+
+        applySaleServiceDetailScope(query, saleUserId);
         
-        // Filter theo nguồn
-        // Có thể là sourceId (ObjectId) hoặc sourceDetails (string)
-        if (sourceId && sourceId !== 'all') {
-            // Kiểm tra xem có phải là ObjectId hợp lệ không
-            if (mongoose.Types.ObjectId.isValid(sourceId)) {
-                // Nếu là ObjectId → filter theo sourceId hoặc source
-                query.$or = [
-                    { sourceId: new mongoose.Types.ObjectId(sourceId) },
-                    { source: new mongoose.Types.ObjectId(sourceId) }
-                ];
-            } else {
-                // Nếu không phải ObjectId → filter theo sourceDetails (string)
-                query.sourceDetails = String(sourceId);
-            }
-        }
+        await applyServiceDetailSourceFilter(query, sourceId);
         
         // Filter theo dịch vụ
         if (serviceId && serviceId !== 'all') {
@@ -178,29 +195,17 @@ export async function getApprovedDeals(params = {}) {
     try {
         await connectDB();
         
-        const { fromDate, toDate, sourceId, serviceId, limit = 10, skip = 0 } = params;
+        const { fromDate, toDate, sourceId, serviceId, limit = 10, skip = 0, saleUserId } = params;
         
         // Build query - chỉ lấy đơn đã duyệt và hoàn thành
         const query = {
             status: 'completed',
             approvalStatus: 'approved'
         };
+
+        applySaleServiceDetailScope(query, saleUserId);
         
-        // Filter theo nguồn
-        // Có thể là sourceId (ObjectId) hoặc sourceDetails (string)
-        if (sourceId && sourceId !== 'all') {
-            // Kiểm tra xem có phải là ObjectId hợp lệ không
-            if (mongoose.Types.ObjectId.isValid(sourceId)) {
-                // Nếu là ObjectId → filter theo sourceId hoặc source
-                query.$or = [
-                    { sourceId: new mongoose.Types.ObjectId(sourceId) },
-                    { source: new mongoose.Types.ObjectId(sourceId) }
-                ];
-            } else {
-                // Nếu không phải ObjectId → filter theo sourceDetails (string)
-                query.sourceDetails = String(sourceId);
-            }
-        }
+        await applyServiceDetailSourceFilter(query, sourceId);
         
         // Filter theo dịch vụ
         if (serviceId && serviceId !== 'all') {

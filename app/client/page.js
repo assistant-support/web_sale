@@ -13,18 +13,30 @@ import { unitMedicine_data, treatmentDoctor_data } from '../actions/treatment.ac
 import { maskPhoneNumber } from '@/function';
 import { customer_data } from '@/data/customers/wraperdata.db';
 import { area_customer_data, filter_customer_data } from '@/data/actions/get';
+import {
+    filterCustomersForSale,
+    scopeBirthMonthFilterForSale,
+} from '@/utils/saleScope';
+import { getClientPageScope } from './clientScope.server';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
 }
 
 export default async function Page({ searchParams }) {
-    let c = await searchParams
-    const user = await checkAuthToken()
-    if (!user) return null
-    const [customer, initialResult, userAuth, sources, messageSources, label, zalo, users, variant, discount, running, workflow, service, areaCustomers, filterCustomer, unitMedicines, treatmentDoctors] = await Promise.all([
+    const c = await searchParams;
+    const user = await checkAuthToken();
+    if (!user) return null;
+
+    const { userId, restrictToAssignee } = await getClientPageScope();
+    const listParams = { ...c };
+    if (restrictToAssignee && userId) {
+        listParams.assignee = userId;
+    }
+
+    const [customer, initialResultRaw, userAuth, sources, messageSources, label, zalo, users, variant, discount, running, workflow, service, areaCustomers, filterCustomer, unitMedicines, treatmentDoctors] = await Promise.all([
         customer_data(),
-        getCombinedData(c),
+        getCombinedData(listParams),
         user_data({ _id: user.id }),
         form_data(),
         message_sources_data(),
@@ -42,40 +54,29 @@ export default async function Page({ searchParams }) {
         treatmentDoctor_data()
     ]);
     const reversedLabel = [...label].reverse();
-    if (userAuth && userAuth[0] && userAuth[0].role && userAuth[0].role.includes('Sale')) {
-        const filteredData = initialResult.data.filter(item => {
-            if (Array.isArray(item.assignees) && item.assignees.length > 0) {
-                return item.assignees.some(
-                    assignee => assignee.user && assignee.user._id === userAuth[0]._id
-                );
-            }
-            return false;
-        }).map(item => {
-            return {
+
+    let initialResult = initialResultRaw;
+    if (restrictToAssignee && userId) {
+        const scopedData = filterCustomersForSale(initialResult?.data || [], userId);
+        initialResult = {
+            ...initialResult,
+            data: scopedData.map((item) => ({
                 ...item,
-                phonex: maskPhoneNumber(item.phone) // tạo field mới phonex
-            };
-        });
-        initialResult.data = filteredData;
-        initialResult.total = filteredData.length;
+                phonex: maskPhoneNumber(item.phone),
+            })),
+        };
     }
-    // console.log(initialResult);
-    // console.log('📊 [Page] filterCustomer data:', filterCustomer);
-    // console.log('📊 [Page] Số lượng mỗi tháng:', {
-    //     month1: filterCustomer?.month1?.length || 0,
-    //     month2: filterCustomer?.month2?.length || 0,
-    //     month3: filterCustomer?.month3?.length || 0,
-    //     month4: filterCustomer?.month4?.length || 0,
-    //     month5: filterCustomer?.month5?.length || 0,
-    //     month6: filterCustomer?.month6?.length || 0,
-    //     month7: filterCustomer?.month7?.length || 0,
-    //     month8: filterCustomer?.month8?.length || 0,
-    //     month9: filterCustomer?.month9?.length || 0,
-    //     month10: filterCustomer?.month10?.length || 0,
-    //     month11: filterCustomer?.month11?.length || 0,
-    //     month12: filterCustomer?.month12?.length || 0,
-    // });
-    
+
+    const customerForSettings = restrictToAssignee && userId
+        ? filterCustomersForSale(customer, userId)
+        : customer;
+    const filterCustomerScoped = restrictToAssignee && userId
+        ? scopeBirthMonthFilterForSale(
+            filterCustomer,
+            customerForSettings.map((c) => c._id)
+        )
+        : filterCustomer || {};
+
     return (
         <Suspense fallback={<PageSkeleton />}>
             <CustomerView
@@ -93,9 +94,9 @@ export default async function Page({ searchParams }) {
                 c={c}
                 workflow={workflow}
                 service={service}
-                customer={customer}
+                customer={customerForSettings}
                 areaCustomers={areaCustomers || []}
-                filterCustomer={filterCustomer || {}}
+                filterCustomer={filterCustomerScoped}
                 unitMedicines={unitMedicines || []}
                 treatmentDoctors={treatmentDoctors || []}
             />

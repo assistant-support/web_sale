@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useWatch } from 'react-hook-form';
-import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw, Loader2, Lock } from 'lucide-react';
+import { FileImage, DollarSign, Percent, Tag, X, Plus, Download, Trash2, RotateCcw, Loader2 } from 'lucide-react';
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,9 +61,8 @@ export default function CloseServiceForm({
 
     // Quyền Technician: chỉ Technician mới được chọn Bác sĩ Liệu trình; tên KTV tự lấy từ tài khoản đăng nhập
     const isTechnician = Array.isArray(currentUserRoles) && currentUserRoles.includes('Technician');
-    // Tạo đơn mới: mọi tài khoản được thêm/xóa/sắp xếp ảnh.
-    // Đơn đã lưu: chỉ Kỹ thuật viên được chỉnh sửa ảnh; các quyền khác chỉ xem/tải.
-    const imageReadOnly = readOnly || (!isCreating && !isTechnician);
+    // Ảnh: mọi quyền được thêm/xóa/sắp xếp; chỉ khóa khi form readOnly (chế độ xem)
+    const imageReadOnly = readOnly;
 
     // State cho autocomplete tên thuốc
     const [medicineInputValue, setMedicineInputValue] = useState(''); // Giá trị hiển thị trong input
@@ -188,7 +187,7 @@ export default function CloseServiceForm({
         }
     };
 
-    // Toggle chọn ảnh để xóa (chế độ edit, chỉ cho phép Technician)
+    // Toggle chọn ảnh để xóa (chế độ edit)
     const toggleImageSelectionForDelete = (imageId) => {
         if (imageReadOnly) return;
         setSelectedImageIdsToDelete(prev => 
@@ -222,7 +221,7 @@ export default function CloseServiceForm({
         }
     };
 
-    // Toggle chọn ảnh khách hàng để xóa (chế độ edit, chỉ cho phép Technician)
+    // Toggle chọn ảnh khách hàng để xóa (chế độ edit)
     const toggleCustomerPhotoSelectionForDelete = (photoId) => {
         if (imageReadOnly) return;
         setSelectedCustomerPhotoIdsToDelete(prev => 
@@ -1080,7 +1079,7 @@ export default function CloseServiceForm({
                         <div className="flex items-center justify-between">
                             <FormLabel className="flex items-center">
                                 <FileImage className="mr-1 h-4 w-4" />
-                                Ảnh minh chứng (Hóa đơn/Hợp đồng)
+                                Tình trạng khách hàng (Hóa đơn/Hợp đồng)
                                 {form.getValues('_id') && form.getValues('hasExistingInvoice')
                                     ? ' (đang có ảnh đã lưu, có thể thêm ảnh mới)'
                                     : ' *'}
@@ -1125,13 +1124,6 @@ export default function CloseServiceForm({
                                 )}
                             </div>
                         </div>
-
-                        {!readOnly && !isCreating && !isTechnician && (
-                            <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                <Lock className="h-3.5 w-3.5" />
-                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu. Bạn vẫn có thể xem và tải ảnh.
-                            </div>
-                        )}
 
                         {/* input file ẩn */}
                         <input
@@ -1373,13 +1365,6 @@ export default function CloseServiceForm({
                                 )}
                             </div>
                         </div>
-
-                        {!readOnly && !isCreating && !isTechnician && (
-                            <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                <Lock className="h-3.5 w-3.5" />
-                                Chỉ Kỹ thuật viên mới được chỉnh sửa ảnh trên đơn đã lưu. Bạn vẫn có thể xem và tải ảnh.
-                            </div>
-                        )}
 
                         {/* input file ẩn */}
                         <input

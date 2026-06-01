@@ -12,6 +12,7 @@ import {
     Phone, Mail, MapPin, User, Tag, Calendar, Link as LinkIcon, RefreshCw,
     ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { customerMatchesSourceFilter } from '@/utils/customerSourceConstants';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
@@ -606,23 +607,12 @@ export default function DataReceptionClient({ initialData, service = [], sources
             }
 
             if (sourceFilter !== 'all') {
-                const isMessageSource = messageSourceIds.has(String(sourceFilter));
-                
-                if (isMessageSource) {
-                    // Nếu là messageSource, so sánh với sourceDetails
-                    const customerSourceDetails = c.sourceDetails ? String(c.sourceDetails).trim() : '';
-                    if (customerSourceDetails !== String(sourceFilter).trim()) return false;
-                } else {
-                    // Nếu là source thường, so sánh với source ID
-                    // Nếu đang ở tab social, bỏ qua các source thường
-                    if (activeTab === 'social') return false;
-                    const customerSourceId = getCustomerSourceId(c);
-                    if (!customerSourceId || customerSourceId !== String(sourceFilter)) return false;
-                }
+                if (activeTab === 'social' && !messageSourceIds.has(String(sourceFilter))) return false;
+                if (!customerMatchesSourceFilter(c, sourceFilter, sources)) return false;
             }
             return true;
         });
-    }, [data, startDate, endDate, groupFilter, tagFilter, sourceFilter, customerTypeFilter, serviceMap, messageSourceIds, activeTab]);
+    }, [data, startDate, endDate, groupFilter, tagFilter, sourceFilter, customerTypeFilter, serviceMap, messageSourceIds, activeTab, sources]);
 
     // Filter data for social media tab (messageSources only)
     const filteredSocialData = useMemo(() => {
@@ -789,24 +779,13 @@ export default function DataReceptionClient({ initialData, service = [], sources
                 if (customerTypeFilter === 'old' && !old) return false;
             }
 
-            // Áp dụng filter theo sourceFilter
-            if (sourceFilter !== 'all') {
-                const isMessageSource = messageSourceIds.has(String(sourceFilter));
-                
-                if (isMessageSource) {
-                    // Nếu là messageSource, so sánh với sourceDetails
-                    const customerSourceDetails = c.sourceDetails ? String(c.sourceDetails).trim() : '';
-                    if (customerSourceDetails !== String(sourceFilter).trim()) return false;
-                } else {
-                    // Nếu là source thường, so sánh với source ID
-                    const customerSourceId = getCustomerSourceId(c);
-                    if (!customerSourceId || customerSourceId !== String(sourceFilter)) return false;
-                }
+            if (sourceFilter !== 'all' && !customerMatchesSourceFilter(c, sourceFilter, sources)) {
+                return false;
             }
 
             return true;
         });
-    }, [data, startDate, endDate, groupFilter, tagFilter, sourceFilter, customerTypeFilter, serviceMap, messageSourceIds]);
+    }, [data, startDate, endDate, groupFilter, tagFilter, sourceFilter, customerTypeFilter, serviceMap, sources]);
 
     // Stats for all sources (sources + messageSources)
     const sourceStats = useMemo(() => {
@@ -818,10 +797,9 @@ export default function DataReceptionClient({ initialData, service = [], sources
         // Xử lý sources thường
         for (const source of sources || []) {
             const sourceId = String(source._id);
-            const sourceData = filteredSourceData.filter(c => {
-                const customerSourceId = getCustomerSourceId(c);
-                return customerSourceId === sourceId;
-            });
+            const sourceData = filteredSourceData.filter(c =>
+                customerMatchesSourceFilter(c, sourceId, sources)
+            );
 
             const total = sourceData.length;
             const pct = (n) => total > 0 ? Math.round((n / total) * 100) : 0;
@@ -883,8 +861,12 @@ export default function DataReceptionClient({ initialData, service = [], sources
                     ? customerSourceDetails.replace('Tin nhắn - ', '')
                     : customerSourceDetails;
             } else {
-                // Nếu là source thường, lấy từ customer.source
-                displaySource = customer.source?.name || 'N/A';
+                const detail = customerSourceDetails;
+                if (detail) {
+                    displaySource = detail;
+                } else {
+                    displaySource = customer.source?.name || 'N/A';
+                }
             }
 
             return {

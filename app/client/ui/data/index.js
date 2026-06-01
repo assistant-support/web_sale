@@ -17,6 +17,7 @@ import WrapIcon from '@/components/(ui)/(button)/hoveIcon';
 import { formatDate } from '@/function';
 import { revalidateData } from '@/app/actions/customer.actions';
 import Customer_add from './addcustomer';
+import { customerMatchesSourceFilter } from '@/utils/customerSourceConstants';
 
 function SubmitButton({ text = 'Thực hiện' }) {
     const { pending } = useFormStatus();
@@ -235,7 +236,7 @@ export default function SettingData({ data, service, customer }) {
                                 <Svg_Add w={'var(--font-size-sm)'} h={'var(--font-size-sm)'} c={'var(--text-primary)'} />
                                 <h5 className='text_w_400'>Tạo Form mới</h5>
                             </button>
-                            <Customer_add service={service} />
+                            <Customer_add service={service} formSources={data} />
                         </div>
                         <div className={styles.wraplistForms}>
                             <div className={styles.title}>
@@ -244,7 +245,7 @@ export default function SettingData({ data, service, customer }) {
                             </div>
                             <div className={styles.itemsContainer}>
                                 {data.map((item) => {
-                                    let sum = customer.filter(c => c.source?._id === item._id).length
+                                    let sum = customer.filter(c => customerMatchesSourceFilter(c, item._id, data)).length
                                     return (
                                         <div key={item._id} className={styles.item} onClick={() => handleOpenUpdatePopup(item)}>
                                             <h5 style={{ textTransform: 'uppercase' }}>{item.name}</h5>

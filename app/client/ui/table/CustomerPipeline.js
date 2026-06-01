@@ -35,6 +35,32 @@ import { useActionFeedback as useAction } from '@/hooks/useAction';
 /* ============================== Helpers ============================== */
 const vnd = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
 
+/** Map nhóm → Admin Sale đầu tiên trong danh sách users */
+function buildAdminSaleByGroupMap(allUsers = []) {
+    const map = new Map();
+    for (const u of allUsers) {
+        if (!u?.group) continue;
+        if (!Array.isArray(u.role) || !u.role.includes('Admin Sale')) continue;
+        if (!map.has(u.group)) map.set(u.group, u);
+    }
+    return map;
+}
+
+function resolveCloserGroup(closedBy, allUsers = []) {
+    if (!closedBy) return null;
+    if (typeof closedBy === 'object' && closedBy.group) return closedBy.group;
+    const id = typeof closedBy === 'object' ? (closedBy._id ?? closedBy.id) : closedBy;
+    if (!id) return null;
+    const user = allUsers.find((u) => String(u._id) === String(id));
+    return user?.group ?? null;
+}
+
+function getResponsibleAdminSale(detail, adminSaleByGroup, allUsers = []) {
+    const group = resolveCloserGroup(detail?.closedBy, allUsers);
+    if (!group) return null;
+    return adminSaleByGroup.get(group) ?? null;
+}
+
 function CareNoteItem({ note }) {
     return (
         <div className="flex gap-3 items-start py-2">
@@ -209,9 +235,11 @@ const closeServiceSchema = z.object({
 });
 
 /* ===================== Bước 6: ServiceDetailsSection ===================== */
-function ServiceDetailsSection({ customer, services = [], currentUserId, currentUserRoles = [], onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
+function ServiceDetailsSection({ customer, services = [], currentUserId, currentUserRoles = [], allUsers = [], onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
     const { run: runAction } = useAction();
     const isApprover = Array.isArray(currentUserRoles) && (currentUserRoles.includes('Admin') || currentUserRoles.includes('Manager'));
+
+    const adminSaleByGroup = useMemo(() => buildAdminSaleByGroupMap(allUsers), [allUsers]);
 
     const details = useMemo(() => {
         const arr = Array.isArray(customer.serviceDetails) ? customer.serviceDetails : (customer.serviceDetails ? [customer.serviceDetails] : []);
@@ -327,6 +355,13 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                             : { text: 'Chờ duyệt', className: 'bg-amber-100 text-amber-800', Icon: CircleDot };
 
                         const missingTechnician = !((d.selectedCourse?.technician || '').trim());
+                        const responsibleAdminSale =
+                            d.responsibleAdminSale
+                            || getResponsibleAdminSale(d, adminSaleByGroup, allUsers);
+                        const closerName =
+                            (typeof d.closedBy === 'object' && d.closedBy?.name)
+                            || (typeof d.closedBy === 'string' && allUsers.find((u) => String(u._id) === String(d.closedBy))?.name)
+                            || null;
 
                         // Lấy serviceId từ snapshot (customers.serviceDetails) rồi resolve tên
                         const rawSid = d.serviceId ?? d.selectedService;
@@ -362,7 +397,13 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                                                         <AlertTriangle className="h-3 w-3 mr-1" />Thiếu kỹ thuật viên
                                                     </Badge>
                                                 )}
+                                                {(responsibleAdminSale?.name) && (
+                                                    <Badge className="font-normal bg-sky-100 text-sky-900">
+                                                        Admin phụ trách: {responsibleAdminSale.name}
+                                                    </Badge>
+                                                )}
                                             </div>
+
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-3 text-sm">
@@ -385,7 +426,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
 
                                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground">
                                             <div className="flex gap-3">
-                                                <span>Chốt bởi: <b>{d.closedBy?.name || '—'}</b></span>
+                                                <span>Chốt bởi: <b>{closerName || '—'}</b></span>
                                                 <span>Lúc: <b>{d.closedAt ? new Date(d.closedAt).toLocaleString('vi-VN') : '—'}</b></span>
                                             </div>
                                             {approved && (
@@ -480,7 +521,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
 }
 
 /* ============================ COMPONENT CHÍNH ============================ */
-export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, currentUserRoles = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
+export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, currentUserRoles = [], allUsers = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
     const router = useRouter();
     const PIPELINE_STAGES = useMemo(() => [
         { id: 1, title: 'Tiếp nhận & Xử lý', getStatus: getStep1Status },
@@ -1388,6 +1429,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                             services={services}
                                             currentUserId={currentUserId}
                                             currentUserRoles={currentUserRoles}
+                                            allUsers={allUsers}
                                             onOpenCreatePopup={openCreatePopup}
                                             onOpenEditPopup={openEditPopup}
                                             onOpenViewPopup={openViewPopup}

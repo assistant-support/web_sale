@@ -226,6 +226,8 @@ const FormSchema = new Schema(
         assignedBy: { type: Schema.Types.ObjectId, ref: 'user', default: null },
         assignedAt: { type: Date, default: null },
         isAutoAssigned: { type: Boolean, default: false },
+        /** Khách tin nhắn/API: đã có sale thao tác đầu tiên gán phụ trách (không đổi nữa). */
+        saleFirstActionClaimed: { type: Boolean, default: false },
 
         serviceDetails: { type: [ServiceDetailSchema], default: [] },
         

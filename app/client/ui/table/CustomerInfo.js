@@ -14,7 +14,9 @@ import { Loader2, ChevronsUpDown, Check, X, Upload, Image as ImageIcon, Plus, Tr
 
 // --- Action & Data Function Imports ---
 import { updateCustomerInfo, syncHistoryService } from '@/app/actions/customer.actions';
+import { createSourceFormAction } from '@/app/actions/data.actions';
 import { area_customer_data } from '@/data/actions/get';
+import { form_data } from '@/data/form_database/wraperdata.db';
 import { getServiceDetailById } from '@/data/customers/wraperdata.db';
 import { cn } from "@/lib/utils";
 import { driveImage } from '@/function/index';
@@ -31,6 +33,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+    DIRECT_SOURCE_FORM_ID,
+    buildManualSourceFormOptions,
+    getInitialSourceFormId,
+    isManualSourceCustomer,
+} from '@/utils/customerSourceConstants';
 
 function TreatmentDoseAccordion({ item }) {
     const [open, setOpen] = useState(false);
@@ -312,6 +320,105 @@ function SingleSelect({ value, onChange, placeholder = 'Chọn...', onOpenChange
 }
 
 // =============================================================
+// == COMPONENT PHỤ: SourceDetailsSelect (tối đa 3 dòng hiển thị, cuộn nếu nhiều hơn)
+// =============================================================
+const SOURCE_DETAIL_VISIBLE_ROWS = 3;
+const SOURCE_DETAIL_ROW_PX = 36;
+
+function SourceDetailsSelect({ value, onChange, placeholder = 'Chọn nguồn chi tiết...', options = [], isLoading, onOpenChange }) {
+    const [open, setOpen] = useState(false);
+    const commandListRef = useRef(null);
+    const selectedOption = options.find((opt) => opt.value === value);
+    const scrollable = options.length > SOURCE_DETAIL_VISIBLE_ROWS;
+    const listStyle = scrollable
+        ? {
+            maxHeight: SOURCE_DETAIL_ROW_PX * SOURCE_DETAIL_VISIBLE_ROWS,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+        }
+        : { overflow: 'visible' };
+
+    const handleOpenChange = (newOpen) => {
+        setOpen(newOpen);
+        if (newOpen && onOpenChange) onOpenChange();
+    };
+
+    useEffect(() => {
+        if (!open || !scrollable) return;
+        let cleanup = null;
+        const timer = setTimeout(() => {
+            const element = commandListRef.current;
+            if (!element) return;
+            const handleWheel = (e) => {
+                const { scrollTop, scrollHeight, clientHeight } = element;
+                if (scrollHeight > clientHeight) {
+                    const isAtTop = scrollTop <= 0;
+                    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 1;
+                    if ((isAtTop && e.deltaY < 0) || (isAtBottom && e.deltaY > 0)) return;
+                    e.stopPropagation();
+                }
+            };
+            element.addEventListener('wheel', handleWheel, { passive: true });
+            cleanup = () => element.removeEventListener('wheel', handleWheel);
+        }, 100);
+        return () => {
+            clearTimeout(timer);
+            if (cleanup) cleanup();
+        };
+    }, [open, scrollable]);
+
+    return (
+        <Popover open={open} onOpenChange={handleOpenChange}>
+            <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal">
+                    {selectedOption ? (
+                        <span className="truncate">{selectedOption.label}</span>
+                    ) : (
+                        <span className="text-muted-foreground">{placeholder}</span>
+                    )}
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" style={{ overflow: 'hidden' }}>
+                <Command>
+                    <CommandInput placeholder="Tìm kiếm nguồn..." className="flex-shrink-0" />
+                    <div ref={commandListRef} style={listStyle} className={scrollable ? 'area-select-scroll' : undefined}>
+                        <CommandList style={{ overflow: 'visible', maxHeight: 'none', height: 'auto' }}>
+                            {isLoading ? (
+                                <div className="p-4 text-center">
+                                    <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                                    <p className="text-sm text-muted-foreground mt-2">Đang tải...</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <CommandEmpty>Không tìm thấy nguồn.</CommandEmpty>
+                                    <CommandGroup>
+                                        {options.map((option) => (
+                                            <CommandItem
+                                                key={option.value}
+                                                value={option.label}
+                                                onSelect={() => {
+                                                    onChange(option.value === value ? '' : option.value);
+                                                    setOpen(false);
+                                                }}
+                                            >
+                                                <Check className={cn('mr-2 h-4 w-4', value === option.value ? 'opacity-100' : 'opacity-0')} />
+                                                {option.label}
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                </>
+                            )}
+                        </CommandList>
+                    </div>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+// =============================================================
 // == COMPONENT PHỤ: MultiSelect (Giữ nguyên)
 // =============================================================
 function MultiSelect({ options, selected, onChange, className }) {
@@ -372,10 +479,10 @@ const updateFormSchema = z.object({
     customerCode: z.string().optional(),
     service_start_date: z.string().optional(),
     service_last_date: z.string().optional(),
-    sourceDetails: z.string().optional(),
+    sourceFormId: z.string().optional(),
 });
 
-export default function CustomerInfo({ customer, onClose, service = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
+export default function CustomerInfo({ customer, onClose, service = [], formSources = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [coverImage, setCoverImage] = useState(null);
     const [coverImageRemoved, setCoverImageRemoved] = useState(false);
@@ -397,6 +504,10 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
     const [editingAreaId, setEditingAreaId] = useState(null);
     const [editAreaName, setEditAreaName] = useState('');
     const [editAreaType, setEditAreaType] = useState('');
+    const [isAddSourceDialogOpen, setIsAddSourceDialogOpen] = useState(false);
+    const [isAddingSource, setIsAddingSource] = useState(false);
+    const [newSourceName, setNewSourceName] = useState('');
+    const [newSourceDescribe, setNewSourceDescribe] = useState('');
     const [notification, setNotification] = useState({ open: false, status: true, mes: '' });
     
     // State cho popup xem chi tiết đơn chốt dịch vụ
@@ -1048,6 +1159,41 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
         loadAreaCustomersData();
     };
 
+    const handleAddSource = async () => {
+        if (!newSourceName?.trim()) {
+            setNotification({ open: true, status: false, mes: 'Vui lòng nhập tên nguồn' });
+            return;
+        }
+
+        setIsAddingSource(true);
+        try {
+            const fd = new FormData();
+            fd.append('name', newSourceName.trim());
+            if (newSourceDescribe.trim()) fd.append('describe', newSourceDescribe.trim());
+
+            const result = await createSourceFormAction(null, fd);
+            if (!result?.status) {
+                setNotification({ open: true, status: false, mes: result?.message || 'Thêm nguồn thất bại' });
+                return;
+            }
+
+            setNotification({ open: true, status: true, mes: result.message || 'Thêm nguồn thành công' });
+            setNewSourceName('');
+            setNewSourceDescribe('');
+            setIsAddSourceDialogOpen(false);
+            await refreshSourceForms();
+            const newId = result.data?._id ? String(result.data._id) : '';
+            if (newId) {
+                form.setValue('sourceFormId', newId, { shouldDirty: true, shouldTouch: true });
+            }
+        } catch (error) {
+            console.error('[handleAddSource]', error);
+            setNotification({ open: true, status: false, mes: 'Có lỗi xảy ra khi thêm nguồn' });
+        } finally {
+            setIsAddingSource(false);
+        }
+    };
+
     // Xử lý thêm khu vực mới
     const handleAddArea = async () => {
         if (!newAreaName || !newAreaName.trim()) {
@@ -1292,20 +1438,35 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
             customerCode: customer.customerCode || '',
             service_start_date: customer.service_start_date ? new Date(customer.service_start_date).toISOString().split('T')[0] : '',
             service_last_date: customer.service_last_date ? new Date(customer.service_last_date).toISOString().split('T')[0] : '',
-            sourceDetails: customer.sourceDetails || '',
+            sourceFormId: getInitialSourceFormId(customer, formSources),
         },
     });
 
-    // Khách có source = "Trực tiếp" (ID cố định) thì hiện icon bút để cho phép sửa "Nguồn chi tiết".
-    const DIRECT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
-    const customerSourceId = (() => {
-        const src = customer?.source;
-        if (!src) return '';
-        if (typeof src === 'object') return String(src._id || src.$oid || '');
-        return String(src);
-    })();
-    const canEditSourceDetails = customerSourceId === DIRECT_SOURCE_ID;
-    const [isEditingSourceDetails, setIsEditingSourceDetails] = useState(false);
+    const canEditSourceDetails = isManualSourceCustomer(customer, formSources);
+    const [localFormSources, setLocalFormSources] = useState(() => (Array.isArray(formSources) ? formSources : []));
+    const [isLoadingSourceForms, setIsLoadingSourceForms] = useState(false);
+
+    useEffect(() => {
+        setLocalFormSources(Array.isArray(formSources) ? formSources : []);
+    }, [formSources]);
+
+    const refreshSourceForms = async () => {
+        setIsLoadingSourceForms(true);
+        try {
+            const data = await form_data();
+            setLocalFormSources(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error('[refreshSourceForms]', error);
+        } finally {
+            setIsLoadingSourceForms(false);
+        }
+    };
+
+    const watchedSourceFormId = form.watch('sourceFormId');
+    const sourceDetailOptions = useMemo(
+        () => buildManualSourceFormOptions(localFormSources, watchedSourceFormId),
+        [localFormSources, watchedSourceFormId]
+    );
 
     // Load dữ liệu area_customer khi component mount nếu đã có Id_area_customer
     useEffect(() => {
@@ -1482,31 +1643,30 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                     {canEditSourceDetails ? (
                         <FormField
                             control={form.control}
-                            name="sourceDetails"
+                            name="sourceFormId"
                             render={({ field }) => (
                                 <FormItem>
-                                    <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center justify-between mb-2 gap-2">
                                         <Label><h6>Nguồn chi tiết</h6></Label>
-                                        {!isEditingSourceDetails && (
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 w-8 p-0"
-                                                onClick={() => setIsEditingSourceDetails(true)}
-                                                aria-label="Chỉnh sửa nguồn chi tiết"
-                                            >
-                                                <Pencil className="h-3 w-3" />
-                                            </Button>
-                                        )}
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 text-xs"
+                                            onClick={() => setIsAddSourceDialogOpen(true)}
+                                        >
+                                            <Plus className="h-3 w-3 mr-1" />
+                                            Thêm nguồn
+                                        </Button>
                                     </div>
                                     <FormControl>
-                                        <Input
-                                            {...field}
-                                            value={field.value ?? ''}
-                                            placeholder="Nhập nguồn chi tiết"
-                                            disabled={!isEditingSourceDetails}
-                                            readOnly={!isEditingSourceDetails}
+                                        <SourceDetailsSelect
+                                            value={field.value || DIRECT_SOURCE_FORM_ID}
+                                            onChange={field.onChange}
+                                            placeholder="Chọn nguồn chi tiết..."
+                                            options={sourceDetailOptions}
+                                            isLoading={isLoadingSourceForms}
+                                            onOpenChange={refreshSourceForms}
                                         />
                                     </FormControl>
                                 </FormItem>
@@ -1515,6 +1675,73 @@ export default function CustomerInfo({ customer, onClose, service = [], discount
                     ) : (
                         <div className="grid gap-2"><Label><h6>Nguồn chi tiết</h6></Label><Input defaultValue={customer.sourceDetails} disabled /></div>
                     )}
+                    <Dialog open={isAddSourceDialogOpen} onOpenChange={setIsAddSourceDialogOpen}>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle>Thêm nguồn mới</DialogTitle>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="source-name">
+                                        Tên nguồn <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="source-name"
+                                        value={newSourceName}
+                                        onChange={(e) => setNewSourceName(e.target.value)}
+                                        placeholder="Ví dụ: Quầy trực, giới thiệu..."
+                                        disabled={isAddingSource}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && newSourceName.trim() && !isAddingSource) {
+                                                handleAddSource();
+                                            }
+                                        }}
+                                    />
+                                    {/* <p className="text-xs text-muted-foreground">
+                                        Nguồn được lưu vào hệ thống (collection forms) và tự gán vào Nguồn chi tiết.
+                                    </p> */}
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="source-describe">Mô tả (tùy chọn)</Label>
+                                    <Input
+                                        id="source-describe"
+                                        value={newSourceDescribe}
+                                        onChange={(e) => setNewSourceDescribe(e.target.value)}
+                                        placeholder="Mô tả ngắn"
+                                        disabled={isAddingSource}
+                                    />
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setIsAddSourceDialogOpen(false);
+                                        setNewSourceName('');
+                                        setNewSourceDescribe('');
+                                    }}
+                                    disabled={isAddingSource}
+                                >
+                                    Hủy
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={handleAddSource}
+                                    disabled={isAddingSource || !newSourceName.trim()}
+                                >
+                                    {isAddingSource ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Đang thêm...
+                                        </>
+                                    ) : (
+                                        'Thêm'
+                                    )}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                     <FormField control={form.control} name="area" render={({ field }) => (<FormItem><Label><h6>Địa chỉ</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
                     <FormField 
                         control={form.control} 

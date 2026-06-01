@@ -5,6 +5,7 @@ import connectDB from '@/config/connectDB';
 import Customer from '@/models/customer.model';
 import { revalidateData } from '@/app/actions/customer.actions';
 import autoAssignForCustomer from '@/utils/autoAssign';
+import { markMessageCustomerAutoAssigned } from '@/utils/assignSaleResponsible';
 import mongoose from 'mongoose';
 import { generateCustomerCodeByType, isDuplicateKeyError } from '@/utils/customerCode';
 
@@ -154,6 +155,7 @@ export async function POST(req) {
         // Gán tự động Sale phụ trách cho nhóm "Nội khoa" (noi_khoa)
         try {
             await autoAssignForCustomer(newCustomer._id, { targetGroup: 'noi_khoa' });
+            await markMessageCustomerAutoAssigned(newCustomer._id);
         } catch (e) {
             console.error('[Auto Customer] Lỗi khi gán Sale:', e?.message || e);
             // Tiếp tục dù có lỗi gán

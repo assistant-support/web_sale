@@ -2,7 +2,8 @@
 'use client';
 
 // ... (Giải thích và imports giữ nguyên)
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { form_data } from '@/data/form_database/wraperdata.db';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -23,6 +24,16 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 
+import {
+    DIRECT_SOURCE_FORM_ID,
+    DEFAULT_MANUAL_SOURCE_DETAIL,
+    buildManualSourceFormOptions,
+} from '@/utils/customerSourceConstants';
+
+const DEFAULT_SOURCE_DETAIL = DEFAULT_MANUAL_SOURCE_DETAIL;
+const SOURCE_DETAIL_VISIBLE_ROWS = 3;
+const SOURCE_DETAIL_ROW_PX = 36;
+
 // Cho phép chọn nhiều dịch vụ quan tâm; bắt buộc tối thiểu 1.
 const formSchema = z.object({
     fullName: z.string().min(2, { message: 'Vui lòng nhập họ và tên.' }),
@@ -30,9 +41,103 @@ const formSchema = z.object({
     email: z.string().email({ message: 'Email không đúng định dạng.' }).optional().or(z.literal('')),
     address: z.string().optional(),
     service: z.array(z.string()).min(1, { message: 'Vui lòng chọn ít nhất một dịch vụ.' }),
+    sourceFormId: z.string().optional(),
     dob: z.date().optional(),
     customerCode: z.string().optional(),
 });
+
+function SourceDetailsSelect({ value, onChange, placeholder = 'Chọn nguồn chi tiết...', options = [], isLoading, onOpenChange }) {
+    const [open, setOpen] = useState(false);
+    const commandListRef = useRef(null);
+    const selectedOption = options.find((opt) => opt.value === value);
+    const scrollable = options.length > SOURCE_DETAIL_VISIBLE_ROWS;
+    const listStyle = scrollable
+        ? {
+            maxHeight: SOURCE_DETAIL_ROW_PX * SOURCE_DETAIL_VISIBLE_ROWS,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+        }
+        : { overflow: 'visible' };
+
+    const handleOpenChange = (newOpen) => {
+        setOpen(newOpen);
+        if (newOpen && onOpenChange) onOpenChange();
+    };
+
+    useEffect(() => {
+        if (!open || !scrollable) return;
+        let cleanup = null;
+        const timer = setTimeout(() => {
+            const element = commandListRef.current;
+            if (!element) return;
+            const handleWheel = (e) => {
+                const { scrollTop, scrollHeight, clientHeight } = element;
+                if (scrollHeight > clientHeight) {
+                    const isAtTop = scrollTop <= 0;
+                    const isAtBottom = scrollTop + clientHeight >= scrollHeight - 1;
+                    if ((isAtTop && e.deltaY < 0) || (isAtBottom && e.deltaY > 0)) return;
+                    e.stopPropagation();
+                }
+            };
+            element.addEventListener('wheel', handleWheel, { passive: true });
+            cleanup = () => element.removeEventListener('wheel', handleWheel);
+        }, 100);
+        return () => {
+            clearTimeout(timer);
+            if (cleanup) cleanup();
+        };
+    }, [open, scrollable]);
+
+    return (
+        <Popover open={open} onOpenChange={handleOpenChange}>
+            <PopoverTrigger asChild>
+                <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal">
+                    {selectedOption ? (
+                        <span className="truncate">{selectedOption.label}</span>
+                    ) : (
+                        <span className="text-muted-foreground">{placeholder}</span>
+                    )}
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" style={{ overflow: 'hidden' }}>
+                <Command>
+                    <CommandInput placeholder="Tìm kiếm nguồn..." className="flex-shrink-0" />
+                    <div ref={commandListRef} style={listStyle}>
+                        <CommandList style={{ overflow: 'visible', maxHeight: 'none', height: 'auto' }}>
+                            {isLoading ? (
+                                <div className="p-4 text-center">
+                                    <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                                    <p className="text-sm text-muted-foreground mt-2">Đang tải...</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <CommandEmpty>Không tìm thấy nguồn.</CommandEmpty>
+                                    <CommandGroup>
+                                        {options.map((option) => (
+                                            <CommandItem
+                                                key={option.value}
+                                                value={option.label}
+                                                onSelect={() => {
+                                                    onChange(option.value);
+                                                    setOpen(false);
+                                                }}
+                                            >
+                                                <Check className={cn('mr-2 h-4 w-4', value === option.value ? 'opacity-100' : 'opacity-0')} />
+                                                {option.label}
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                </>
+                            )}
+                        </CommandList>
+                    </div>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 // Multi-select dịch vụ: hiển thị các dịch vụ đã chọn dưới dạng badge, mở popover để tick chọn.
 function ServiceMultiSelect({ options, selected, onChange }) {
@@ -111,20 +216,46 @@ function ServiceMultiSelect({ options, selected, onChange }) {
  * Component chính để hiển thị nút và popup thêm khách hàng.
  * @param {{ service: Array<{_id: string, name: string}> }} props - Prop chứa danh sách các dịch vụ.
  */
-export default function Customer_add({ service }) {
+export default function Customer_add({ service, formSources = [] }) {
     const [isOpen, setIsOpen] = useState(false);
     const actionUI = useActionUI();
     const [suggestedCustomerCode, setSuggestedCustomerCode] = useState('');
     const [isSuggestingCode, setIsSuggestingCode] = useState(false);
+    const [localFormSources, setLocalFormSources] = useState(() => (Array.isArray(formSources) ? formSources : []));
+    const [isLoadingSourceForms, setIsLoadingSourceForms] = useState(false);
 
     const form = useForm({
         resolver: zodResolver(formSchema),
         mode: 'onChange',
         defaultValues: {
-            fullName: '', phone: '', email: '', address: '', service: [], dob: undefined,
+            fullName: '', phone: '', email: '', address: '', service: [],
+            sourceFormId: DIRECT_SOURCE_FORM_ID,
+            dob: undefined,
             customerCode: '',
         },
     });
+
+    useEffect(() => {
+        setLocalFormSources(Array.isArray(formSources) ? formSources : []);
+    }, [formSources]);
+
+    const refreshSourceForms = async () => {
+        setIsLoadingSourceForms(true);
+        try {
+            const data = await form_data();
+            setLocalFormSources(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error('[Customer_add] refreshSourceForms:', error);
+        } finally {
+            setIsLoadingSourceForms(false);
+        }
+    };
+
+    const watchedSourceFormId = form.watch('sourceFormId');
+    const sourceDetailOptions = useMemo(
+        () => buildManualSourceFormOptions(localFormSources, watchedSourceFormId),
+        [localFormSources, watchedSourceFormId]
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -167,7 +298,12 @@ export default function Customer_add({ service }) {
             silentOnSuccess: false,
             refreshOnSuccess: true,
             onSuccess: () => {
-                form.reset();
+                form.reset({
+                    fullName: '', phone: '', email: '', address: '', service: [],
+                    sourceFormId: DIRECT_SOURCE_FORM_ID,
+                    dob: undefined,
+                    customerCode: suggestedCustomerCode || '',
+                });
                 setTimeout(() => setIsOpen(false), 1200);
             },
         });
@@ -224,6 +360,22 @@ export default function Customer_add({ service }) {
 
                             <FormField control={form.control} name="address" render={({ field }) => (
                                 <FormItem><FormLabel><h5>Địa chỉ</h5></FormLabel><FormControl><Input placeholder="123 Đường ABC, Phường X, Quận Y" {...field} /></FormControl></FormItem>
+                            )} />
+
+                            <FormField control={form.control} name="sourceFormId" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel><h5>Nguồn chi tiết</h5></FormLabel>
+                                    <FormControl>
+                                        <SourceDetailsSelect
+                                            value={field.value || DIRECT_SOURCE_FORM_ID}
+                                            onChange={field.onChange}
+                                            placeholder="Chọn nguồn chi tiết..."
+                                            options={sourceDetailOptions}
+                                            isLoading={isLoadingSourceForms}
+                                            onOpenChange={refreshSourceForms}
+                                        />
+                                    </FormControl>
+                                </FormItem>
                             )} />
 
                             <FormField control={form.control} name="service" render={({ field }) => (

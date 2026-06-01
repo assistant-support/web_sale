@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BarChart3, GitBranch, Share2, Users, CalendarClock, DollarSign } from 'lucide-react';
+import { isAdminSaleRestrictedRole } from '@/utils/saleScope';
 
 const allNavLinks = [
     { name: 'Nguồn data', href: '/admin/data-reception', icon: Share2 },
@@ -15,21 +16,10 @@ const allNavLinks = [
 
 export function Navbar({ roles = [] }) {
     const pathname = usePathname();
-    const isAdminSaleRestricted =
-        Array.isArray(roles) &&
-        roles.includes('Admin Sale') &&
-        !roles.includes('Admin') &&
-        !roles.includes('Manager');
-    const isSaleOnly = Array.isArray(roles) && roles.includes('Sale') && !roles.includes('Admin') && !roles.includes('Manager');
+    const isAdminSaleRestricted = isAdminSaleRestrictedRole(roles);
     const navLinks = isAdminSaleRestricted
         ? allNavLinks.filter((link) => link.href === '/admin/revenue')
-        : isSaleOnly
-            ? allNavLinks.filter((link) =>
-                link.href === '/admin/allocation' ||
-                link.href === '/admin/call' ||
-                link.href === '/admin/appointment-stats'
-            )
-            : allNavLinks;
+        : allNavLinks;
 
     return (
         <nav className="bg-white shadow-md sticky top-0 z-50 rounded-sm">

@@ -7,6 +7,7 @@ import checkAuthToken from '@/utils/checktoken';
 import { reloadAppointments } from '@/data/appointment_db/wraperdata.db';
 import { revalidateData } from '@/app/actions/customer.actions';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
+import { claimSaleOnFirstCustomerAction } from '@/utils/assignSaleResponsible';
 
 /**
  * Action để tạo lịch hẹn mới.
@@ -119,6 +120,12 @@ export async function createAppointmentAction(prevState, formData) {
                 statusForCall: 'success',
             }
         });
+
+        try {
+            await claimSaleOnFirstCustomerAction(customerId, user.id, 'Đặt lịch hẹn');
+        } catch (claimErr) {
+            console.error('[createAppointmentAction] claim sale:', claimErr?.message || claimErr);
+        }
 
         // Revalidate data
         await reloadAppointments();

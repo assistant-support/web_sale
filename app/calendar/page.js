@@ -22,15 +22,20 @@ export default async function CalendarPage({ searchParams }) {
     const userDetails = await user_data({ _id: user.id });
     const userInfo = userDetails[0];
 
-    // Determine if user has admin privileges
-    const isAdmin = userInfo.role.includes('Admin') || userInfo.role.includes('Admin Sale');
+    // Admin, Admin Sale, Manager: xem toàn bộ lịch hẹn (ngang quyền admin)
+    const canViewAllAppointments =
+        userInfo.role.includes('Admin') ||
+        userInfo.role.includes('Admin Sale') ||
+        userInfo.role.includes('Manager');
+    const isAdmin = canViewAllAppointments;
 
     // Build filter object based on user permissions
     let filter = {};
 
-    // If not admin, only show appointments created by the current user
-    if (!isAdmin) {
+    if (!canViewAllAppointments) {
         filter.createdBy = user.id;
+    } else if (searchParams.createdBy) {
+        filter.createdBy = searchParams.createdBy;
     }
 
     // Add any additional filters from search params

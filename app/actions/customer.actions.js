@@ -14,6 +14,18 @@ import autoAssignForCustomer from '@/utils/autoAssign';
 import { uploadFileToDrive } from '@/function/drive/image';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 import { parseCustomerCode, isCustomerCodeAvailable } from '@/utils/customerCode';
+import { buildCustomerSourceFilter } from '@/utils/customerSourceFilter';
+import {
+    mustScopeClientListToAssignees,
+    normalizeRoles,
+    filterCustomersForSale,
+    normalizeUserId,
+} from '@/utils/saleScope';
+import { isManualSourceCustomer } from '@/utils/customerSourceConstants';
+import {
+    resolveCustomerSourceFromFormId,
+    resolveCustomerSourceFromDetailName,
+} from '@/utils/resolveCustomerSource.server';
 // Các import không liên quan đến Student đã được bỏ đi
 // import { ProfileDefault, statusStudent } from '@/data/default'; // Không dùng cho Customer
 // import { getZaloUid } from '@/function/drive/appscript'; // Không dùng cho Customer (nếu không chuyển đổi)
@@ -159,9 +171,35 @@ export async function syncHistoryService(customerId) {
     }
 }
 
-export async function getCombinedData(params) {
-    const cachedData = nextCache(
-        async (currentParams) => {
+/** Sale thuần trên trang Chăm sóc: chỉ khách có mình trong assignees. */
+async function resolveClientListRestrictUserId(session) {
+    if (!session?.id) return null;
+    const userId = normalizeUserId(session.id);
+    if (!mongoose.Types.ObjectId.isValid(userId)) return null;
+
+    let roles = normalizeRoles(session.role);
+    if (roles.length === 0) {
+        const dbUser = await User.findById(userId).select('role').lean();
+        roles = normalizeRoles(dbUser?.role);
+    }
+    if (!mustScopeClientListToAssignees(roles)) return null;
+    return userId;
+}
+
+function buildAssigneeUserFilter(assigneeId) {
+    if (!assigneeId || !mongoose.Types.ObjectId.isValid(assigneeId)) return null;
+    const assigneeOid = new mongoose.Types.ObjectId(assigneeId);
+    const assigneeStr = String(assigneeId);
+    return {
+        assignees: {
+            $elemMatch: {
+                user: { $in: [assigneeOid, assigneeStr] },
+            },
+        },
+    };
+}
+
+async function queryCombinedData(currentParams) {
             await connectDB();
 
             const page = Number(currentParams.page) || 1;
@@ -184,26 +222,16 @@ export async function getCombinedData(params) {
 
             let sourceIndexHint = null;
 
-            // Lọc theo nguồn
+            // Lọc theo nguồn (form _id hoặc sourceDetails — gồm khách Trực tiếp + nguồn chi tiết)
             if (currentParams.source) {
-                // Kiểm tra xem có phải là ObjectId hợp lệ không (nguồn thường)
-                if (mongoose.Types.ObjectId.isValid(currentParams.source)) {
-                    filterConditions.push({ source: new mongoose.Types.ObjectId(currentParams.source) });
-                    sourceIndexHint = 'source_1';
-                } else {
-                    // Nếu không phải ObjectId, có thể là sourceDetails (nguồn tin nhắn)
-                    const sourceValue = String(currentParams.source);
-                    
-                    // Nếu filter theo "Tin nhắn", lấy tất cả sourceDetails bắt đầu bằng "Tin nhắn"
-                    if (sourceValue === 'Tin nhắn') {
-                        filterConditions.push({
-                            sourceDetails: { $regex: '^Tin nhắn', $options: 'i' }
-                        });
-                    } else {
-                        // Các sourceDetails khác: filter chính xác
-                        filterConditions.push({ sourceDetails: sourceValue });
-                    }
-                    sourceIndexHint = 'sourceDetails_1';
+                const sourceFilter = await buildCustomerSourceFilter(currentParams.source);
+                if (sourceFilter) {
+                    filterConditions.push(sourceFilter);
+                    sourceIndexHint = sourceFilter.$or
+                        ? null
+                        : sourceFilter.source
+                            ? 'source_1'
+                            : 'sourceDetails_1';
                 }
             }
 
@@ -235,9 +263,10 @@ export async function getCombinedData(params) {
                 }
             }
 
-            // Lọc theo người phụ trách trong mảng assignees
-            if (currentParams.assignee && mongoose.Types.ObjectId.isValid(currentParams.assignee)) {
-                filterConditions.push({ 'assignees.user': new mongoose.Types.ObjectId(currentParams.assignee) });
+            // Lọc theo người phụ trách trong mảng assignees (ObjectId hoặc chuỗi legacy)
+            const assigneeFilter = buildAssigneeUserFilter(currentParams.assignee);
+            if (assigneeFilter) {
+                filterConditions.push(assigneeFilter);
             }
 
             // Zalo phase
@@ -478,23 +507,7 @@ export async function getCombinedData(params) {
                 list.forEach(collectFromServiceDetail);
             });
 
-            // Query users/services một lần
-            let sdUserMap = new Map();
-            let sdServiceMap = new Map();
-            if (sdUserIds.size > 0) {
-                const users = await User.find({ _id: { $in: Array.from(sdUserIds) } })
-                    .select('name avt')
-                    .lean();
-                sdUserMap = new Map(users.map((u) => [String(u._id), u]));
-            }
-            if (sdServiceIds.size > 0) {
-                const services = await Service.find({ _id: { $in: Array.from(sdServiceIds) } })
-                    .select('name code price')
-                    .lean();
-                sdServiceMap = new Map(services.map((s) => [String(s._id), s]));
-            }
-
-            // Lấy pricing + name_CTKM, idCTKM từ collection service_details (nguồn đúng cho giá gốc/giảm giá/thành tiền)
+            // Lấy meta từ service_details (pricing, closedBy, …) — snapshot customers có thể thiếu closedBy
             const sdDetailIds = new Set();
             paginatedData.forEach((customer) => {
                 const list = Array.isArray(customer.serviceDetails)
@@ -508,14 +521,41 @@ export async function getCombinedData(params) {
                     }
                 });
             });
-            let sdPricingMap = new Map();
+            let sdDetailMetaMap = new Map();
             if (sdDetailIds.size > 0) {
                 const details = await ServiceDetail.find({ _id: { $in: Array.from(sdDetailIds).map((id) => new mongoose.Types.ObjectId(id)) } })
-                    .select('pricing name_CTKM idCTKM')
+                    .select('pricing name_CTKM idCTKM closedBy approvedBy')
                     .lean();
                 details.forEach((doc) => {
-                    sdPricingMap.set(String(doc._id), { pricing: doc.pricing, name_CTKM: doc.name_CTKM, idCTKM: doc.idCTKM });
+                    sdDetailMetaMap.set(String(doc._id), doc);
+                    if (doc.closedBy) sdUserIds.add(String(doc.closedBy));
+                    if (doc.approvedBy) sdUserIds.add(String(doc.approvedBy));
                 });
+            }
+
+            // Admin Sale đầu tiên theo nhóm (không lọc uid — getUserAll có thể loại Admin Sale)
+            const adminSaleByGroup = new Map();
+            const adminSaleUsers = await User.find({ role: { $in: ['Admin Sale'] } })
+                .select('name group role')
+                .lean();
+            adminSaleUsers.forEach((u) => {
+                if (u?.group && !adminSaleByGroup.has(u.group)) adminSaleByGroup.set(u.group, u);
+            });
+
+            // Query users/services một lần
+            let sdUserMap = new Map();
+            let sdServiceMap = new Map();
+            if (sdUserIds.size > 0) {
+                const users = await User.find({ _id: { $in: Array.from(sdUserIds) } })
+                    .select('name avt group role')
+                    .lean();
+                sdUserMap = new Map(users.map((u) => [String(u._id), u]));
+            }
+            if (sdServiceIds.size > 0) {
+                const services = await Service.find({ _id: { $in: Array.from(sdServiceIds) } })
+                    .select('name code price')
+                    .lean();
+                sdServiceMap = new Map(services.map((s) => [String(s._id), s]));
             }
 
             // Map dữ liệu vào từng serviceDetails
@@ -533,11 +573,13 @@ export async function getCombinedData(params) {
                     // Pricing + CTKM: ưu tiên từ service_details (nguồn đúng)
                     const sdId = sd?.serviceDetailId ?? sd?._id;
                     const sdIdStr = sdId != null ? (typeof sdId === 'object' ? String(sdId._id ?? sdId.$oid ?? sdId) : String(sdId)) : null;
-                    if (sdIdStr && sdPricingMap.has(sdIdStr)) {
-                        const fromDetail = sdPricingMap.get(sdIdStr);
+                    if (sdIdStr && sdDetailMetaMap.has(sdIdStr)) {
+                        const fromDetail = sdDetailMetaMap.get(sdIdStr);
                         if (fromDetail.pricing) cloned.pricing = fromDetail.pricing;
                         if (fromDetail.name_CTKM !== undefined) cloned.name_CTKM = fromDetail.name_CTKM;
                         if (fromDetail.idCTKM !== undefined) cloned.idCTKM = fromDetail.idCTKM;
+                        if (!cloned.closedBy && fromDetail.closedBy) cloned.closedBy = fromDetail.closedBy;
+                        if (!cloned.approvedBy && fromDetail.approvedBy) cloned.approvedBy = fromDetail.approvedBy;
                     }
 
                     // Users
@@ -546,6 +588,12 @@ export async function getCombinedData(params) {
                     }
                     if (cloned.approvedBy && sdUserMap.has(String(cloned.approvedBy))) {
                         cloned.approvedBy = sdUserMap.get(String(cloned.approvedBy));
+                    }
+
+                    const closerGroup = cloned.closedBy?.group;
+                    if (closerGroup && adminSaleByGroup.has(closerGroup)) {
+                        const admin = adminSaleByGroup.get(closerGroup);
+                        cloned.responsibleAdminSale = { _id: admin._id, name: admin.name };
                     }
                     if (Array.isArray(cloned.payments)) {
                         cloned.payments = cloned.payments.map((p) => {
@@ -598,12 +646,76 @@ export async function getCombinedData(params) {
                 data: plainData,
                 total: results[0]?.totalCount[0]?.count || 0,
             };
-        },
-        ['data-by-type'],
-        { tags: ['combined-data'], revalidate: 3600 }
-    );
+}
 
-    return cachedData(params);
+const cachedCombinedData = nextCache(
+    async (_scopeKey, currentParams) => queryCombinedData(currentParams),
+    ['combined-data-v3'],
+    { tags: ['combined-data'], revalidate: 3600 }
+);
+
+export async function getCombinedData(params) {
+    const session = await checkAuthToken();
+    const restrictUserId = await resolveClientListRestrictUserId(session);
+    const scopedParams = { ...(params || {}) };
+
+    if (restrictUserId) {
+        // Luôn ép assignee = user đang đăng nhập (chặn ?assignee= user khác trên URL)
+        scopedParams.assignee = restrictUserId;
+    }
+
+    let result = restrictUserId
+        ? await queryCombinedData(scopedParams)
+        : await cachedCombinedData('all', scopedParams);
+
+    if (!restrictUserId || !Array.isArray(result?.data)) {
+        return result;
+    }
+
+    const data = filterCustomersForSale(result.data, restrictUserId);
+    const total =
+        data.length !== result.data.length
+            ? await countCustomersForAssignee(restrictUserId, scopedParams)
+            : result.total;
+
+    return { data, total };
+}
+
+async function countCustomersForAssignee(assigneeId, params) {
+    await connectDB();
+    const filterConditions = [];
+    const assigneeFilter = buildAssigneeUserFilter(assigneeId);
+    if (assigneeFilter) {
+        filterConditions.push(assigneeFilter);
+    }
+
+    const query = params?.query || '';
+    if (query) {
+        filterConditions.push({
+            $or: [
+                { name: { $regex: query, $options: 'i' } },
+                { phone: { $regex: query, $options: 'i' } },
+                { customerCode: { $regex: query, $options: 'i' } },
+            ],
+        });
+    }
+
+    if (params?.source) {
+        const sourceFilter = await buildCustomerSourceFilter(params.source);
+        if (sourceFilter) filterConditions.push(sourceFilter);
+    }
+
+    if (params?.pipelineStatus) {
+        const v = String(params.pipelineStatus);
+        const legacy = v.replace(/_\d+$/, '');
+        filterConditions.push({
+            $or: [{ 'pipelineStatus.0': v }, { 'pipelineStatus.0': legacy }],
+        });
+    }
+
+    const match =
+        filterConditions.length > 0 ? { $and: filterConditions } : {};
+    return Customer.countDocuments(match);
 }
 
 
@@ -669,6 +781,7 @@ export async function updateCustomerInfo(previousState, formData) {
         const service_start_date = formData.get('service_start_date');
         const service_last_date = formData.get('service_last_date');
         const customerCodeInput = formData.get('customerCode');
+        const sourceFormIdInput = formData.get('sourceFormId');
         const sourceDetailsInput = formData.get('sourceDetails');
 
         // Lấy khu vực cũ (là _id) để xóa customer khỏi mảng id_customer
@@ -726,13 +839,16 @@ export async function updateCustomerInfo(previousState, formData) {
             }
         }
 
-        // ===== sourceDetails =====
-        // Chỉ cho phép cập nhật khi customer có nguồn là "Trực tiếp" (form ID cố định).
-        const DIRECT_SOURCE_ID = '68b5ebb3658a1123798c0ce4';
-        if (sourceDetailsInput !== null && sourceDetailsInput !== undefined) {
-            const currentSourceId = customerDoc.source ? String(customerDoc.source) : '';
-            if (currentSourceId === DIRECT_SOURCE_ID) {
-                customerDoc.sourceDetails = String(sourceDetailsInput).trim();
+        // ===== Nguồn chi tiết: cập nhật cả source (form _id) và sourceDetails (tên form) =====
+        if (isManualSourceCustomer(customerDoc)) {
+            if (sourceFormIdInput && String(sourceFormIdInput).trim()) {
+                const resolved = await resolveCustomerSourceFromFormId(sourceFormIdInput);
+                customerDoc.source = resolved.source;
+                customerDoc.sourceDetails = resolved.sourceDetails;
+            } else if (sourceDetailsInput !== null && sourceDetailsInput !== undefined) {
+                const resolved = await resolveCustomerSourceFromDetailName(sourceDetailsInput);
+                customerDoc.source = resolved.source;
+                customerDoc.sourceDetails = resolved.sourceDetails;
             }
         }
 

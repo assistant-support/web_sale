@@ -12,6 +12,7 @@ import Appointment from '@/models/appointment.model';
 
 import { getCallsAll, getCallsByCustomer } from './handledata.db';
 import { revalidateData } from '@/app/actions/customer.actions';
+import { claimSaleOnFirstCustomerAction } from '@/utils/assignSaleResponsible';
 
 /**
  * API lấy dữ liệu (dùng file data đã cache)
@@ -123,6 +124,12 @@ export async function saveCallAction(prevState, formData) {
       step: 4
     };
     await Customer.findByIdAndUpdate(customerId, { $push: { care: careNote } });
+
+    try {
+        await claimSaleOnFirstCustomerAction(customerId, userId, 'Cuộc gọi');
+    } catch (claimErr) {
+        console.error('[saveCallAction] claim sale:', claimErr?.message || claimErr);
+    }
 
     // 5) Revalidate
     revalidateTag('calls');

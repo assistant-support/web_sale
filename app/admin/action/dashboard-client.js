@@ -46,16 +46,21 @@ const YearlyUsageCard = ({ yearlyData }) => {
     );
 };
 
-const ActionStatCard = ({ title, icon: Icon, color, data }) => (
+const EMPTY_ACTION_STAT = { total: 0, success: 0, failed: 0 };
+
+const ActionStatCard = ({ title, icon: Icon, color, data = EMPTY_ACTION_STAT }) => {
+    const safe = { ...EMPTY_ACTION_STAT, ...(data || {}) };
+    return (
     <Card className="shadow-lg">
         <CardHeader><CardTitle className="flex items-center text-base font-semibold"><Icon className={`mr-2 h-5 w-5 ${color}`} />{title}</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-            <div className="flex justify-between items-center border-b pb-1"><span className="text-sm text-muted-foreground">Tổng chạy</span><span className="font-bold text-lg">{data.total}</span></div>
-            <div className="flex justify-between items-center border-b pb-1"><span className="text-sm text-green-600">Thành công</span><span className="font-bold text-green-600">{data.success}</span></div>
-            <div className="flex justify-between items-center"><span className="text-sm text-red-600">Thất bại</span><span className="font-bold text-red-600">{data.failed}</span></div>
+            <div className="flex justify-between items-center border-b pb-1"><span className="text-sm text-muted-foreground">Tổng chạy</span><span className="font-bold text-lg">{safe.total}</span></div>
+            <div className="flex justify-between items-center border-b pb-1"><span className="text-sm text-green-600">Thành công</span><span className="font-bold text-green-600">{safe.success}</span></div>
+            <div className="flex justify-between items-center"><span className="text-sm text-red-600">Thất bại</span><span className="font-bold text-red-600">{safe.failed}</span></div>
         </CardContent>
     </Card>
-);
+    );
+};
 
 const ActivityLogTable = ({ activities, actionNames }) => (
     <Card className="shadow-lg">
@@ -74,7 +79,7 @@ const ActivityLogTable = ({ activities, actionNames }) => (
                     <TableBody>
                         {activities.map((log) => (
                             <TableRow key={log._id}>
-                                <TableCell>{log.status.status ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Thành công</Badge> : <Badge variant="destructive">Thất bại</Badge>}</TableCell>
+                                <TableCell>{log.status?.status ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Thành công</Badge> : <Badge variant="destructive">Thất bại</Badge>}</TableCell>
                                 <TableCell className="font-medium">{actionNames[log.type] || log.type}</TableCell>
                                 <TableCell className="hidden md:table-cell">{log.customer?.name || 'N/A'}</TableCell>
                                 <TableCell className="text-right text-xs">{new Date(log.createdAt).toLocaleString('vi-VN')}</TableCell>
@@ -126,7 +131,7 @@ export default function MessagingStatsClient({ initialData }) {
         const failedData = [];
         let otherTotal = 0, otherSuccess = 0, otherFailed = 0;
 
-        for (const key in initialData.byType) {
+        for (const key in initialData.byType || {}) {
             const action = initialData.byType[key];
             actionNamesMap[key] = action.name;
 
@@ -160,9 +165,9 @@ export default function MessagingStatsClient({ initialData }) {
     return (
         <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-gray-50 min-h-screen">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <LimitCard hourly={initialData.zaloLimits.hourly} daily={initialData.zaloLimits.daily} />
-                <YearlyUsageCard yearlyData={initialData.zaloLimits.yearly} />
-                <ActionStatCard title="Tin nhắn" icon={Send} color="text-blue-500" data={initialData.byType.sendMessage} />
+                <LimitCard hourly={initialData.zaloLimits?.hourly ?? 0} daily={initialData.zaloLimits?.daily ?? 0} />
+                <YearlyUsageCard yearlyData={initialData.zaloLimits?.yearly ?? { total: 200000, used: 0, remaining: 200000 }} />
+                <ActionStatCard title="Tin nhắn" icon={Send} color="text-blue-500" data={initialData.byType?.sendMessage} />
                 <ActionStatCard title="Hành động khác" icon={BarChart2} color="text-gray-500" data={otherActions} />
             </div>
 

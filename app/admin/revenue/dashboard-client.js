@@ -186,7 +186,8 @@ export default function DashboardClient({
     discountPrograms = [],
     services = [],
     sources = [],
-    messageSources = []
+    messageSources = [],
+    saleScoped = false,
 }) {
     /* ===== Helpers đặt TRONG component như yêu cầu ===== */
     const { openDetails, setOpenDetails, detailsRow, setDetailsRow } = useDetailsState();
@@ -629,6 +630,10 @@ export default function DashboardClient({
     
     // Fetch report_daily function - export để dùng ở nơi khác
     const fetchReportDaily = useCallback(async () => {
+        if (saleScoped) {
+            setReportDailyData(null);
+            return;
+        }
         try {
             setLoadingReportDaily(true);
             const params = new URLSearchParams();
@@ -650,7 +655,7 @@ export default function DashboardClient({
         } finally {
             setLoadingReportDaily(false);
         }
-    }, [startDate, endDate]);
+    }, [startDate, endDate, saleScoped]);
     
     // Fetch report_daily khi filter thay đổi
     useEffect(() => {
@@ -659,8 +664,8 @@ export default function DashboardClient({
 
     /* ---------- Stats từ report_daily ---------- */
     const stats = useMemo(() => {
-        // Ưu tiên dùng report_daily nếu có
-        if (reportDailyData?.totals) {
+        // Ưu tiên dùng report_daily nếu có (không dùng cho Sale — chỉ số liệu khách được gán)
+        if (!saleScoped && reportDailyData?.totals) {
             const totals = reportDailyData.totals;
             const totalDeals = totals.total_completed_orders || 0;
             const totalRevenueNum = totals.total_revenue || 0;
@@ -682,7 +687,7 @@ export default function DashboardClient({
             totalRevenue: fmtVND(totalRevenueNum),
             avgRevenue: fmtVND(avgRevenueNum),
         };
-    }, [reportDailyData, approvedDeals]);
+    }, [reportDailyData, approvedDeals, saleScoped]);
 
     /* ---------- Top Commissions (đã duyệt) - Fetch tất cả đơn đã duyệt để tính hoa hồng ---------- */
     const [allApprovedForCommissions, setAllApprovedForCommissions] = useState([]);

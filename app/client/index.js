@@ -151,6 +151,8 @@ export default function CustomerView({ customer, c, running, initialResult, user
                     data={initialResult.data}
                     total={initialResult.total}
                     user={user}
+                    allUsers={users}
+                    formSources={sources}
                     selectedCustomers={selectedCustomers}
                     setSelectedCustomers={setSelectedCustomers}
                     viewMode={viewMode}
