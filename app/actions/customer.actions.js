@@ -15,12 +15,6 @@ import { uploadFileToDrive } from '@/function/drive/image';
 import { validatePipelineStatusUpdate } from '@/utils/pipelineStatus';
 import { parseCustomerCode, isCustomerCodeAvailable } from '@/utils/customerCode';
 import { buildCustomerSourceFilter } from '@/utils/customerSourceFilter';
-import {
-    mustScopeClientListToAssignees,
-    normalizeRoles,
-    filterCustomersForSale,
-    normalizeUserId,
-} from '@/utils/saleScope';
 import { isManualSourceCustomer } from '@/utils/customerSourceConstants';
 import {
     resolveCustomerSourceFromFormId,
@@ -169,21 +163,6 @@ export async function syncHistoryService(customerId) {
             error: error?.message || 'Lỗi khi đồng bộ history_service.',
         };
     }
-}
-
-/** Sale thuần trên trang Chăm sóc: chỉ khách có mình trong assignees. */
-async function resolveClientListRestrictUserId(session) {
-    if (!session?.id) return null;
-    const userId = normalizeUserId(session.id);
-    if (!mongoose.Types.ObjectId.isValid(userId)) return null;
-
-    let roles = normalizeRoles(session.role);
-    if (roles.length === 0) {
-        const dbUser = await User.findById(userId).select('role').lean();
-        roles = normalizeRoles(dbUser?.role);
-    }
-    if (!mustScopeClientListToAssignees(roles)) return null;
-    return userId;
 }
 
 function buildAssigneeUserFilter(assigneeId) {
@@ -655,67 +634,7 @@ const cachedCombinedData = nextCache(
 );
 
 export async function getCombinedData(params) {
-    const session = await checkAuthToken();
-    const restrictUserId = await resolveClientListRestrictUserId(session);
-    const scopedParams = { ...(params || {}) };
-
-    if (restrictUserId) {
-        // Luôn ép assignee = user đang đăng nhập (chặn ?assignee= user khác trên URL)
-        scopedParams.assignee = restrictUserId;
-    }
-
-    let result = restrictUserId
-        ? await queryCombinedData(scopedParams)
-        : await cachedCombinedData('all', scopedParams);
-
-    if (!restrictUserId || !Array.isArray(result?.data)) {
-        return result;
-    }
-
-    const data = filterCustomersForSale(result.data, restrictUserId);
-    const total =
-        data.length !== result.data.length
-            ? await countCustomersForAssignee(restrictUserId, scopedParams)
-            : result.total;
-
-    return { data, total };
-}
-
-async function countCustomersForAssignee(assigneeId, params) {
-    await connectDB();
-    const filterConditions = [];
-    const assigneeFilter = buildAssigneeUserFilter(assigneeId);
-    if (assigneeFilter) {
-        filterConditions.push(assigneeFilter);
-    }
-
-    const query = params?.query || '';
-    if (query) {
-        filterConditions.push({
-            $or: [
-                { name: { $regex: query, $options: 'i' } },
-                { phone: { $regex: query, $options: 'i' } },
-                { customerCode: { $regex: query, $options: 'i' } },
-            ],
-        });
-    }
-
-    if (params?.source) {
-        const sourceFilter = await buildCustomerSourceFilter(params.source);
-        if (sourceFilter) filterConditions.push(sourceFilter);
-    }
-
-    if (params?.pipelineStatus) {
-        const v = String(params.pipelineStatus);
-        const legacy = v.replace(/_\d+$/, '');
-        filterConditions.push({
-            $or: [{ 'pipelineStatus.0': v }, { 'pipelineStatus.0': legacy }],
-        });
-    }
-
-    const match =
-        filterConditions.length > 0 ? { $and: filterConditions } : {};
-    return Customer.countDocuments(match);
+    return cachedCombinedData('all', params || {});
 }
 
 

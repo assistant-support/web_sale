@@ -13,11 +13,7 @@ import { unitMedicine_data, treatmentDoctor_data } from '../actions/treatment.ac
 import { maskPhoneNumber } from '@/function';
 import { customer_data } from '@/data/customers/wraperdata.db';
 import { area_customer_data, filter_customer_data } from '@/data/actions/get';
-import {
-    filterCustomersForSale,
-    scopeBirthMonthFilterForSale,
-} from '@/utils/saleScope';
-import { getClientPageScope } from './clientScope.server';
+import { isSaleOnlyRole, normalizeRoles } from '@/utils/saleScope';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -28,15 +24,9 @@ export default async function Page({ searchParams }) {
     const user = await checkAuthToken();
     if (!user) return null;
 
-    const { userId, restrictToAssignee } = await getClientPageScope();
-    const listParams = { ...c };
-    if (restrictToAssignee && userId) {
-        listParams.assignee = userId;
-    }
-
     const [customer, initialResultRaw, userAuth, sources, messageSources, label, zalo, users, variant, discount, running, workflow, service, areaCustomers, filterCustomer, unitMedicines, treatmentDoctors] = await Promise.all([
         customer_data(),
-        getCombinedData(listParams),
+        getCombinedData(c),
         user_data({ _id: user.id }),
         form_data(),
         message_sources_data(),
@@ -54,28 +44,19 @@ export default async function Page({ searchParams }) {
         treatmentDoctor_data()
     ]);
     const reversedLabel = [...label].reverse();
+    const roles = normalizeRoles(userAuth?.[0]?.role || user?.role);
 
+    // Trang Chăm sóc: mọi quyền xem toàn bộ khách; chỉ che SĐT với Sale thuần
     let initialResult = initialResultRaw;
-    if (restrictToAssignee && userId) {
-        const scopedData = filterCustomersForSale(initialResult?.data || [], userId);
+    if (isSaleOnlyRole(roles)) {
         initialResult = {
             ...initialResult,
-            data: scopedData.map((item) => ({
+            data: (initialResult.data || []).map((item) => ({
                 ...item,
                 phonex: maskPhoneNumber(item.phone),
             })),
         };
     }
-
-    const customerForSettings = restrictToAssignee && userId
-        ? filterCustomersForSale(customer, userId)
-        : customer;
-    const filterCustomerScoped = restrictToAssignee && userId
-        ? scopeBirthMonthFilterForSale(
-            filterCustomer,
-            customerForSettings.map((c) => c._id)
-        )
-        : filterCustomer || {};
 
     return (
         <Suspense fallback={<PageSkeleton />}>
@@ -94,9 +75,9 @@ export default async function Page({ searchParams }) {
                 c={c}
                 workflow={workflow}
                 service={service}
-                customer={customerForSettings}
+                customer={customer}
                 areaCustomers={areaCustomers || []}
-                filterCustomer={filterCustomerScoped}
+                filterCustomer={filterCustomer || {}}
                 unitMedicines={unitMedicines || []}
                 treatmentDoctors={treatmentDoctors || []}
             />

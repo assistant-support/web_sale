@@ -25,17 +25,6 @@ export function isSaleOnlyRole(roles) {
     );
 }
 
-/** Trang Chăm sóc: Admin / Manager xem toàn bộ khách. */
-export function canViewAllCustomersOnClient(roles) {
-    const r = normalizeRoles(roles);
-    return r.includes('Admin') || r.includes('Manager');
-}
-
-/** Trang Chăm sóc: mọi role khác chỉ khách có mình trong assignees. */
-export function mustScopeClientListToAssignees(roles) {
-    return !canViewAllCustomersOnClient(roles);
-}
-
 export function normalizeUserId(value) {
     if (!value) return '';
     if (typeof value === 'object') {

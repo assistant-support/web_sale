@@ -5,7 +5,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useState, useMemo, useRef } from 'react';
 import styles from './index.module.css';
 import Menu from '@/components/(ui)/(button)/menu';
-import { canViewAllCustomersOnClient, normalizeRoles } from '@/utils/saleScope';
 
 export default function FilterControls({
     sources = [],
@@ -25,10 +24,6 @@ export default function FilterControls({
     
     // Đảm bảo auth luôn có giá trị hợp lệ, tránh lỗi khi auth là null hoặc undefined
     const safeAuth = auth || { role: [] };
-    const canViewAllCustomers = useMemo(
-        () => canViewAllCustomersOnClient(normalizeRoles(safeAuth.role)),
-        [safeAuth.role]
-    );
 
     const searchParams = useSearchParams();
     const pathname = usePathname();
@@ -157,7 +152,7 @@ export default function FilterControls({
                 </div>
 
                 {/* Người phụ trách */}
-                {canViewAllCustomers && (
+                {!safeAuth.role?.includes?.('Sale') && (
                     <div style={{ flex: 1 }}>
                         <Menu
                             isOpen={isAssigneeMenuOpen}
