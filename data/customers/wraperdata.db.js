@@ -19,6 +19,7 @@ import { findUserUid, sendUserMessage } from '@/data/zalo/chat.actions';
 import checkAuthToken from '@/utils/checktoken';
 import connectDB from '@/config/connectDB';
 import { claimSaleOnFirstCustomerAction } from '@/utils/assignSaleResponsible';
+import { canApproveRevenueDealsRole, canApproveCarePipelineRole, isCareReadOnlyRole } from '@/utils/saleScope';
 
 // Helper function để đảm bảo kết nối MongoDB
 async function ensureMongo() {
@@ -651,6 +652,9 @@ export async function closeServiceAction(prevState, formData) {
     if (!session?.id) {
         return { success: false, error: 'Yêu cầu đăng nhập.' };
     }
+    if (isCareReadOnlyRole(session.role)) {
+        return { success: false, error: 'Thu ngân chỉ được xem trang Chăm sóc, không thể thao tác.' };
+    }
 
     // 1. Lấy dữ liệu từ FormData
     const customerId = String(formData.get('customerId') || '');
@@ -1059,6 +1063,9 @@ export async function saveCallResultAction(prevState, formData) {
 export async function updateServiceDetailAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (isCareReadOnlyRole(session.role)) {
+        return { success: false, error: 'Thu ngân chỉ được xem trang Chăm sóc, không thể thao tác.' };
+    }
 
     const customerId = String(formData.get('customerId') || '');
     const serviceDetailId = String(formData.get('serviceDetailId') || '');
@@ -1441,6 +1448,9 @@ export async function updateServiceDetailAction(prevState, formData) {
 export async function deleteServiceDetailAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (isCareReadOnlyRole(session.role)) {
+        return { success: false, error: 'Thu ngân chỉ được xem trang Chăm sóc, không thể thao tác.' };
+    }
 
     const customerId = String(formData.get('customerId') || '');
     const serviceDetailId = String(formData.get('serviceDetailId') || '');
@@ -1508,6 +1518,9 @@ export async function deleteServiceDetailAction(prevState, formData) {
 export async function approveServiceDetailAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (!canApproveCarePipelineRole(session.role)) {
+        return { success: false, error: 'Chỉ Admin hoặc Manager mới được duyệt đơn trên Chăm sóc.' };
+    }
 
     const customerId = String(formData.get('customerId') || '');
     const serviceDetailId = String(formData.get('serviceDetailId') || '');
@@ -1595,6 +1608,9 @@ export async function approveServiceDetailAction(prevState, formData) {
 export async function approveServiceDealAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (!canApproveRevenueDealsRole(session.role)) {
+        return { success: false, error: 'Chỉ Admin, Manager hoặc Thu ngân mới được duyệt đơn.' };
+    }
 
     const customerId = String(formData.get('customerId') || '');
     const serviceDetailId = String(formData.get('serviceDetailId') || '');
@@ -1881,6 +1897,9 @@ export async function approveServiceDealAction(prevState, formData) {
 export async function rejectServiceDealAction(prevState, formData) {
     const session = await checkAuthToken();
     if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (!canApproveRevenueDealsRole(session.role)) {
+        return { success: false, error: 'Chỉ Admin, Manager hoặc Thu ngân mới được từ chối đơn.' };
+    }
 
     const customerId = String(formData.get('customerId') || '');
     const serviceDetailId = String(formData.get('serviceDetailId') || '');

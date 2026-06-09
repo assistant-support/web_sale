@@ -13,7 +13,7 @@ import { unitMedicine_data, treatmentDoctor_data } from '../actions/treatment.ac
 import { maskPhoneNumber } from '@/function';
 import { customer_data } from '@/data/customers/wraperdata.db';
 import { area_customer_data, filter_customer_data } from '@/data/actions/get';
-import { isSaleOnlyRole, normalizeRoles } from '@/utils/saleScope';
+import { isSaleOnlyRole, isCareReadOnlyRole, normalizeRoles } from '@/utils/saleScope';
 
 function PageSkeleton() {
     return <div>Đang tải trang...</div>;
@@ -45,6 +45,7 @@ export default async function Page({ searchParams }) {
     ]);
     const reversedLabel = [...label].reverse();
     const roles = normalizeRoles(userAuth?.[0]?.role || user?.role);
+    const careReadOnly = isCareReadOnlyRole(roles);
 
     // Trang Chăm sóc: mọi quyền xem toàn bộ khách; chỉ che SĐT với Sale thuần
     let initialResult = initialResultRaw;
@@ -80,6 +81,7 @@ export default async function Page({ searchParams }) {
                 filterCustomer={filterCustomer || {}}
                 unitMedicines={unitMedicines || []}
                 treatmentDoctors={treatmentDoctors || []}
+                careReadOnly={careReadOnly}
             />
         </Suspense>
     );

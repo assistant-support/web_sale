@@ -10,9 +10,15 @@ import Noti from '@/components/(features)/(noti)/noti';
 import Loading from '@/components/(ui)/(loading)/loading';
 import Image from 'next/image';
 
+const STAFF_ROLES = ["Sale", "Admin Sale", "Cashier", "Marketing", "Manager", "Technician"];
+
+function roleOptionLabel(role) {
+    if (role === 'Cashier') return 'Thu ngân (Cashier)';
+    return role;
+}
+
 // CẬP NHẬT: Form thêm mới
 function AddTeacherForm({ onSubmit, onClose, isLoading }) {
-    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager", "Technician"];
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -47,8 +53,8 @@ function AddTeacherForm({ onSubmit, onClose, isLoading }) {
             <div className={styles.formGroup}>
                 <label>Cài đặt quyền<span>*</span></label>
                 <select name="role" value={formData.role} onChange={handleChange} className='input' required>
-                    {ROLES.map(role => (
-                        <option key={role} value={role}>{role}</option>
+                    {STAFF_ROLES.map(role => (
+                        <option key={role} value={role}>{roleOptionLabel(role)}</option>
                     ))}
                 </select>
             </div>
@@ -109,7 +115,6 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
         e.preventDefault();
         onSubmit(teacherData._id, formData);
     };
-    const ROLES = ["Sale", "Admin Sale", "Marketing", "Manager", "Technician"];
     return (
         <form onSubmit={handleSubmit} className={styles.addTeacherForm}>
             <div className={styles.formGroup}>
@@ -127,8 +132,8 @@ function EditTeacherForm({ teacherData, onSubmit, onClose, isLoading }) {
             <div className={styles.formGroup}>
                 <label>Quyền</label>
                 <select name="role" value={formData.role} onChange={handleChange} className='input'>
-                    {ROLES.map(role => (
-                        <option key={role} value={role}>{role}</option>
+                    {STAFF_ROLES.map(role => (
+                        <option key={role} value={role}>{roleOptionLabel(role)}</option>
                     ))}
                 </select>
             </div>

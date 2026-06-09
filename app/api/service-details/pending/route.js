@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getPendingApprovals } from '@/data/service_details/handledata.db';
+import {
+    getPendingApprovals,
+    getPendingApprovalsGroupedByCustomer,
+} from '@/data/service_details/handledata.db';
 import { getAdminSaleScope } from '@/app/admin/saleScope.server';
 
 export async function GET(request) {
@@ -11,6 +14,7 @@ export async function GET(request) {
         const serviceId = searchParams.get('serviceId');
         const limit = parseInt(searchParams.get('limit') || '10', 10);
         const skip = parseInt(searchParams.get('skip') || '0', 10);
+        const groupBy = searchParams.get('groupBy');
 
         const params = { limit, skip };
         if (fromDate) params.fromDate = fromDate;
@@ -23,7 +27,9 @@ export async function GET(request) {
             params.saleUserId = currentUserId;
         }
 
-        const result = await getPendingApprovals(params);
+        const result = groupBy === 'customer'
+            ? await getPendingApprovalsGroupedByCustomer(params)
+            : await getPendingApprovals(params);
 
         return NextResponse.json({ success: true, data: result.data, total: result.total });
     } catch (error) {

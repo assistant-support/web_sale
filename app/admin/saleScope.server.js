@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import connectDB from '@/config/connectDB';
 import Customer from '@/models/customer.model';
 import checkAuthToken from '@/utils/checktoken';
-import { isSaleOnlyRole, isAdminSaleRestrictedRole } from '@/utils/saleScope';
+import { isSaleOnlyRole, isAdminSaleRestrictedRole, canApproveRevenueDealsRole } from '@/utils/saleScope';
 
 export async function getAdminSaleScope() {
     const session = await checkAuthToken();
@@ -12,7 +12,8 @@ export async function getAdminSaleScope() {
     const currentUserId = session?.id ? String(session.id) : '';
     const isSaleOnly = isSaleOnlyRole(roles);
     const isAdminSaleRestricted = isAdminSaleRestrictedRole(roles);
-    return { session, roles, currentUserId, isSaleOnly, isAdminSaleRestricted };
+    const canApproveRevenue = canApproveRevenueDealsRole(roles);
+    return { session, roles, currentUserId, isSaleOnly, isAdminSaleRestricted, canApproveRevenue };
 }
 
 /** ObjectId khách được gán cho sale (assignees.user). */

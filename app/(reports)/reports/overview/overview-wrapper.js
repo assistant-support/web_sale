@@ -7,6 +7,23 @@ const INITIAL_PAGE_SIZE = 10;
 const SECOND_PAGE_SIZE = 20;
 const RECEPTION_PAGE_SIZE = 30;
 
+/** Gộp danh sách theo _id — tránh trùng khi nhiều request load-more chạy cùng offset */
+function mergeUniqueById(prev, next) {
+    const seen = new Set();
+    const out = [];
+    const push = (item) => {
+        const id = String(item?._id ?? '');
+        if (id) {
+            if (seen.has(id)) return;
+            seen.add(id);
+        }
+        out.push(item);
+    };
+    (prev || []).forEach(push);
+    (next || []).forEach(push);
+    return out;
+}
+
 /**
  * Mở trang: load giao diện (light) → load 10 khách + 10 lịch hẹn → load tiếp 20+20 (dừng).
  * Kéo thanh trượt quá nửa thì load tiếp. Thẻ tổng số lấy số lượng thật từ DB (counts API).
@@ -27,8 +44,10 @@ export default function OverviewReportWrapper() {
     const [customersArrivedTotal, setCustomersArrivedTotal] = useState(0);
     const [loadingCustomers, setLoadingCustomers] = useState(true);
     const [loadingMoreCustomers, setLoadingMoreCustomers] = useState(false);
+    const [loadingMoreReception, setLoadingMoreReception] = useState(false);
     const [errorCustomers, setErrorCustomers] = useState(null);
     const initialLoadDoneCustomers = useRef(false);
+    const customersLoadInFlight = useRef(false);
 
     const [appointments, setAppointments] = useState([]);
     const [appointmentsTotal, setAppointmentsTotal] = useState(0);
@@ -36,6 +55,7 @@ export default function OverviewReportWrapper() {
     const [loadingMoreAppointments, setLoadingMoreAppointments] = useState(false);
     const [errorAppointments, setErrorAppointments] = useState(null);
     const initialLoadDoneAppointments = useRef(false);
+    const appointmentsLoadInFlight = useRef(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -89,8 +109,12 @@ export default function OverviewReportWrapper() {
         return () => { cancelled = true; };
     }, []);
 
-    const loadCustomers = useCallback(async (offset, limit = INITIAL_PAGE_SIZE) => {
+    const loadCustomers = useCallback(async (offset, limit = INITIAL_PAGE_SIZE, { forReception = false } = {}) => {
+        if (customersLoadInFlight.current) return;
+        customersLoadInFlight.current = true;
+
         if (offset === 0) setLoadingCustomers(true);
+        else if (forReception) setLoadingMoreReception(true);
         else setLoadingMoreCustomers(true);
         setErrorCustomers(null);
         try {
@@ -103,21 +127,29 @@ export default function OverviewReportWrapper() {
                 const { customers: next, total } = json.data || {};
                 if (counts == null) setCustomersTotal(total ?? 0);
                 if (offset === 0) {
-                    setCustomers(next || []);
+                    setCustomers(mergeUniqueById([], next));
                 } else {
-                    setCustomers((prev) => [...prev, ...(next || [])]);
+                    setCustomers((prev) => {
+                        if (offset !== prev.length) return prev;
+                        return mergeUniqueById(prev, next);
+                    });
                 }
             }
         } catch (e) {
             setErrorCustomers(e?.message || 'Lỗi kết nối.');
             if (offset === 0) setCustomers([]);
         } finally {
+            customersLoadInFlight.current = false;
             setLoadingCustomers(false);
             setLoadingMoreCustomers(false);
+            setLoadingMoreReception(false);
         }
     }, [counts]);
 
     const loadAppointments = useCallback(async (offset, limit = INITIAL_PAGE_SIZE) => {
+        if (appointmentsLoadInFlight.current) return;
+        appointmentsLoadInFlight.current = true;
+
         if (offset === 0) setLoadingAppointments(true);
         else setLoadingMoreAppointments(true);
         setErrorAppointments(null);
@@ -131,15 +163,19 @@ export default function OverviewReportWrapper() {
                 const { appointments: next, total } = json.data || {};
                 if (counts == null) setAppointmentsTotal(total ?? 0);
                 if (offset === 0) {
-                    setAppointments(next || []);
+                    setAppointments(mergeUniqueById([], next));
                 } else {
-                    setAppointments((prev) => [...prev, ...(next || [])]);
+                    setAppointments((prev) => {
+                        if (offset !== prev.length) return prev;
+                        return mergeUniqueById(prev, next);
+                    });
                 }
             }
         } catch (e) {
             setErrorAppointments(e?.message || 'Lỗi kết nối.');
             if (offset === 0) setAppointments([]);
         } finally {
+            appointmentsLoadInFlight.current = false;
             setLoadingAppointments(false);
             setLoadingMoreAppointments(false);
         }
@@ -163,15 +199,27 @@ export default function OverviewReportWrapper() {
         loadAppointments(INITIAL_PAGE_SIZE, SECOND_PAGE_SIZE);
     }, [lightData, loadingCustomers, loadingAppointments, customers.length, appointments.length]);
 
-    const onLoadMoreCustomers = useCallback(() => {
-        if (loadingMoreCustomers || customers.length >= customersTotal) return;
-        loadCustomers(customers.length, SECOND_PAGE_SIZE);
+    const onLoadMoreCustomersPage = useCallback((pageSize) => {
+        if (
+            loadingMoreCustomers
+            || customersLoadInFlight.current
+            || customers.length >= customersTotal
+        ) return;
+        loadCustomers(customers.length, pageSize);
     }, [loadingMoreCustomers, customers.length, customersTotal, loadCustomers]);
 
+    const onLoadMoreCustomers = useCallback(() => {
+        onLoadMoreCustomersPage(SECOND_PAGE_SIZE);
+    }, [onLoadMoreCustomersPage]);
+
     const onLoadMoreReceptionCustomers = useCallback(() => {
-        if (loadingMoreCustomers || customers.length >= customersTotal) return;
-        loadCustomers(customers.length, RECEPTION_PAGE_SIZE);
-    }, [loadingMoreCustomers, customers.length, customersTotal, loadCustomers]);
+        if (
+            loadingMoreReception
+            || customersLoadInFlight.current
+            || customers.length >= customersTotal
+        ) return;
+        loadCustomers(customers.length, RECEPTION_PAGE_SIZE, { forReception: true });
+    }, [loadingMoreReception, customers.length, customersTotal, loadCustomers]);
 
     const onLoadMoreAppointments = useCallback(() => {
         if (loadingMoreAppointments || appointments.length >= appointmentsTotal) return;
@@ -236,6 +284,7 @@ export default function OverviewReportWrapper() {
                 hasMoreCustomers={customers.length < customersTotal}
                 hasMoreAppointments={appointments.length < appointmentsTotal}
                 loadingMoreCustomers={loadingMoreCustomers}
+                loadingMoreReception={loadingMoreReception}
                 loadingMoreAppointments={loadingMoreAppointments}
                 onLoadMoreCustomers={onLoadMoreCustomers}
                 onLoadMoreReceptionCustomers={onLoadMoreReceptionCustomers}

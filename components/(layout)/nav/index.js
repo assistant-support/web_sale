@@ -69,6 +69,7 @@ export default function Nav({ data }) {
       'Sale': ['/client', '/pancake', '/calendar', '/admin'],
       'Docter': [],
       'Admin Sale': ['/client', '/calendar', '/admin'],
+      'Cashier': ['/client', '/calendar', '/admin'],
       'Technician': ['/client', '/calendar'],
     };
     // Nếu là Manager hoặc Admin thì trả về tất cả các mục

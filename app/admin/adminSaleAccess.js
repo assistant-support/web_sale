@@ -4,7 +4,7 @@ import { isAdminSaleRestrictedRole } from '@/utils/saleScope';
 
 export { isAdminSaleRestrictedRole };
 
-/** Gọi đầu các trang /admin không phải Doanh thu — chuyển Admin Sale về /admin/revenue */
+/** Gọi đầu các trang /admin không phải Doanh thu — chuyển Admin Sale / Cashier về /admin/revenue */
 export async function assertAdminSaleRevenueOnly() {
     const user = await checkAuthToken();
     if (!user?.role) return;

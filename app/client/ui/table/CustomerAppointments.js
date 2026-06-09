@@ -184,7 +184,7 @@ function CreateAppointmentForm({ customerId, services, onAppointmentCreated }) {
 // =============================================================
 // == COMPONENT CHÍNH
 // =============================================================
-export default function CustomerAppointments({ customer }) {
+export default function CustomerAppointments({ customer, careReadOnly = false }) {
     const [appointments, setAppointments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
@@ -250,6 +250,7 @@ export default function CustomerAppointments({ customer }) {
 
     return (
         <div className="p-4 h-full flex flex-col flex-1 gap-4 scroll">
+            {!careReadOnly && (
             <Collapsible open={isOpen} onOpenChange={setIsOpen} className="flex-shrink-0 border rounded-lg">
                 <CollapsibleTrigger asChild>
                     <div className="flex justify-between items-center cursor-pointer p-3 bg-muted/30">
@@ -263,6 +264,7 @@ export default function CustomerAppointments({ customer }) {
                     <CreateAppointmentForm customerId={customer._id} services={customer.tags || []} onAppointmentCreated={fetchAppointments} />
                 </CollapsibleContent>
             </Collapsible>
+            )}
 
             <h5 className="font-semibold flex items-center gap-2 my-4 flex-shrink-0">
                 <CalendarClock className="h-5 w-5" />
@@ -329,7 +331,7 @@ export default function CustomerAppointments({ customer }) {
                                             </div>
                                         )}
                                     </CardContent>
-                                    {app.status === 'pending' && (
+                                    {app.status === 'pending' && !careReadOnly && (
                                         <CardFooter className="bg-muted/50 p-2 border-t">
                                             <div className="grid grid-cols-3 gap-2 w-full">
                                                 <Button variant="outline" size="sm" className="bg-white text-green-600 border-green-300 hover:bg-green-50 hover:text-green-700" onClick={() => handleUpdateStatus(app._id, 'completed')}>

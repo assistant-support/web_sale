@@ -1,13 +1,20 @@
 'use client';
 
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import ExcelJS from 'exceljs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Users, Calendar, RefreshCw, Download, DollarSign, BookOpenText } from 'lucide-react';
 import Popup from '@/components/ui/popup';
-import { customerMatchesSourceFilter } from '@/utils/customerSourceConstants';
+import {
+    applyConversationTypeFilter,
+    buildGlobalFilteredOverviewData,
+    computeCardStatsFromTables,
+    customerHasFuKey,
+    customerIsOld,
+    hasActiveGlobalFilters,
+} from '@/utils/overviewReportFilters';
 
 // Listbox component (từ appointment-stats)
 function Listbox({ label, options, value, onChange, placeholder = 'Chọn...' }) {
@@ -85,6 +92,8 @@ const StatCard = ({ title, value, icon: Icon, color, loading }) => (
 );
 
 const SCROLL_LOAD_THRESHOLD = 0.5;
+const RECEPTION_LOAD_SIZE = 30;
+const RECEPTION_BOTTOM_NUDGE = 20;
 
 function formatPercent(value) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '0%';
@@ -117,6 +126,7 @@ export default function OverviewReportClient({
     hasMoreCustomers = false,
     hasMoreAppointments = false,
     loadingMoreCustomers = false,
+    loadingMoreReception = false,
     loadingMoreAppointments = false,
     onLoadMoreCustomers,
     onLoadMoreReceptionCustomers,
@@ -124,8 +134,12 @@ export default function OverviewReportClient({
 }) {
     const PAGE_SIZE = 40;
     const scrollHalfReachedCustomers = useRef(false);
-    const scrollHalfReachedReception = useRef(false);
     const scrollHalfReachedAppointments = useRef(false);
+    const receptionScrollRef = useRef(null);
+    const receptionLoadLocked = useRef(false);
+    const receptionScrollRestore = useRef(null);
+    const receptionScrollRaf = useRef(0);
+    const receptionPendingLimitBump = useRef(0);
 
     // Filters
     const [sourceFilter, setSourceFilter] = useState('all');
@@ -140,6 +154,19 @@ export default function OverviewReportClient({
     const [docOpen, setDocOpen] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const globalFilters = useMemo(() => ({
+        startDate,
+        endDate,
+        sourceFilter,
+        serviceFilter,
+        appointmentTypeFilter,
+        customerTypeFilter,
+    }), [startDate, endDate, sourceFilter, serviceFilter, appointmentTypeFilter, customerTypeFilter]);
+
+    const allSources = useMemo(
+        () => [...(sources || []), ...(messageSources || [])],
+        [sources, messageSources]
+    );
 
     // Source options
     const sourceOptions = useMemo(() => {
@@ -156,98 +183,23 @@ export default function OverviewReportClient({
         return opts;
     }, [services]);
 
-    // Filtered data
-    const filteredData = useMemo(() => {
-        let filteredCustomers = [...customers];
-        let filteredAppointments = [...appointments];
-        let filteredConversations = [...conversations];
+    // Bộ lọc toàn cục: ngày, nguồn, dịch vụ, loại LH, loại KH → thẻ + tất cả bảng
+    const globalFilteredData = useMemo(() => (
+        buildGlobalFilteredOverviewData(
+            customers,
+            appointments,
+            conversations,
+            globalFilters,
+            allSources,
+            sources,
+            messageSources
+        )
+    ), [customers, appointments, conversations, globalFilters, allSources, sources, messageSources]);
 
-        console.log('[Overview][Filters] start =', {
-            sourceFilter,
-            serviceFilter,
-            customerTypeFilter,
-            appointmentTypeFilter,
-            conversationTypeFilter,
-            startDate,
-            endDate,
-            totalCustomers: customers.length,
-        });
-
-        // Date filter
-        if (startDate) {
-            const start = new Date(startDate + 'T00:00:00');
-            filteredCustomers = filteredCustomers.filter(c => new Date(c.createAt) >= start);
-            filteredAppointments = filteredAppointments.filter(a => new Date(a.appointmentDate) >= start);
-            filteredConversations = filteredConversations.filter(conv => {
-                if (!conv.createdAt) return true;
-                return new Date(conv.createdAt) >= start;
-            });
-        }
-        if (endDate) {
-            const end = new Date(endDate + 'T23:59:59.999');
-            filteredCustomers = filteredCustomers.filter(c => new Date(c.createAt) <= end);
-            filteredAppointments = filteredAppointments.filter(a => new Date(a.appointmentDate) <= end);
-            filteredConversations = filteredConversations.filter(conv => {
-                if (!conv.createdAt) return true;
-                return new Date(conv.createdAt) <= end;
-            });
-        }
-
-        if (sourceFilter !== 'all') {
-            filteredCustomers = filteredCustomers.filter(c =>
-                customerMatchesSourceFilter(c, sourceFilter, sources)
-            );
-        }
-
-        // Service filter
-        if (serviceFilter !== 'all') {
-            filteredCustomers = filteredCustomers.filter(c => {
-                if (!c.serviceDetails || !Array.isArray(c.serviceDetails)) return false;
-                return c.serviceDetails.some(sd => String(sd.selectedService?._id || sd.selectedService) === serviceFilter);
-            });
-        }
-
-        // Customer type filter
-        if (customerTypeFilter === 'new') {
-            filteredCustomers = filteredCustomers.filter(c => !c.serviceDetails || c.serviceDetails.length === 0);
-        } else if (customerTypeFilter === 'old') {
-            filteredCustomers = filteredCustomers.filter(c => c.serviceDetails && c.serviceDetails.length > 0);
-        }
-
-        // Appointment type filter
-        if (appointmentTypeFilter !== 'all') {
-            filteredAppointments = filteredAppointments.filter(a => a.status === appointmentTypeFilter);
-        }
-
-        // Conversation type filter (LEAD / NOT_LEAD)
-        if (conversationTypeFilter === 'lead') {
-            filteredConversations = filteredConversations.filter(conv => conv.status === 'LEAD');
-        } else if (conversationTypeFilter === 'not_lead') {
-            filteredConversations = filteredConversations.filter(conv => conv.status === 'NOT_LEAD');
-        }
-
-        return { filteredCustomers, filteredAppointments, filteredConversations };
-    }, [customers, appointments, conversations, startDate, endDate, sourceFilter, serviceFilter, customerTypeFilter, appointmentTypeFilter, conversationTypeFilter, sources]);
-
-    // Stats
-    const stats = useMemo(() => ({
-        totalCustomers: filteredData.filteredCustomers.length,
-        totalAppointments: filteredData.filteredAppointments.length,
-    }), [filteredData]);
-
-    const completionRate = customersTotal > 0
-        ? (customersWithOrdersTotal / customersTotal) * 100
-        : 0;
-    const oldRate = customersTotal > 0
-        ? (oldCustomersTotal / customersTotal) * 100
-        : 0;
-
-    const appointmentRate = customersTotal > 0
-        ? (customersWithAppointmentsTotal / customersTotal) * 100
-        : 0;
-    const dropRate = customersTotal > 0
-        ? (customersArrivedTotal / customersTotal) * 100
-        : 0;
+    // Bảng Hội thoại: toàn cục (ngày) + loại hội thoại
+    const conversationsTableFiltered = useMemo(() => (
+        applyConversationTypeFilter(globalFilteredData.filteredConversations, conversationTypeFilter)
+    ), [globalFilteredData.filteredConversations, conversationTypeFilter]);
 
     // Source map for lookup
     const sourceMap = useMemo(() => {
@@ -266,7 +218,7 @@ export default function OverviewReportClient({
 
     const appointmentStatsByCustomer = useMemo(() => {
         const map = new Map();
-        (filteredData.filteredAppointments || []).forEach((a) => {
+        (globalFilteredData.filteredAppointments || []).forEach((a) => {
             const customerId = String(a?.customer?._id || a?.customer || '');
             if (!customerId) return;
             const currentAt = new Date(a?.appointmentDate || a?.createdAt || 0).getTime();
@@ -283,7 +235,7 @@ export default function OverviewReportClient({
             map.set(customerId, next);
         });
         return map;
-    }, [filteredData]);
+    }, [globalFilteredData]);
 
     // Helper function to get customer source name
     const getCustomerSourceName = (customer) => {
@@ -366,11 +318,7 @@ export default function OverviewReportClient({
     // Helper function to get customer type (new/old)
     const getCustomerType = (customer) => {
         if (!customer) return '—';
-        // Check if customer has serviceDetails (old customer) or not (new customer)
-        if (customer.serviceDetails && Array.isArray(customer.serviceDetails) && customer.serviceDetails.length > 0) {
-            return 'Khách cũ';
-        }
-        return 'Khách mới';
+        return customerIsOld(customer) ? 'Khách cũ' : 'Khách mới';
     };
 
     // Helper function to format appointment status
@@ -424,22 +372,16 @@ export default function OverviewReportClient({
 
     // Tables data with service stats + lazy loading
     const [customerLimit, setCustomerLimit] = useState(PAGE_SIZE);
-    const [receptionLimit, setReceptionLimit] = useState(PAGE_SIZE);
+    const [receptionLimit, setReceptionLimit] = useState(RECEPTION_LOAD_SIZE);
     const [appointmentLimit, setAppointmentLimit] = useState(PAGE_SIZE);
     const [serviceLimit, setServiceLimit] = useState(PAGE_SIZE);
     const [conversationLimit, setConversationLimit] = useState(PAGE_SIZE);
 
     const receptionCustomersFiltered = useMemo(() => {
-        let next = filteredData.filteredCustomers;
+        let next = globalFilteredData.filteredCustomers;
 
         if (receptionFuFilter !== 'all') {
-            const fuLen = Number(String(receptionFuFilter).replace('FU', ''));
-            if (Number.isFinite(fuLen) && fuLen > 0) {
-                next = next.filter((c) => {
-                    const list = Array.isArray(c?.FU) ? c.FU : [];
-                    return list.length === fuLen;
-                });
-            }
+            next = next.filter((c) => customerHasFuKey(c, receptionFuFilter));
         }
 
         if (receptionCallStatusFilter !== 'all') {
@@ -455,25 +397,97 @@ export default function OverviewReportClient({
         }
 
         if (receptionTagFilter !== 'all') {
-            next = next.filter((c) => String(c?.Call_Label?.name || '') === receptionTagFilter);
+            next = next.filter((c) => {
+                const tagName = String(c?.Call_Label?.name || '').trim();
+                return tagName === receptionTagFilter;
+            });
         }
 
         return next;
-    }, [filteredData, receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
+    }, [globalFilteredData, receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
 
-    // Mỗi lần bộ lọc thay đổi, reset lại số dòng hiển thị
+    // Không lọc → số liệu tổng DB; có lọc → tính theo bảng (tiếp nhận / KH / lịch hẹn)
+    const filtersActive = useMemo(() => (
+        hasActiveGlobalFilters(globalFilters)
+        || receptionFuFilter !== 'all'
+        || receptionCallStatusFilter !== 'all'
+        || receptionAppointmentFilter !== 'all'
+        || receptionTagFilter !== 'all'
+    ), [
+        globalFilters,
+        receptionFuFilter,
+        receptionCallStatusFilter,
+        receptionAppointmentFilter,
+        receptionTagFilter,
+    ]);
+
+    const cardStats = useMemo(() => {
+        if (!filtersActive) {
+            return {
+                receptionCustomersTotal: customersTotal,
+                customerTableTotal: customersTotal,
+                appointmentsTotal,
+                customersWithOrdersTotal,
+                oldCustomersTotal,
+                customersWithAppointmentsTotal,
+                customersArrivedTotal,
+            };
+        }
+        return computeCardStatsFromTables(
+            receptionCustomersFiltered,
+            globalFilteredData.filteredCustomers,
+            globalFilteredData.filteredAppointments
+        );
+    }, [
+        filtersActive,
+        customersTotal,
+        appointmentsTotal,
+        customersWithOrdersTotal,
+        oldCustomersTotal,
+        customersWithAppointmentsTotal,
+        customersArrivedTotal,
+        receptionCustomersFiltered,
+        globalFilteredData,
+    ]);
+
+    const {
+        receptionCustomersTotal: statReceptionTotal,
+        customerTableTotal: statCustomerTableTotal,
+        appointmentsTotal: statAppointmentsTotal,
+        customersWithOrdersTotal: statWithOrders,
+        oldCustomersTotal: statOldCustomers,
+        customersWithAppointmentsTotal: statWithAppointments,
+        customersArrivedTotal: statArrived,
+    } = cardStats;
+
+    const rateBase = statCustomerTableTotal;
+    const completionRate = rateBase > 0 ? (statWithOrders / rateBase) * 100 : 0;
+    const oldRate = rateBase > 0 ? (statOldCustomers / rateBase) * 100 : 0;
+    const appointmentRate = rateBase > 0 ? (statWithAppointments / rateBase) * 100 : 0;
+    const dropRate = rateBase > 0 ? (statArrived / rateBase) * 100 : 0;
+    const cardsLoading = filtersActive ? loadingHeavy : countsLoading;
+
+    // Reset limit khi bộ lọc toàn cục đổi (ảnh hưởng mọi bảng + thẻ)
     useEffect(() => {
         setCustomerLimit(PAGE_SIZE);
-        setReceptionLimit(PAGE_SIZE);
+        setReceptionLimit(RECEPTION_LOAD_SIZE);
         setAppointmentLimit(PAGE_SIZE);
         setServiceLimit(PAGE_SIZE);
         setConversationLimit(PAGE_SIZE);
-    }, [filteredData, receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
+    }, [startDate, endDate, sourceFilter, serviceFilter, appointmentTypeFilter, customerTypeFilter]);
+
+    useEffect(() => {
+        setConversationLimit(PAGE_SIZE);
+    }, [conversationTypeFilter]);
+
+    useEffect(() => {
+        setReceptionLimit(RECEPTION_LOAD_SIZE);
+    }, [receptionFuFilter, receptionCallStatusFilter, receptionAppointmentFilter, receptionTagFilter]);
 
     // Tính thống kê dịch vụ cho TẤT CẢ services (dùng cho bảng + export)
     const servicesWithStatsAll = useMemo(() => {
         const getServiceInterestedCount = (serviceId) => {
-            return filteredData.filteredCustomers.filter(c => {
+            return globalFilteredData.filteredCustomers.filter(c => {
                 if (c.tags && Array.isArray(c.tags)) {
                     return c.tags.some(tag => String(tag._id || tag) === String(serviceId));
                 }
@@ -482,7 +496,7 @@ export default function OverviewReportClient({
         };
 
         const getServiceUsedCount = (serviceId) => {
-            return filteredData.filteredCustomers.filter(c => {
+            return globalFilteredData.filteredCustomers.filter(c => {
                 if (c.serviceDetails && Array.isArray(c.serviceDetails)) {
                     return c.serviceDetails.some(sd => {
                         const sdServiceId = sd.serviceId
@@ -502,46 +516,72 @@ export default function OverviewReportClient({
             interestedCount: getServiceInterestedCount(s._id),
             usedCount: getServiceUsedCount(s._id),
         }));
-    }, [services, filteredData]);
+    }, [services, globalFilteredData]);
 
     const tableData = useMemo(() => {
         const servicesWithStats = servicesWithStatsAll.slice(0, serviceLimit);
 
         return {
-            customers: filteredData.filteredCustomers.slice(0, customerLimit),
+            customers: globalFilteredData.filteredCustomers.slice(0, customerLimit),
             receptionCustomers: receptionCustomersFiltered.slice(0, receptionLimit),
-            appointments: filteredData.filteredAppointments.slice(0, appointmentLimit),
+            appointments: globalFilteredData.filteredAppointments.slice(0, appointmentLimit),
             services: servicesWithStats,
-            conversations: filteredData.filteredConversations.slice(0, conversationLimit),
+            conversations: conversationsTableFiltered.slice(0, conversationLimit),
             sources: [...sources, ...messageSources].slice(0, 20),
         };
-    }, [filteredData, receptionCustomersFiltered, servicesWithStatsAll, sources, messageSources, customerLimit, receptionLimit, appointmentLimit, serviceLimit, conversationLimit]);
+    }, [globalFilteredData, receptionCustomersFiltered, conversationsTableFiltered, servicesWithStatsAll, sources, messageSources, customerLimit, receptionLimit, appointmentLimit, serviceLimit, conversationLimit]);
 
     // Reset ref khi load xong để lần kéo tiếp có thể load tiếp
     useEffect(() => {
         if (!loadingMoreCustomers) scrollHalfReachedCustomers.current = false;
     }, [loadingMoreCustomers]);
     useEffect(() => {
-        if (!loadingMoreCustomers) scrollHalfReachedReception.current = false;
-    }, [loadingMoreCustomers]);
-    useEffect(() => {
         if (!loadingMoreAppointments) scrollHalfReachedAppointments.current = false;
     }, [loadingMoreAppointments]);
+
+    // Sau khi API tiếp nhận trả về, mở thêm 30 dòng đã đặt hàng
+    useEffect(() => {
+        if (receptionPendingLimitBump.current <= 0 || loadingMoreReception) return;
+        const bump = receptionPendingLimitBump.current;
+        receptionPendingLimitBump.current = 0;
+        setReceptionLimit((prev) => Math.min(prev + bump, receptionCustomersFiltered.length));
+    }, [loadingMoreReception, receptionCustomersFiltered.length, customers.length]);
+
+    // Chỉ can thiệp scroll khi tải ở cuối bảng (nhích lên 20px). Giữa bảng: browser tự giữ scrollTop.
+    useLayoutEffect(() => {
+        const el = receptionScrollRef.current;
+        const restore = receptionScrollRestore.current;
+        if (!el || !restore) return;
+        if (restore.waitingApi && (loadingMoreReception || receptionPendingLimitBump.current > 0)) return;
+
+        if (restore.atBottom) {
+            el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - RECEPTION_BOTTOM_NUDGE);
+        }
+        receptionScrollRestore.current = null;
+        receptionLoadLocked.current = false;
+    }, [tableData.receptionCustomers.length, loadingMoreReception]);
 
     // Kéo thanh trượt quá nửa thì gọi API load thêm (khách hàng / lịch hẹn)
     const handleScrollLoadFromApi = useCallback((e, type) => {
         const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
         if (scrollHeight <= 0) return;
         const ratio = (scrollTop + clientHeight) / scrollHeight;
-        if (ratio < SCROLL_LOAD_THRESHOLD) return;
 
-        if (type === 'customers' && hasMoreCustomers && !loadingMoreCustomers && onLoadMoreCustomers) {
-            if (!scrollHalfReachedCustomers.current) {
+        if (type === 'customers') {
+            if (ratio < SCROLL_LOAD_THRESHOLD) {
+                scrollHalfReachedCustomers.current = false;
+                return;
+            }
+            if (hasMoreCustomers && !loadingMoreCustomers && onLoadMoreCustomers && !scrollHalfReachedCustomers.current) {
                 scrollHalfReachedCustomers.current = true;
                 onLoadMoreCustomers();
             }
-        } else if (type === 'appointments' && hasMoreAppointments && !loadingMoreAppointments && onLoadMoreAppointments) {
-            if (!scrollHalfReachedAppointments.current) {
+        } else if (type === 'appointments') {
+            if (ratio < SCROLL_LOAD_THRESHOLD) {
+                scrollHalfReachedAppointments.current = false;
+                return;
+            }
+            if (hasMoreAppointments && !loadingMoreAppointments && onLoadMoreAppointments && !scrollHalfReachedAppointments.current) {
                 scrollHalfReachedAppointments.current = true;
                 onLoadMoreAppointments();
             }
@@ -555,19 +595,16 @@ export default function OverviewReportClient({
         if (!isBottom) return;
 
         if (type === 'customers') {
-            const maxLen = filteredData.filteredCustomers.length;
+            const maxLen = globalFilteredData.filteredCustomers.length;
             setCustomerLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
-        } else if (type === 'reception') {
-            const maxLen = receptionCustomersFiltered.length;
-            setReceptionLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         } else if (type === 'appointments') {
-            const maxLen = filteredData.filteredAppointments.length;
+            const maxLen = globalFilteredData.filteredAppointments.length;
             setAppointmentLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         } else if (type === 'services') {
             const maxLen = services.length;
             setServiceLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         } else if (type === 'conversations') {
-            const maxLen = filteredData.filteredConversations.length;
+            const maxLen = conversationsTableFiltered.length;
             setConversationLimit((prev) => (prev < maxLen ? Math.min(prev + PAGE_SIZE, maxLen) : prev));
         }
     };
@@ -581,23 +618,59 @@ export default function OverviewReportClient({
         handleScrollLoadFromApi(e, 'appointments');
         handleScrollLoadMore(e, 'appointments');
     }, [handleScrollLoadFromApi]);
-    const handleReceptionScroll = useCallback((e) => {
-        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-        if (scrollHeight > 0) {
-            const ratio = (scrollTop + clientHeight) / scrollHeight;
-            if (
-                ratio >= SCROLL_LOAD_THRESHOLD &&
-                hasMoreCustomers &&
-                !loadingMoreCustomers &&
-                onLoadMoreReceptionCustomers &&
-                !scrollHalfReachedReception.current
-            ) {
-                scrollHalfReachedReception.current = true;
-                onLoadMoreReceptionCustomers();
-            }
+    const tryLoadMoreReception = useCallback((scrollEl, atBottom) => {
+        if (receptionLoadLocked.current || loadingMoreReception) return;
+
+        const filteredLen = receptionCustomersFiltered.length;
+        const canExpandLocal = receptionLimit < filteredLen;
+        const canFetchRemote = hasMoreCustomers && !!onLoadMoreReceptionCustomers;
+
+        if (!canExpandLocal && !canFetchRemote) return;
+
+        receptionLoadLocked.current = true;
+        receptionScrollRestore.current = {
+            scrollTop: scrollEl.scrollTop,
+            atBottom,
+            waitingApi: false,
+        };
+
+        if (canExpandLocal) {
+            setReceptionLimit((prev) => Math.min(prev + RECEPTION_LOAD_SIZE, filteredLen));
+            return;
         }
-        handleScrollLoadMore(e, 'reception');
-    }, [hasMoreCustomers, loadingMoreCustomers, onLoadMoreReceptionCustomers]);
+
+        receptionScrollRestore.current.waitingApi = true;
+        receptionPendingLimitBump.current = RECEPTION_LOAD_SIZE;
+        onLoadMoreReceptionCustomers();
+    }, [
+        receptionLimit,
+        receptionCustomersFiltered.length,
+        hasMoreCustomers,
+        loadingMoreReception,
+        onLoadMoreReceptionCustomers,
+    ]);
+
+    const handleReceptionScroll = useCallback((e) => {
+        const el = e.currentTarget;
+        if (receptionScrollRaf.current) cancelAnimationFrame(receptionScrollRaf.current);
+        receptionScrollRaf.current = requestAnimationFrame(() => {
+            receptionScrollRaf.current = 0;
+            const { scrollTop, clientHeight, scrollHeight } = el;
+            if (scrollHeight <= 0) return;
+
+            const ratio = (scrollTop + clientHeight) / scrollHeight;
+            const atBottom = scrollTop + clientHeight >= scrollHeight - 4;
+            const atMiddle = ratio >= SCROLL_LOAD_THRESHOLD;
+
+            if (ratio < SCROLL_LOAD_THRESHOLD - 0.08) {
+                receptionLoadLocked.current = false;
+                return;
+            }
+
+            if (!atMiddle && !atBottom) return;
+            tryLoadMoreReception(el, atBottom);
+        });
+    }, [tryLoadMoreReception]);
 
     // Export Excel: luôn lấy TOÀN BỘ dữ liệu đã lọc (không theo limit)
     const handleDownload = async (type) => {
@@ -619,7 +692,7 @@ export default function OverviewReportClient({
                 { header: 'Số lượng đơn', key: 'orderCount', width: 15 },
             ];
 
-            filteredData.filteredCustomers.forEach((c) => {
+            globalFilteredData.filteredCustomers.forEach((c) => {
                 const customerServices = getCustomerServices(c);
                 const orderCount = getCustomerOrderCount(c);
                 worksheet.addRow({
@@ -638,7 +711,7 @@ export default function OverviewReportClient({
                 { header: 'Trạng thái', key: 'status', width: 18 },
             ];
 
-            filteredData.filteredAppointments.forEach((a) => {
+            globalFilteredData.filteredAppointments.forEach((a) => {
                 const customerType = getCustomerType(a.customer);
                 worksheet.addRow({
                     title: a.title || '',
@@ -670,7 +743,7 @@ export default function OverviewReportClient({
                 { header: 'Trạng thái', key: 'status', width: 15 },
             ];
 
-            filteredData.filteredConversations.forEach((conv) => {
+            conversationsTableFiltered.forEach((conv) => {
                 worksheet.addRow({
                     name: conv.name || '',
                     source: conv.pageDisplayName || '',
@@ -906,56 +979,56 @@ export default function OverviewReportClient({
                 </div>
             </Popup>
 
-            {/* Cards: số lượng thật từ DB, không phụ thuộc số mẫu đã load */}
+            {/* Thẻ: bộ lọc toàn cục (nguồn, dịch vụ, loại LH, ngày) */}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <StatCard
                     title="Tổng số khách hàng"
-                    value={customersTotal}
+                    value={statReceptionTotal}
                     icon={Users}
                     color="#6366f1"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
                 <StatCard
                     title="Tỷ lệ hoàn thành đơn"
-                    value={`${formatPercent(completionRate)} (${customersWithOrdersTotal}/${customersTotal})`}
+                    value={`${formatPercent(completionRate)} (${statWithOrders}/${rateBase})`}
                     icon={Users}
                     color="#f59e0b"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
                 <StatCard
                     title="Tỷ lệ khách cũ"
                     value={(
                         <div>
-                            <div>{`${formatPercent(oldRate)} (${oldCustomersTotal}/${customersTotal})`}</div>
+                            <div>{`${formatPercent(oldRate)} (${statOldCustomers}/${rateBase})`}</div>
                             <div className="mt-1 text-xs font-normal text-muted-foreground">
-                                {`Khách cũ: ${oldCustomersTotal} | Khách mới: ${Math.max(0, customersTotal - oldCustomersTotal)}`}
+                                {`Khách cũ: ${statOldCustomers} | Khách mới: ${Math.max(0, rateBase - statOldCustomers)}`}
                             </div>
                         </div>
                     )}
                     icon={Users}
                     color="#f97316"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
                 <StatCard
                     title="Tỷ lệ hẹn"
-                    value={`${formatPercent(appointmentRate)} (${customersWithAppointmentsTotal}/${customersTotal})`}
+                    value={`${formatPercent(appointmentRate)} (${statWithAppointments}/${rateBase})`}
                     icon={Calendar}
                     color="#3b82f6"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
                 <StatCard
                     title="Tổng số lịch hẹn"
-                    value={appointmentsTotal}
+                    value={statAppointmentsTotal}
                     icon={Calendar}
                     color="#10b981"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
                 <StatCard
                     title="Tỷ lệ rớt"
-                    value={`${formatPercent(dropRate)} (${customersArrivedTotal}/${customersTotal})`}
+                    value={`${formatPercent(dropRate)} (${statArrived}/${rateBase})`}
                     icon={Users}
                     color="#ef4444"
-                    loading={countsLoading}
+                    loading={cardsLoading}
                 />
             </div>
 
@@ -967,7 +1040,11 @@ export default function OverviewReportClient({
                         <CardTitle className="text-sm">Khách hàng tiếp nhận</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="max-h-[420px] overflow-y-auto" onScroll={handleReceptionScroll}>
+                        <div
+                            ref={receptionScrollRef}
+                            className="max-h-[420px] overflow-y-auto"
+                            onScroll={handleReceptionScroll}
+                        >
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -996,19 +1073,19 @@ export default function OverviewReportClient({
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        tableData.receptionCustomers.map((c) => {
-                                            const customerId = String(c?._id || '');
+                                        tableData.receptionCustomers.map((c, rowIdx) => {
+                                            const customerId = String(c?._id || `row-${rowIdx}`);
                                             const appointmentStats = appointmentStatsByCustomer.get(customerId);
                                             const appointmentCount = appointmentStats?.count || 0;
                                             const latestStatus = appointmentStats?.latestStatus || '';
-                                            const typeText = c?.customerType === 'old' ? 'Khách cũ' : 'Khách mới';
+                                            const typeText = customerIsOld(c) ? 'Khách cũ' : 'Khách mới';
                                             const serviceUse = getCustomerServiceUse(c);
                                             const callStatusCode = getCustomerCallStatusCode(c);
                                             const callStatusIsSuccess = callStatusCode.endsWith('_S');
                                             const callStatusIsPending = callStatusCode === 'Chưa lưu FU' || callStatusCode.endsWith('_await');
 
                                             return (
-                                                <TableRow key={`reception-${customerId}`}>
+                                                <TableRow key={`reception-${customerId}-${rowIdx}`}>
                                                     <TableCell className="text-xs">{formatDateTime(c?.createAt)}</TableCell>
                                                     <TableCell className="text-xs">{typeText}</TableCell>
                                                     <TableCell className="text-xs">{c?.customerCode || '—'}</TableCell>

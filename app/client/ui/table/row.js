@@ -130,7 +130,7 @@ function CustomerDetailHeader({ customer, zalo }) {
 // == COMPONENT CHÍNH
 // =============================================================
 export default function CustomerRow({
-    customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, zalo, service, allUsers = [], formSources = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = []
+    customer, index, isSelected, onSelect, visibleColumns, renderCellContent, user, zalo, service, allUsers = [], formSources = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], careReadOnly = false
 }) {
     const [isPopupOpen, setIsPopupOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('pipeline');
@@ -254,6 +254,7 @@ export default function CustomerRow({
                         unitMedicines={unitMedicines}
                         treatmentDoctors={treatmentDoctors}
                         service={service}
+                        careReadOnly={careReadOnly}
                     />
                 );
             case 'history':
@@ -272,16 +273,23 @@ export default function CustomerRow({
                     discountPrograms={discountPrograms}
                     unitMedicines={unitMedicines}
                     treatmentDoctors={treatmentDoctors}
+                    careReadOnly={careReadOnly}
                     onClose={() => setIsPopupOpen(false)} 
                 />;
             case 'appointments':
-                return <CustomerAppointments customer={customer} />;
+                return <CustomerAppointments customer={customer} careReadOnly={careReadOnly} />;
             case 'calls':
-                return <OMICallClient customer={customer} user={user} />;
+                return careReadOnly
+                    ? <div className="p-6 text-center text-muted-foreground text-sm">Chế độ chỉ xem — không thể thực hiện cuộc gọi.</div>
+                    : <OMICallClient customer={customer} user={user} />;
             case 'zalo_pancake':
-                return <ZaloPancake customer={customer} />;
+                return careReadOnly
+                    ? <div className="p-6 text-center text-muted-foreground text-sm">Chế độ chỉ xem — không thể nhắn tin.</div>
+                    : <ZaloPancake customer={customer} />;
             case 'zalo':
-                return <ZaloButton customer={customer} user={user} zalo={zalo} />;
+                return careReadOnly
+                    ? <div className="p-6 text-center text-muted-foreground text-sm">Chế độ chỉ xem — không thể nhắn tin Zalo.</div>
+                    : <ZaloButton customer={customer} user={user} zalo={zalo} />;
             default:
                 return null;
         }
@@ -292,9 +300,11 @@ export default function CustomerRow({
             {isPopupOpen && <tr className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />}
 
             <TableRow data-state={isSelected ? "selected" : "unselected"} className="cursor-pointer">
-                <TableCell onClick={(e) => e.stopPropagation()} className="w-[60px]">
-                    <Checkbox checked={isSelected} onCheckedChange={(checked) => onSelect(customer, checked)} />
-                </TableCell>
+                {!careReadOnly && (
+                    <TableCell onClick={(e) => e.stopPropagation()} className="w-[60px]">
+                        <Checkbox checked={isSelected} onCheckedChange={(checked) => onSelect(customer, checked)} />
+                    </TableCell>
+                )}
                 <TableCell className="font-medium w-[80px]" onClick={handleOpenPopup}><h6>{index}</h6></TableCell>
                 {visibleColumns.map(colKey => (
                     <TableCell key={colKey} className="truncate" onClick={handleOpenPopup}>

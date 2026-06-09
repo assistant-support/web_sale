@@ -9,7 +9,7 @@ import { getAdminSaleScope } from "../saleScope.server";
 import { filterCustomersForSaleRevenue, filterUsersForSale } from "@/utils/saleScope";
 
 export default async function AdminPage() {
-    const { roles, currentUserId, isSaleOnly, isAdminSaleRestricted } = await getAdminSaleScope();
+    const { roles, currentUserId, isSaleOnly, isAdminSaleRestricted, canApproveRevenue } = await getAdminSaleScope();
 
     const [rawData, rawUsers, discountPrograms, services, sources, messageSources] = await Promise.all([
         customer_data(),
@@ -20,7 +20,7 @@ export default async function AdminPage() {
         message_sources_data(),
     ]);
 
-    // Sale: chỉ đơn của mình. Admin Sale / Admin / Manager: toàn bộ doanh thu.
+    // Sale: chỉ đơn của mình. Admin Sale / Cashier / Admin / Manager: toàn bộ doanh thu.
     const data = isSaleOnly ? filterCustomersForSaleRevenue(rawData, currentUserId) : rawData;
     const users = isSaleOnly ? filterUsersForSale(rawUsers, currentUserId) : rawUsers;
 
@@ -35,6 +35,7 @@ export default async function AdminPage() {
                 sources={sources || []}
                 messageSources={messageSources || []}
                 saleScoped={isSaleOnly && !isAdminSaleRestricted}
+                readOnly={!canApproveRevenue}
             />
         </>
     );

@@ -235,9 +235,12 @@ const closeServiceSchema = z.object({
 });
 
 /* ===================== Bước 6: ServiceDetailsSection ===================== */
-function ServiceDetailsSection({ customer, services = [], currentUserId, currentUserRoles = [], allUsers = [], onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory }) {
+function ServiceDetailsSection({ customer, services = [], currentUserId, currentUserRoles = [], allUsers = [], onOpenCreatePopup, onOpenEditPopup, onOpenViewPopup, onOpenTreatmentPopup, onOpenTreatmentHistory, careReadOnly = false }) {
     const { run: runAction } = useAction();
-    const isApprover = Array.isArray(currentUserRoles) && (currentUserRoles.includes('Admin') || currentUserRoles.includes('Manager'));
+    const isApprover = !careReadOnly && Array.isArray(currentUserRoles) && (
+        currentUserRoles.includes('Admin') ||
+        currentUserRoles.includes('Manager')
+    );
 
     const adminSaleByGroup = useMemo(() => buildAdminSaleByGroupMap(allUsers), [allUsers]);
 
@@ -316,10 +319,12 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                     <span className="font-medium">Tổng đã nhận (đã duyệt):</span>
                     <span className="font-semibold">{vnd.format(approvedTotalReceived)}</span>
                 </div>
-                <Button size="sm" onClick={onOpenCreatePopup}>
-                    <PlusCircle className="h-4 w-4 mr-2" />
-                    Chốt Đơn Mới
-                </Button>
+                {!careReadOnly && (
+                    <Button size="sm" onClick={onOpenCreatePopup}>
+                        <PlusCircle className="h-4 w-4 mr-2" />
+                        Chốt Đơn Mới
+                    </Button>
+                )}
             </div>
 
             {details.length === 0 ? (
@@ -341,8 +346,8 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                                     {group.details.map((d) => {
                         const approved = d.approvalStatus === 'approved';
                         // Cho phép sửa/xóa khi đơn chưa duyệt và có user đăng nhập (backend vẫn kiểm tra approvalStatus)
-                        const canEditOrDelete = !approved && !!currentUserId;
-                        const canApprove = !approved && isApprover;
+                        const canEditOrDelete = !careReadOnly && !approved && !!currentUserId;
+                        const canApprove = !careReadOnly && !approved && isApprover;
 
                         const statusChip = d.status === 'completed'
                             ? { text: 'Hoàn thành', className: 'bg-green-100 text-green-800' }
@@ -443,11 +448,13 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                                             <Button size="sm" onClick={() => onOpenViewPopup(d)}>
                                                 Xem
                                             </Button>
+                                            {!careReadOnly && (
+                                                <>
                                             <Button
                                                 size="sm"
                                                 variant="default"
                                                 disabled={!canApprove}
-                                                title={!canApprove ? 'Chỉ Admin/Manager mới có thể duyệt đơn chờ duyệt' : undefined}
+                                                title={!canApprove ? 'Chỉ Admin hoặc Manager mới có thể duyệt đơn chờ duyệt' : undefined}
                                                 onClick={() => canApprove && handleApprove(customer._id, d.serviceDetailId || d._id)}
                                             >
                                                 Xác nhận
@@ -470,9 +477,11 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
                                             >
                                                 <Trash2 className="h-4 w-4 mr-1" />Xóa
                                             </Button>
+                                                </>
+                                            )}
                                             {(onOpenTreatmentPopup || onOpenTreatmentHistory) && (
                                                 <>
-                                                    {onOpenTreatmentPopup && (
+                                                    {onOpenTreatmentPopup && !careReadOnly && (
                                                         <Button
                                                             size="sm"
                                                             variant="outline"
@@ -521,7 +530,7 @@ function ServiceDetailsSection({ customer, services = [], currentUserId, current
 }
 
 /* ============================ COMPONENT CHÍNH ============================ */
-export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, currentUserRoles = [], allUsers = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [] }) {
+export default function CustomerPipeline({ customer, addNoteAction, isNotePending, noteState, currentUserId, currentUserName, currentUserRoles = [], allUsers = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], service: serviceProp = [], careReadOnly = false }) {
     const router = useRouter();
     const PIPELINE_STAGES = useMemo(() => [
         { id: 1, title: 'Tiếp nhận & Xử lý', getStatus: getStep1Status },
@@ -657,6 +666,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
 
     // mở form tạo mới
     const openCreatePopup = () => {
+        if (careReadOnly) return;
         setEditingDetail(null);
         setIsReadOnlyView(false);
         form.reset({
@@ -702,6 +712,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
     };
 
     const openEditPopup = async (detail) => {
+        if (careReadOnly) return;
         const fullId = getServiceDetailId(detail);
         if (fullId && !detail.invoiceDriveIds) {
             try {
@@ -1065,6 +1076,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
     };
 
     const openTreatmentPopup = async ({ detail, serviceName, courseName }) => {
+        if (careReadOnly) return;
         try {
             setTreatmentError('');
             setTreatmentLoading(true);
@@ -1435,6 +1447,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                             onOpenViewPopup={openViewPopup}
                                             onOpenTreatmentPopup={openTreatmentPopup}
                                             onOpenTreatmentHistory={openTreatmentHistory}
+                                            careReadOnly={careReadOnly}
                                         />
                                     ) : (
                                         <>
@@ -1460,7 +1473,7 @@ export default function CustomerPipeline({ customer, addNoteAction, isNotePendin
                                                 ? notesForStage.map(note => <CareNoteItem key={note._id || `${stage.id}-${Math.random()}`} note={note} />)
                                                 : <h6 className='text-center text-muted-foreground p-4'>Chưa có hoạt động.</h6>
                                             }
-                                            {isCurrent && (
+                                            {isCurrent && !careReadOnly && (
                                                 <AddNoteForm
                                                     customerId={customer._id}
                                                     dispatchAddNote={addNoteAction}

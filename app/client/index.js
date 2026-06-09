@@ -26,7 +26,7 @@ function TableSkeleton() {
     );
 }
 
-export default function CustomerView({ customer, c, running, initialResult, user, sources, messageSources = [], labelData, formData, zaloData, users, variant, discount = [], workflow, service, areaCustomers = [], filterCustomer = {}, unitMedicines = [], treatmentDoctors = [] }) {
+export default function CustomerView({ customer, c, running, initialResult, user, sources, messageSources = [], labelData, formData, zaloData, users, variant, discount = [], workflow, service, areaCustomers = [], filterCustomer = {}, unitMedicines = [], treatmentDoctors = [], careReadOnly = false }) {
     const router = useRouter();
     const intervalRef = useRef(null);
 
@@ -100,36 +100,45 @@ export default function CustomerView({ customer, c, running, initialResult, user
         <div className={styles.container}>
             {viewMode === 'manage' && (
                 <>
+                    {careReadOnly && (
+                        <div className="mx-2 mb-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+                            Chế độ chỉ xem — tài khoản Thu ngân không thể thao tác trên trang Chăm sóc.
+                        </div>
+                    )}
                     <div className={styles.filterSection}>
                         <div className={styles.filterHeader}>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <SettingZalo user={user && user[0] ? user[0] : null} zalo={zaloData} />
-                                <RunningActions user={user} running={runningSchedules} />
-                            </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <ZaloSystemButton />
-                                {!c.type && (
-                                    <BulkActions
-                                        selectedCustomers={selectedCustomers}
-                                        onActionComplete={handleActionComplete}
-                                        labels={labelData}
-                                        variants={variant}
-                                        users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
-                                        workflows={workflow}
-                                        auth={user && user[0] ? user[0] : null}
-                                    />
-                                )}
-                                <ActionHistory history={historySchedules} />
-                                {user && user[0] && user[0].role && !user[0].role.includes('Sale') && (
-                                    <>
-                                        <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
-                                        <SettingVariant data={variant} />
-                                        <SettingDiscount data={discount} />
-                                        <SettingLabel data={labelData} />
-                                    </>
-                                )}
-                                <SettingData data={formData} service={service} customer={customer} />
-                            </div>
+                            {!careReadOnly && (
+                                <>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <SettingZalo user={user && user[0] ? user[0] : null} zalo={zaloData} />
+                                        <RunningActions user={user} running={runningSchedules} />
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <ZaloSystemButton />
+                                        {!c.type && (
+                                            <BulkActions
+                                                selectedCustomers={selectedCustomers}
+                                                onActionComplete={handleActionComplete}
+                                                labels={labelData}
+                                                variants={variant}
+                                                users={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')}
+                                                workflows={workflow}
+                                                auth={user && user[0] ? user[0] : null}
+                                            />
+                                        )}
+                                        <ActionHistory history={historySchedules} />
+                                        {user && user[0] && user[0].role && !user[0].role.includes('Sale') && (
+                                            <>
+                                                <SettingZaloRoles data={zaloData} allUsers={users.filter(u => u.role[0] === 'Sale' || u.role[0] === 'Admin')} />
+                                                <SettingVariant data={variant} />
+                                                <SettingDiscount data={discount} />
+                                                <SettingLabel data={labelData} />
+                                            </>
+                                        )}
+                                        <SettingData data={formData} service={service} customer={customer} />
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                     <FilterControls
@@ -162,6 +171,7 @@ export default function CustomerView({ customer, c, running, initialResult, user
                     discountPrograms={discount}
                     unitMedicines={unitMedicines}
                     treatmentDoctors={treatmentDoctors}
+                    careReadOnly={careReadOnly}
                 />
             </Suspense>
         </div>

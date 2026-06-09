@@ -4,18 +4,22 @@ import { Navbar } from "../nav";
 import { assertAdminSaleRevenueOnly } from "../adminSaleAccess";
 import { getAdminSaleScope } from "../saleScope.server";
 import { filterCallsForSale } from "@/utils/saleScope";
+import { user_data } from "@/data/actions/get";
 
 export default async function AdminPage() {
     await assertAdminSaleRevenueOnly();
     const { roles, currentUserId, isSaleOnly } = await getAdminSaleScope();
 
-    const rawData = await call_data();
+    const [rawData, users] = await Promise.all([
+        call_data(),
+        user_data({}),
+    ]);
     const data = isSaleOnly ? filterCallsForSale(rawData, currentUserId) : rawData;
 
     return (
         <>
             <Navbar roles={roles} />
-            <DashboardClient initialData={data} />
+            <DashboardClient initialData={data} user={Array.isArray(users) ? users : []} />
         </>
     );
 }

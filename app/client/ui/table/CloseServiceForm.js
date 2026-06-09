@@ -660,7 +660,7 @@ export default function CloseServiceForm({
                     <FormLabel>Thông tin liệu trình</FormLabel>
                     <div className="p-4 border rounded-md bg-muted/50 mt-3 space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <FormField control={form.control} name="medicationName" render={({ field }) => (
+                            {/* <FormField control={form.control} name="medicationName" render={({ field }) => (
                                 <FormItem className="relative">
                                     <FormLabel className="text-xs">Tên thuốc</FormLabel>
                                     <FormControl>
@@ -730,7 +730,7 @@ export default function CloseServiceForm({
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
-                            )} />
+                            )} /> */}
 
                             <FormField control={form.control} name="medicationDosage" render={({ field }) => (
                                 <FormItem>

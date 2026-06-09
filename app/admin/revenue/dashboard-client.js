@@ -16,6 +16,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 import Popup from '@/components/ui/popup';
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
     DollarSign, ShoppingCart, UserCheck, Percent, History, Check, X, UserCog, PiggyBank,
     Eye, LineChart, RefreshCw, ChevronDown
 } from 'lucide-react';
@@ -188,6 +198,7 @@ export default function DashboardClient({
     sources = [],
     messageSources = [],
     saleScoped = false,
+    readOnly = false,
 }) {
     /* ===== Helpers đặt TRONG component như yêu cầu ===== */
     const { openDetails, setOpenDetails, detailsRow, setDetailsRow } = useDetailsState();
@@ -222,6 +233,27 @@ export default function DashboardClient({
         if (discountType === 'amount') return fmtVND(discountValue);
         if (discountType === 'percent') return `${discountValue}%`;
         return '0';
+    };
+
+    const truncateNote = (text, maxLen = 20) => {
+        if (text == null || text === '') return '—';
+        const s = String(text).trim();
+        if (s.length <= maxLen) return s;
+        return `${s.slice(0, maxLen)}…`;
+    };
+
+    const formatOrderCreatedAt = (detail = {}) => {
+        const raw = detail?.createdAt;
+        if (!raw) return '—';
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
     };
 
     // Lấy “ngày đơn” để lọc/thống kê
@@ -364,8 +396,12 @@ export default function DashboardClient({
         return rows;
     }, [initialData]);
 
-    /* ---------- Pending Approvals với filter thời gian và pagination ---------- */
+    /* ---------- Pending Approvals (nhóm theo khách hàng) ---------- */
     const [pendingApprovalsFromAPI, setPendingApprovalsFromAPI] = useState([]);
+    const [openPendingCustomerOrders, setOpenPendingCustomerOrders] = useState(false);
+    const [selectedPendingCustomer, setSelectedPendingCustomer] = useState(null);
+    const [openBulkApproveConfirm, setOpenBulkApproveConfirm] = useState(false);
+    const [bulkApproving, setBulkApproving] = useState(false);
     const [loadingPending, setLoadingPending] = useState(false);
     const [hasFetched, setHasFetched] = useState(false);
     const [pendingSkip, setPendingSkip] = useState(0);
@@ -397,13 +433,18 @@ export default function DashboardClient({
             }
             params.append('limit', '10');
             params.append('skip', String(skip));
+            params.append('groupBy', 'customer');
             
             const response = await fetch(`/api/service-details/pending?${params.toString()}`);
             const result = await response.json();
             
             if (result.success && Array.isArray(result.data)) {
                 if (append) {
-                    setPendingApprovalsFromAPI(prev => [...prev, ...result.data]);
+                    setPendingApprovalsFromAPI((prev) => {
+                        const seen = new Set(prev.map((c) => String(c.customerId)));
+                        const next = result.data.filter((c) => !seen.has(String(c.customerId)));
+                        return [...prev, ...next];
+                    });
                 } else {
                     setPendingApprovalsFromAPI(result.data);
                 }
@@ -451,8 +492,8 @@ export default function DashboardClient({
         
         const handleScroll = () => {
             const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-            // Khi scroll đến nửa đường (50%)
-            if (scrollTop + clientHeight >= scrollHeight * 0.5) {
+            // Khi scroll đến 1/4 chiều cao danh sách
+            if (scrollTop + clientHeight >= scrollHeight * 0.25) {
                 loadMorePending();
             }
         };
@@ -461,23 +502,49 @@ export default function DashboardClient({
         return () => scrollContainer.removeEventListener('scroll', handleScroll);
     }, [loadMorePending]);
     
-    // Sử dụng dữ liệu từ API nếu có, nếu không thì fallback về logic cũ (có filter thời gian)
-    const pendingApprovals = useMemo(() => {
-        // Nếu đã fetch xong từ API, sử dụng kết quả (kể cả mảng rỗng)
-        // Chỉ fallback khi chưa fetch được (lần đầu mount hoặc đang loading)
+    const groupPendingRowsByCustomer = useCallback((rows) => {
+        const map = new Map();
+        for (const r of rows) {
+            if (r.detail?.approvalStatus !== 'pending') continue;
+            const cid = String(r.customerId);
+            if (!map.has(cid)) {
+                map.set(cid, {
+                    customerId: cid,
+                    name: r.name || '',
+                    phone: r.phone || '',
+                    assignees: r.assignees || [],
+                    latestCreatedAt: null,
+                    orderCount: 0,
+                    totalListPrice: 0,
+                    orders: [],
+                });
+            }
+            const g = map.get(cid);
+            const p = readPricing(r.detail);
+            g.orderCount += 1;
+            g.totalListPrice += Number(p.listPrice) || 0;
+            const created = r.detail?.createdAt ? new Date(r.detail.createdAt) : null;
+            if (created && (!g.latestCreatedAt || created > new Date(g.latestCreatedAt))) {
+                g.latestCreatedAt = r.detail.createdAt;
+            }
+            g.orders.push(r);
+        }
+        return Array.from(map.values()).sort(
+            (a, b) => new Date(b.latestCreatedAt || 0) - new Date(a.latestCreatedAt || 0)
+        );
+    }, []);
+
+    const pendingCustomers = useMemo(() => {
         if (hasFetched) {
             return pendingApprovalsFromAPI;
         }
-        
-        // Fallback: sử dụng logic cũ từ allRows, KHÔNG filter theo thời gian
-        // Chỉ dùng khi chưa fetch được từ API hoặc API lỗi
-        const filtered = allRows.filter(r => {
-            if (r.detail?.approvalStatus !== 'pending') return false;
-            return true;
-        });
-        
-        return filtered;
-    }, [pendingApprovalsFromAPI, allRows, hasFetched, startDate, endDate]);
+        return groupPendingRowsByCustomer(allRows);
+    }, [pendingApprovalsFromAPI, allRows, hasFetched, groupPendingRowsByCustomer]);
+
+    const openPendingCustomerOrdersPopup = (customerRow) => {
+        setSelectedPendingCustomer(customerRow);
+        setOpenPendingCustomerOrders(true);
+    };
 
     /* ---------- Approved Deals với filter và pagination ---------- */
     const [approvedDealsFromAPI, setApprovedDealsFromAPI] = useState([]);
@@ -531,9 +598,9 @@ export default function DashboardClient({
             if (result.success && Array.isArray(result.data)) {
                 // Transform data để có __dealDate và __dealDateObj
                 const transformed = result.data.map(r => {
-                    const dealDate = r.detail?.closedAt 
-                        ? new Date(r.detail.closedAt) 
-                        : (r.detail?.approvedAt ? new Date(r.detail.approvedAt) : null);
+                    const dealDate = r.detail?.approvedAt
+                        ? new Date(r.detail.approvedAt)
+                        : (r.detail?.closedAt ? new Date(r.detail.closedAt) : null);
                     return {
                         ...r,
                         __dealDate: dealDate ? dealDate.toISOString() : null,
@@ -747,6 +814,49 @@ export default function DashboardClient({
         return rows.slice(0, 5);
     }, [allApprovedForCommissions, allRows]);
 
+    const commissionOrdersByUser = useMemo(() => {
+        const map = new Map();
+        const dataSource = allApprovedForCommissions.length > 0
+            ? allApprovedForCommissions
+            : allRows.filter((r) => r.detail?.approvalStatus === 'approved');
+
+        for (const r of dataSource) {
+            const commissions = Array.isArray(r?.detail?.commissions) ? r.detail.commissions : [];
+            if (commissions.length === 0) continue;
+
+            const pricing = readPricing(r.detail);
+            const orderPrice = pricing.finalPrice || Number(r?.detail?.revenue) || 0;
+            const usersInOrder = new Set();
+
+            for (const it of commissions) {
+                if (!it?.user) continue;
+                const key = String((typeof it.user === 'object' && it.user?._id) ? it.user._id : it.user);
+                usersInOrder.add(key);
+            }
+
+            for (const userId of usersInOrder) {
+                if (!map.has(userId)) map.set(userId, []);
+                map.get(userId).push({
+                    detailId: r.detail?._id,
+                    customerName: r.name || '—',
+                    createdAt: r.detail?.createdAt,
+                    orderPrice,
+                });
+            }
+        }
+
+        for (const [userId, orders] of map) {
+            orders.sort((a, b) => {
+                const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return tb - ta;
+            });
+            map.set(userId, orders);
+        }
+
+        return map;
+    }, [allApprovedForCommissions, allRows]);
+
     /* ---------- Fetch yearly data từ report_daily (tất cả năm, không filter) ---------- */
     const [yearlyReportData, setYearlyReportData] = useState(null);
     const [loadingYearly, setLoadingYearly] = useState(false);
@@ -855,6 +965,8 @@ export default function DashboardClient({
 
     /* ---------- Approve / Reject Popup ---------- */
     const [openApprove, setOpenApprove] = useState(false);
+    const [openCommissionOrders, setOpenCommissionOrders] = useState(false);
+    const [selectedCommissionUserId, setSelectedCommissionUserId] = useState(null);
     const [selected, setSelected] = useState(null);
     const [selectedDiscountProgram, setSelectedDiscountProgram] = useState('');
     const [form, setForm] = useState({
@@ -868,8 +980,19 @@ export default function DashboardClient({
 
     const { run } = useActionFeedback();
 
+    const selectedCommissionOrders = useMemo(() => {
+        if (!selectedCommissionUserId) return [];
+        return commissionOrdersByUser.get(String(selectedCommissionUserId)) || [];
+    }, [selectedCommissionUserId, commissionOrdersByUser]);
+
+    const openCommissionOrdersForUser = (userId) => {
+        setSelectedCommissionUserId(String(userId));
+        setOpenCommissionOrders(true);
+    };
+
     // ✅ NẠP GIÁ ĐÚNG TỪ pricing hiện có (không ép = revenue)
     const openApproveFor = (row) => {
+        if (readOnly) return;
         setSelected(row);
         const d = row?.detail || {};
         const p = readPricing(d);
@@ -906,12 +1029,202 @@ export default function DashboardClient({
         setOpenApprove(true);
     };
 
-    const calcFinalPrice = () => {
-        const lp = Number(form.listPrice) || 0;
-        const dv = Number(form.discountValue) || 0;
-        if (form.discountType === 'percent') return Math.max(0, Math.round(lp * (1 - dv / 100)));
-        if (form.discountType === 'amount') return Math.max(0, lp - dv);
+    const calcFinalPriceFromPricing = (p = {}) => {
+        const lp = Number(p.listPrice) || 0;
+        const dv = Number(p.discountValue) || 0;
+        const discountType = p.discountType || 'none';
+        if (discountType === 'percent') return Math.max(0, Math.round(lp * (1 - dv / 100)));
+        if (discountType === 'amount') return Math.max(0, lp - dv);
         return lp;
+    };
+
+    const calcFinalPrice = () => calcFinalPriceFromPricing({
+        listPrice: form.listPrice,
+        discountType: form.discountType,
+        discountValue: form.discountValue,
+    });
+
+    const buildApproveFormDataFromOrder = (order) => {
+        const d = order?.detail || {};
+        const p = readPricing(d);
+        let revenueValue = d.revenue ?? p.finalPrice ?? p.listPrice ?? 0;
+        if (
+            Number(revenueValue) === Number(p.listPrice) &&
+            Number(p.finalPrice) > 0 &&
+            Number(p.finalPrice) !== Number(p.listPrice)
+        ) {
+            revenueValue = p.finalPrice;
+        }
+        const finalPrice = calcFinalPriceFromPricing(p);
+
+        const rawCommissions = d.commissions?.length
+            ? d.commissions
+            : [{
+                user: order.assignees?.[0]?.user?._id || order.assignees?.[0]?.user || '',
+                role: 'sale',
+                percent: '',
+                amount: '',
+            }];
+
+        const cleanCommissions = rawCommissions.map((x) => {
+            const uid = String((typeof x.user === 'object' && x.user?._id) ? x.user._id : x.user || '');
+            const amt = Number(x.amount) || 0;
+            const pct = Number(x.percent) || 0;
+            const mode = amt > 0 ? 'amount' : 'percent';
+            return {
+                user: uid,
+                role: x.role || 'sale',
+                percent: mode === 'percent' ? pct : 0,
+                amount: mode === 'amount' ? amt : 0,
+            };
+        });
+
+        const fd = new FormData();
+        fd.append('customerId', String(order.customerId));
+        fd.append('serviceDetailId', String(d._id || d.serviceDetailId));
+        fd.append('listPrice', String(Number(p.listPrice) || 0));
+        fd.append('discountType', p.discountType || 'none');
+        fd.append('discountValue', String(Number(p.discountValue) || 0));
+        fd.append('finalPrice', String(finalPrice));
+        fd.append('revenue', String(Number(revenueValue) || 0));
+        fd.append('commissions', JSON.stringify(cleanCommissions));
+        fd.append('notes', d.notes || '');
+        return fd;
+    };
+
+    const prependApprovedDealToRecentList = (order, overrides = {}) => {
+        if (!order?.detail) return;
+        const approvedAt = new Date();
+        const detailId = order.detail?._id || order.detail?.serviceDetailId;
+        const row = {
+            ...order,
+            detail: {
+                ...order.detail,
+                _id: detailId,
+                approvalStatus: 'approved',
+                status: 'completed',
+                approvedAt: approvedAt.toISOString(),
+                revenue: overrides.revenue ?? order.detail?.revenue,
+                pricing: overrides.pricing ?? order.detail?.pricing,
+                notes: overrides.notes ?? order.detail?.notes,
+                commissions: overrides.commissions ?? order.detail?.commissions,
+            },
+            __dealDate: approvedAt.toISOString(),
+            __dealDateObj: approvedAt,
+        };
+        setApprovedDealsFromAPI((prev) => {
+            const id = String(detailId);
+            const rest = prev.filter((r) => {
+                const did = r.detail?._id || r.detail?.serviceDetailId;
+                return String(did) !== id;
+            });
+            return [row, ...rest];
+        });
+        setApprovedTotal((prev) => prev + 1);
+        setApprovedSkip((prev) => prev + 1);
+        setHasFetchedApproved(true);
+    };
+
+    const refreshAfterApproveAction = async () => {
+        setApprovedSkip(0);
+        await fetchApprovedDeals(0, false).catch((err) => console.error('Error refreshing approved deals:', err));
+        await fetchPendingApprovals(0, false).catch((err) => console.error('Error refreshing pending approvals:', err));
+
+        fetch('/api/service-details/approved?limit=1000&skip=0')
+            .then((res) => res.json())
+            .then((result) => {
+                if (result.success && Array.isArray(result.data)) {
+                    setAllApprovedForCommissions(result.data);
+                }
+            })
+            .catch((err) => console.error('Error refreshing all approved for commissions:', err));
+
+        fetchReportDaily().catch((err) => console.error('Error refreshing report_daily:', err));
+
+        setTimeout(async () => {
+            try {
+                const response = await fetch('/api/report-daily');
+                const result = await response.json();
+                if (result.success && result.data) {
+                    setYearlyReportData(result.data);
+                }
+            } catch (err) {
+                console.error('Error refreshing yearly report_daily:', err);
+            }
+        }, 500);
+    };
+
+    const submitBulkApproveAll = async () => {
+        if (readOnly || bulkApproving) return;
+        const orders = selectedPendingCustomer?.orders || [];
+        if (orders.length === 0) return;
+
+        for (const order of orders) {
+            const fd = buildApproveFormDataFromOrder(order);
+            const commissions = JSON.parse(fd.get('commissions') || '[]');
+            if (commissions.some((c) => !c.user)) {
+                await run(
+                    async () => ({
+                        success: false,
+                        error: 'Một số đơn chưa có nhân viên hoa hồng. Vui lòng duyệt từng đơn.',
+                    }),
+                    [],
+                    { toast: true, overlay: false, autoRefresh: false, silent: false }
+                );
+                return;
+            }
+        }
+
+        setOpenBulkApproveConfirm(false);
+        setBulkApproving(true);
+
+        let successCount = 0;
+        let lastError = '';
+
+        for (const order of orders) {
+            const fd = buildApproveFormDataFromOrder(order);
+            const res = await approveServiceDealAction(null, fd);
+            if (res?.success) {
+                successCount += 1;
+            } else {
+                lastError = res?.error || 'Không thể duyệt đơn.';
+                break;
+            }
+        }
+
+        setBulkApproving(false);
+
+        if (successCount > 0) {
+            orders.slice(0, successCount).reverse().forEach((order) => {
+                prependApprovedDealToRecentList(order);
+            });
+            await refreshAfterApproveAction();
+            setOpenPendingCustomerOrders(false);
+            setSelectedPendingCustomer(null);
+        }
+
+        await run(
+            async () => {
+                if (successCount === orders.length) {
+                    return { success: true };
+                }
+                if (successCount > 0) {
+                    return {
+                        success: false,
+                        error: `Đã duyệt ${successCount}/${orders.length} đơn. ${lastError}`,
+                    };
+                }
+                return { success: false, error: lastError || 'Không thể duyệt đơn.' };
+            },
+            [],
+            {
+                successMessage: `Đã duyệt tất cả ${successCount} đơn.`,
+                errorMessage: (r) => r?.error || 'Duyệt hàng loạt thất bại.',
+                autoRefresh: false,
+                toast: true,
+                overlay: false,
+            }
+        );
     };
 
     const onAddCommission = () =>
@@ -931,6 +1244,7 @@ export default function DashboardClient({
     };
 
     const submitApprove = async () => {
+        if (readOnly) return;
         if (!selected) return;
 
         const err = validateCommissions();
@@ -977,57 +1291,55 @@ export default function DashboardClient({
         );
         if (res?.success) {
             setOpenApprove(false);
-            
-            // Lấy serviceDetailId từ biến đã lấy ở trên hoặc từ selected
             const approvedServiceDetailId = serviceDetailId || selected.detail?._id || selected.detail?.serviceDetailId;
-            
-            // Xóa đơn khỏi danh sách pending ngay lập tức
-            setPendingApprovalsFromAPI(prev => prev.filter(r => {
-                const detailId = r.detail?._id || r.detail?.serviceDetailId;
-                return String(detailId) !== String(approvedServiceDetailId);
-            }));
-            
-            // Giảm pendingTotal
-            setPendingTotal(prev => Math.max(0, prev - 1));
-            
-            // Reset và fetch lại danh sách approved để hiển thị đơn mới
-            setApprovedSkip(0);
-            fetchApprovedDeals(0, false).catch(err => console.error('Error refreshing approved deals:', err));
-            
-            // Refresh lại pending list để đảm bảo đồng bộ (nếu còn đơn khác)
-            fetchPendingApprovals(0, false).catch(err => console.error('Error refreshing pending approvals:', err));
-            
-            // Refresh lại danh sách tất cả đơn đã duyệt để cập nhật top commissions
-            fetch('/api/service-details/approved?limit=1000&skip=0')
-                .then(res => res.json())
-                .then(result => {
-                    if (result.success && Array.isArray(result.data)) {
-                        setAllApprovedForCommissions(result.data);
+
+            prependApprovedDealToRecentList(selected, {
+                revenue: revenueNum,
+                pricing: {
+                    listPrice: Number(form.listPrice) || 0,
+                    discountType: form.discountType || 'none',
+                    discountValue: Number(form.discountValue) || 0,
+                    finalPrice: calcFinalPrice(),
+                },
+                notes: form.notes || '',
+                commissions: cleanCommissions,
+            });
+
+            await refreshAfterApproveAction();
+
+            if (openPendingCustomerOrders && selectedPendingCustomer?.customerId) {
+                setSelectedPendingCustomer((prev) => {
+                    if (!prev) return prev;
+                    const remaining = (prev.orders || []).filter((o) => {
+                        const detailId = o.detail?._id || o.detail?.serviceDetailId;
+                        return String(detailId) !== String(approvedServiceDetailId);
+                    });
+                    if (remaining.length === 0) {
+                        setOpenPendingCustomerOrders(false);
+                        return null;
                     }
-                })
-                .catch(err => console.error('Error refreshing all approved for commissions:', err));
-            
-            // Refresh report_daily để cập nhật stats ngay lập tức
-            fetchReportDaily().catch(err => console.error('Error refreshing report_daily:', err));
-            
-            // ✅ CHỈ refresh yearly data SAU KHI DUYỆT THÀNH CÔNG (đã lưu vào database) để cập nhật biểu đồ năm
-            // Đây là lúc duy nhất biểu đồ cần render lại
-            // Delay một chút để đảm bảo database đã được cập nhật hoàn toàn
-            setTimeout(async () => {
-                try {
-                    const response = await fetch('/api/report-daily');
-                    const result = await response.json();
-                    if (result.success && result.data) {
-                        setYearlyReportData(result.data);
-                    }
-                } catch (err) {
-                    console.error('Error refreshing yearly report_daily:', err);
-                }
-            }, 500); // Delay 500ms để đảm bảo database đã được cập nhật
+                    const totalListPrice = remaining.reduce(
+                        (sum, o) => sum + (Number(readPricing(o.detail).listPrice) || 0),
+                        0
+                    );
+                    const latestCreatedAt = remaining.reduce((max, o) => {
+                        const t = o.detail?.createdAt ? new Date(o.detail.createdAt).getTime() : 0;
+                        return t > max ? t : max;
+                    }, 0);
+                    return {
+                        ...prev,
+                        orders: remaining,
+                        orderCount: remaining.length,
+                        totalListPrice,
+                        latestCreatedAt: latestCreatedAt ? new Date(latestCreatedAt).toISOString() : prev.latestCreatedAt,
+                    };
+                });
+            }
         }
     };
 
     const submitReject = async () => {
+        if (readOnly) return;
         if (!selected) return;
         const reason = prompt('Lý do từ chối? (không bắt buộc)') || '';
 
@@ -1051,18 +1363,39 @@ export default function DashboardClient({
         );
         if (res?.success) {
             setOpenApprove(false);
-            
-            // Xóa đơn khỏi danh sách pending ngay lập tức (sử dụng rejectServiceDetailId đã lấy ở trên)
-            setPendingApprovalsFromAPI(prev => prev.filter(r => {
-                const detailId = r.detail?._id || r.detail?.serviceDetailId;
-                return String(detailId) !== String(rejectServiceDetailId);
-            }));
-            
-            // Giảm pendingTotal
-            setPendingTotal(prev => Math.max(0, prev - 1));
-            
-            // Refresh lại pending list để đảm bảo đồng bộ
-            fetchPendingApprovals(0, false).catch(err => console.error('Error refreshing pending approvals:', err));
+
+            fetchPendingApprovals(0, false)
+                .then(() => {
+                    if (openPendingCustomerOrders && selectedPendingCustomer?.customerId) {
+                        setSelectedPendingCustomer((prev) => {
+                            if (!prev) return prev;
+                            const orders = (prev.orders || []).filter((o) => {
+                                const detailId = o.detail?._id || o.detail?.serviceDetailId;
+                                return String(detailId) !== String(rejectServiceDetailId);
+                            });
+                            if (orders.length === 0) {
+                                setOpenPendingCustomerOrders(false);
+                                return null;
+                            }
+                            const totalListPrice = orders.reduce(
+                                (sum, o) => sum + (Number(readPricing(o.detail).listPrice) || 0),
+                                0
+                            );
+                            const latestCreatedAt = orders.reduce((max, o) => {
+                                const t = o.detail?.createdAt ? new Date(o.detail.createdAt).getTime() : 0;
+                                return t > max ? t : max;
+                            }, 0);
+                            return {
+                                ...prev,
+                                orders,
+                                orderCount: orders.length,
+                                totalListPrice,
+                                latestCreatedAt: latestCreatedAt ? new Date(latestCreatedAt).toISOString() : prev.latestCreatedAt,
+                            };
+                        });
+                    }
+                })
+                .catch(err => console.error('Error refreshing pending approvals:', err));
         }
     };
 
@@ -1441,7 +1774,8 @@ export default function DashboardClient({
                 <CardHeader>
                     <CardTitle className="flex items-center"><UserCog className="mr-2 h-5 w-5" />Danh sách cần duyệt</CardTitle>
                     <CardDescription>
-                        Đơn chốt đang ở trạng thái <b>chờ duyệt</b> — chưa tính vào doanh thu.
+                        Mỗi dòng là <b>1 khách hàng</b> có đơn chờ duyệt — chưa tính vào doanh thu.
+                        {readOnly && <span className="ml-1 text-amber-600">(Chỉ xem — không thể duyệt)</span>}
                         {loadingPending && <span className="ml-2 text-xs text-muted-foreground">(Đang tải...)</span>}
                     </CardDescription>
                 </CardHeader>
@@ -1451,46 +1785,49 @@ export default function DashboardClient({
                             <TableHeader className="sticky top-0 bg-secondary">
                                 <TableRow>
                                     <TableHead>Khách hàng</TableHead>
-                                    <TableHead>Giá & Doanh thu</TableHead>
-                                    <TableHead>Ghi chú</TableHead>
+                                    <TableHead>Thời gian tạo đơn</TableHead>
+                                    <TableHead>Giá gốc</TableHead>
+                                    <TableHead className="text-center">Số lượng đơn</TableHead>
                                     <TableHead className="text-right">Thao tác</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {pendingApprovals.length === 0 && (
-                                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Không có đơn cần duyệt</TableCell></TableRow>
+                                {pendingCustomers.length === 0 && (
+                                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Không có khách hàng cần duyệt</TableCell></TableRow>
                                 )}
-                                {pendingApprovals.map((row, idx) => {
-                                    const p = readPricing(row.detail);
-                                    return (
-                                        <TableRow key={`${row.detail?._id || `${row.customerId}-${row.name}`}-${idx}`}>
-                                            <TableCell className="font-medium">
-                                                {row.name}
-                                                <div className="text-xs text-muted-foreground">{row.phone}</div>
-                                            </TableCell>
-                                            <TableCell className="font-semibold">
-                                                <div className="leading-tight">
-                                                    <div>Giá gốc: <b>{fmtVND(p.listPrice)}</b></div>
-                                                    <div className="text-[12px] text-muted-foreground">
-                                                        Giảm: {discountLabel(p)} → Final: <b>{fmtVND(p.finalPrice)}</b>
-                                                    </div>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-xs">{row.detail?.notes || '—'}</TableCell>
-                                            <TableCell className="text-right flex items-center justify-end gap-2">
-                                                <Button size="sm" variant="outline" onClick={() => setOpenDetails(true) || setDetailsRow(row)}><Eye className="w-4 h-4 mr-1" />Xem</Button>
-                                                <Button size="sm" onClick={() => openApproveFor(row)}><Check className="w-4 h-4 mr-1" />Duyệt</Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
+                                {pendingCustomers.map((row) => (
+                                    <TableRow key={row.customerId}>
+                                        <TableCell className="font-medium">
+                                            {row.name}
+                                            <div className="text-xs text-muted-foreground">{row.phone}</div>
+                                        </TableCell>
+                                        <TableCell className="text-xs whitespace-nowrap font-semibold" style={{ color: 'black' }}>
+                                            {formatOrderCreatedAt({ createdAt: row.latestCreatedAt })}
+                                        </TableCell>
+                                        <TableCell className="font-semibold">
+                                            {fmtVND(row.totalListPrice)}
+                                        </TableCell>
+                                        <TableCell className="text-center font-semibold">
+                                            {row.orderCount}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => openPendingCustomerOrdersPopup(row)}
+                                            >
+                                                <Eye className="w-4 h-4 mr-1" />Xem
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
                             </TableBody>
                         </Table>
                         {loadingMorePending && (
                             <div className="text-center py-3 text-sm text-muted-foreground">Đang tải thêm...</div>
                         )}
                         {pendingSkip >= pendingTotal && pendingTotal > 0 && (
-                            <div className="text-center py-3 text-sm text-muted-foreground">Đã hiển thị tất cả ({pendingTotal} đơn)</div>
+                            <div className="text-center py-3 text-sm text-muted-foreground">Đã hiển thị tất cả ({pendingTotal} khách hàng)</div>
                         )}
                     </div>
                 </CardContent>
@@ -1513,7 +1850,11 @@ export default function DashboardClient({
                         <TableBody>
                             {topCommissions.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">Chưa có dữ liệu</TableCell></TableRow>}
                             {topCommissions.map(row => (
-                                <TableRow key={row.user}>
+                                <TableRow
+                                    key={row.user}
+                                    className="cursor-pointer hover:bg-muted/50"
+                                    onClick={() => openCommissionOrdersForUser(row.user)}
+                                >
                                     <TableCell>{nameFromUserId(row.user, userMap)}</TableCell>
                                     <TableCell className="text-right font-semibold">{fmtVND(row.total)}</TableCell>
                                 </TableRow>
@@ -1534,7 +1875,191 @@ export default function DashboardClient({
                 loaded={approvedSkip}
             />
 
-            {/* ===== POPUP: DUYỆT ===== */}
+            {/* ===== POPUP: Đơn theo nhân viên hoa hồng ===== */}
+            <Popup
+                open={openCommissionOrders}
+                onClose={() => {
+                    setOpenCommissionOrders(false);
+                    setSelectedCommissionUserId(null);
+                }}
+                header={
+                    selectedCommissionUserId
+                        ? `Đơn hoa hồng — ${nameFromUserId(selectedCommissionUserId, userMap)}`
+                        : 'Đơn hoa hồng'
+                }
+                widthClass="max-w-3xl"
+                footer={
+                    <Button
+                        variant="secondary"
+                        onClick={() => {
+                            setOpenCommissionOrders(false);
+                            setSelectedCommissionUserId(null);
+                        }}
+                    >
+                        <X className="w-4 h-4 mr-2" />Đóng
+                    </Button>
+                }
+            >
+                <div className="max-h-[420px] overflow-y-auto">
+                    <Table>
+                        <TableHeader className="sticky top-0 bg-secondary">
+                            <TableRow>
+                                <TableHead>Tên khách hàng</TableHead>
+                                <TableHead>Thời gian tạo đơn</TableHead>
+                                <TableHead className="text-right">Giá đơn</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {selectedCommissionOrders.length === 0 && (
+                                <TableRow>
+                                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                                        Không có đơn
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                            {selectedCommissionOrders.map((order, idx) => (
+                                <TableRow key={order.detailId || `commission-order-${idx}`}>
+                                    <TableCell className="font-medium">{order.customerName}</TableCell>
+                                    <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                                        {formatOrderCreatedAt({ createdAt: order.createdAt })}
+                                    </TableCell>
+                                    <TableCell className="text-right font-semibold">
+                                        {fmtVND(order.orderPrice)}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            </Popup>
+
+            {/* ===== POPUP: Đơn chờ duyệt theo khách hàng ===== */}
+            <Popup
+                open={openPendingCustomerOrders}
+                onClose={() => {
+                    setOpenPendingCustomerOrders(false);
+                    setSelectedPendingCustomer(null);
+                }}
+                header={
+                    selectedPendingCustomer
+                        ? `Đơn chờ duyệt — ${selectedPendingCustomer.name} (${selectedPendingCustomer.phone || '—'})`
+                        : 'Đơn chờ duyệt'
+                }
+                widthClass="max-w-4xl"
+                footer={
+                    <div className="flex items-center justify-end gap-2 w-full">
+                        <Button
+                            variant="secondary"
+                            onClick={() => {
+                                setOpenPendingCustomerOrders(false);
+                                setSelectedPendingCustomer(null);
+                                setOpenBulkApproveConfirm(false);
+                            }}
+                            disabled={bulkApproving}
+                        >
+                            <X className="w-4 h-4 mr-2" />Đóng
+                        </Button>
+                        {!readOnly && (selectedPendingCustomer?.orders?.length || 0) > 0 && (
+                            <Button
+                                onClick={() => setOpenBulkApproveConfirm(true)}
+                                disabled={bulkApproving}
+                            >
+                                <Check className="w-4 h-4 mr-2" />
+                                {bulkApproving ? 'Đang duyệt...' : 'Duyệt'}
+                            </Button>
+                        )}
+                    </div>
+                }
+            >
+                <div className="max-h-[420px] overflow-y-auto">
+                    <Table>
+                        <TableHeader className="sticky top-0 bg-secondary">
+                            <TableRow>
+                                <TableHead>Dịch vụ</TableHead>
+                                <TableHead>Thời gian tạo đơn</TableHead>
+                                <TableHead className="text-right">Giá đơn</TableHead>
+                                <TableHead className="text-right">Thao tác</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {(!selectedPendingCustomer?.orders || selectedPendingCustomer.orders.length === 0) && (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                        Không có đơn
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                            {(selectedPendingCustomer?.orders || []).map((order, idx) => {
+                                const p = readPricing(order.detail);
+                                const orderPrice = p.finalPrice || Number(order.detail?.revenue) || p.listPrice || 0;
+                                return (
+                                    <TableRow key={order.detail?._id || `pending-order-${idx}`}>
+                                        <TableCell className="font-medium">
+                                            {getServiceName(order.detail?.serviceId || order.detail?.selectedService)}
+                                        </TableCell>
+                                        <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                                            {formatOrderCreatedAt(order.detail)}
+                                        </TableCell>
+                                        <TableCell className="text-right font-semibold">
+                                            {fmtVND(orderPrice)}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => {
+                                                        setDetailsRow(order);
+                                                        setOpenDetails(true);
+                                                    }}
+                                                >
+                                                    <Eye className="w-4 h-4 mr-1" />Xem đơn
+                                                </Button>
+                                                {!readOnly && (
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => openApproveFor(order)}
+                                                    >
+                                                        <Check className="w-4 h-4 mr-1" />Duyệt đơn
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    </Table>
+                </div>
+            </Popup>
+
+            <AlertDialog open={openBulkApproveConfirm} onOpenChange={setOpenBulkApproveConfirm}>
+                <AlertDialogContent className="z-[60]">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Xác nhận duyệt hàng loạt</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm font-medium">
+                                Duyệt tất cả {selectedPendingCustomer?.orderCount ?? selectedPendingCustomer?.orders?.length ?? 0} đơn của khách {selectedPendingCustomer?.name || '—'}
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={bulkApproving}>Hủy</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={bulkApproving}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                submitBulkApproveAll();
+                            }}
+                        >
+                            {bulkApproving ? 'Đang duyệt...' : 'Xác nhận duyệt'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* ===== POPUP: DUYỆT (Admin / Manager / Cashier) ===== */}
+            {!readOnly && (
             <Popup
                 open={openApprove}
                 onClose={() => setOpenApprove(false)}
@@ -1778,6 +2303,7 @@ export default function DashboardClient({
                     </div>
                 </section>
             </Popup>
+            )}
 
             {/* ===== POPUP: XEM CHI TIẾT ===== */}
             <Popup

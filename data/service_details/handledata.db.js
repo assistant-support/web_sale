@@ -35,147 +35,276 @@ async function applyServiceDetailSourceFilter(query, sourceId) {
     }
 }
 
+const PENDING_DETAIL_POPULATE = [
+    { path: 'customerId', select: 'name phone assignees tags source' },
+    { path: 'serviceId', select: 'name code price' },
+    { path: 'sourceId', select: 'name' },
+    { path: 'createdBy', select: 'name avt' },
+    { path: 'approvedBy', select: 'name avt' },
+    { path: 'closedBy', select: 'name avt' },
+    { path: 'payments.receivedBy', select: 'name avt' },
+    { path: 'commissions.user', select: 'name avt' },
+    { path: 'costs.createdBy', select: 'name avt' },
+];
+
+function parseRangeStart(fromDate) {
+    if (typeof fromDate === 'string' && !fromDate.includes('T')) {
+        return new Date(fromDate + 'T00:00:00.000Z');
+    }
+    if (fromDate instanceof Date) {
+        const from = new Date(fromDate);
+        from.setUTCHours(0, 0, 0, 0);
+        return from;
+    }
+    const from = new Date(fromDate);
+    from.setHours(0, 0, 0, 0);
+    return from;
+}
+
+function parseRangeEndExclusive(toDate) {
+    if (typeof toDate === 'string' && !toDate.includes('T')) {
+        const to = new Date(toDate + 'T00:00:00.000Z');
+        to.setUTCDate(to.getUTCDate() + 1);
+        return to;
+    }
+    if (toDate instanceof Date) {
+        const to = new Date(toDate);
+        to.setUTCDate(to.getUTCDate() + 1);
+        to.setUTCHours(0, 0, 0, 0);
+        return to;
+    }
+    const to = new Date(toDate);
+    to.setDate(to.getDate() + 1);
+    to.setHours(0, 0, 0, 0);
+    return to;
+}
+
+/** Lọc theo ngày duyệt (ưu tiên) → ngày chốt → ngày tạo. */
+function applyApprovedDealsEffectiveDateRange(query, fromDate, toDate) {
+    if (!fromDate && !toDate) return;
+
+    const effectiveDate = { $ifNull: ['$approvedAt', { $ifNull: ['$closedAt', '$createdAt'] }] };
+    const conditions = [];
+    if (fromDate) {
+        conditions.push({ $gte: [effectiveDate, parseRangeStart(fromDate)] });
+    }
+    if (toDate) {
+        conditions.push({ $lt: [effectiveDate, parseRangeEndExclusive(toDate)] });
+    }
+    const dateExpr = conditions.length === 1 ? conditions[0] : { $and: conditions };
+
+    if (Array.isArray(query.$and)) {
+        query.$and.push({ $expr: dateExpr });
+    } else if (query.$expr) {
+        query.$and = [{ $expr: query.$expr }, { $expr: dateExpr }];
+        delete query.$expr;
+    } else {
+        query.$expr = dateExpr;
+    }
+}
+
+function applyPendingCreatedAtRange(query, fromDate, toDate) {
+    if (!fromDate && !toDate) return;
+    query.createdAt = {};
+    if (fromDate) {
+        if (typeof fromDate === 'string' && !fromDate.includes('T')) {
+            query.createdAt.$gte = new Date(fromDate + 'T00:00:00.000Z');
+        } else if (fromDate instanceof Date) {
+            const from = new Date(fromDate);
+            from.setUTCHours(0, 0, 0, 0);
+            query.createdAt.$gte = from;
+        } else {
+            const from = new Date(fromDate);
+            from.setHours(0, 0, 0, 0);
+            query.createdAt.$gte = from;
+        }
+    }
+    if (toDate) {
+        if (typeof toDate === 'string' && !toDate.includes('T')) {
+            const to = new Date(toDate + 'T00:00:00.000Z');
+            to.setUTCDate(to.getUTCDate() + 1);
+            query.createdAt.$lt = to;
+        } else if (toDate instanceof Date) {
+            const to = new Date(toDate);
+            to.setUTCDate(to.getUTCDate() + 1);
+            to.setUTCHours(0, 0, 0, 0);
+            query.createdAt.$lt = to;
+        } else {
+            const to = new Date(toDate);
+            to.setDate(to.getDate() + 1);
+            to.setHours(0, 0, 0, 0);
+            query.createdAt.$lt = to;
+        }
+    }
+}
+
+async function buildPendingServiceDetailQuery(params = {}) {
+    const { fromDate, toDate, sourceId, serviceId, saleUserId } = params;
+    const query = { approvalStatus: 'pending' };
+
+    applySaleServiceDetailScope(query, saleUserId);
+    await applyServiceDetailSourceFilter(query, sourceId);
+
+    if (serviceId && serviceId !== 'all') {
+        query.serviceId = serviceId;
+    }
+
+    applyPendingCreatedAtRange(query, fromDate, toDate);
+    return query;
+}
+
+function transformPendingDetailToRow(detail) {
+    const customer = detail.customerId || {};
+    return {
+        customerId: customer._id || detail.customerId,
+        name: customer.name || '',
+        phone: customer.phone || '',
+        assignees: customer.assignees || [],
+        tags: customer.tags || [],
+        care: [],
+        detail: {
+            _id: detail._id,
+            approvalStatus: detail.approvalStatus,
+            status: detail.status,
+            notes: detail.notes,
+            selectedService: detail.serviceId,
+            serviceId: detail.serviceId,
+            pricing: detail.pricing,
+            revenue: detail.revenue,
+            payments: detail.payments || [],
+            commissions: detail.commissions || [],
+            costs: detail.costs || [],
+            amountReceivedTotal: detail.amountReceivedTotal,
+            outstandingAmount: detail.outstandingAmount,
+            closedAt: detail.closedAt,
+            closedBy: detail.closedBy,
+            approvedAt: detail.approvedAt,
+            approvedBy: detail.approvedBy,
+            createdAt: detail.createdAt,
+            createdBy: detail.createdBy,
+            invoiceDriveIds: detail.invoiceDriveIds || [],
+            customerPhotosDriveIds: detail.customerPhotosDriveIds || [],
+            selectedCourse: detail.selectedCourse,
+            interestedServices: detail.interestedServices || [],
+            sourceId: detail.sourceId,
+            sourceDetails: detail.sourceDetails,
+        },
+    };
+}
+
 /**
  * Lấy danh sách đơn chờ duyệt từ service_details với filter thời gian và pagination
- * @param {Object} params - Tham số filter
- * @param {Date} params.fromDate - Ngày bắt đầu (optional)
- * @param {Date} params.toDate - Ngày kết thúc (optional)
- * @param {string} params.sourceId - ID nguồn (optional)
- * @param {string} params.serviceId - ID dịch vụ (optional)
- * @param {number} params.limit - Số lượng đơn cần lấy (default: 10)
- * @param {number} params.skip - Số lượng đơn cần bỏ qua (default: 0)
- * @returns {Promise<{data: Array, total: number}>} Danh sách đơn chờ duyệt với thông tin customer đầy đủ và tổng số
  */
 export async function getPendingApprovals(params = {}) {
     try {
         await connectDB();
-        
-        const { fromDate, toDate, sourceId, serviceId, limit = 10, skip = 0, saleUserId } = params;
-        
-        // Build query
-        const query = {
-            approvalStatus: 'pending'
-        };
 
-        applySaleServiceDetailScope(query, saleUserId);
-        
-        await applyServiceDetailSourceFilter(query, sourceId);
-        
-        // Filter theo dịch vụ
-        if (serviceId && serviceId !== 'all') {
-            query.serviceId = serviceId;
-        }
-        
-        // Filter theo thời gian tạo đơn (createdAt) nếu có
-        // Vì đây là đơn chờ duyệt, nên filter theo createdAt
-        // Sử dụng $gte và $lt (không dùng $lte) để chính xác hơn theo gợi ý
-        if (fromDate || toDate) {
-            query.createdAt = {};
-            if (fromDate) {
-                // Set thời gian bắt đầu của ngày (00:00:00.000Z)
-                // Đảm bảo parse đúng format ISO với timezone UTC
-                if (typeof fromDate === 'string' && !fromDate.includes('T')) {
-                    // Nếu là string YYYY-MM-DD, thêm T00:00:00.000Z
-                    query.createdAt.$gte = new Date(fromDate + 'T00:00:00.000Z');
-                } else if (fromDate instanceof Date) {
-                    // Nếu là Date object, tạo mới và set về 00:00:00 UTC
-                    const from = new Date(fromDate);
-                    from.setUTCHours(0, 0, 0, 0);
-                    query.createdAt.$gte = from;
-                } else {
-                    const from = new Date(fromDate);
-                    from.setHours(0, 0, 0, 0);
-                    query.createdAt.$gte = from;
-                }
-            }
-            if (toDate) {
-                // Set thời gian kết thúc: dùng $lt với ngày tiếp theo (00:00:00.000Z)
-                // Ví dụ: toDate = 2026-02-19 => $lt = 2026-02-20T00:00:00.000Z
-                // Điều này đảm bảo lấy tất cả đơn trong ngày 19/02 (từ 00:00:00 đến 23:59:59)
-                if (typeof toDate === 'string' && !toDate.includes('T')) {
-                    // Nếu là string YYYY-MM-DD, tính ngày tiếp theo
-                    const to = new Date(toDate + 'T00:00:00.000Z');
-                    to.setUTCDate(to.getUTCDate() + 1);
-                    query.createdAt.$lt = to;
-                } else if (toDate instanceof Date) {
-                    const to = new Date(toDate);
-                    to.setUTCDate(to.getUTCDate() + 1);
-                    to.setUTCHours(0, 0, 0, 0);
-                    query.createdAt.$lt = to;
-                } else {
-                    const to = new Date(toDate);
-                    to.setDate(to.getDate() + 1);
-                    to.setHours(0, 0, 0, 0);
-                    query.createdAt.$lt = to;
-                }
-            }
-        }
-        
-        // Đếm tổng số đơn phù hợp
+        const { limit = 10, skip = 0 } = params;
+        const query = await buildPendingServiceDetailQuery(params);
         const total = await ServiceDetail.countDocuments(query);
-        
-        // Query từ service_details với pagination
+
         const pendingDetails = await ServiceDetail.find(query)
-            .populate('customerId', 'name phone assignees tags source')
-            .populate('serviceId', 'name code price')
-            .populate('sourceId', 'name')
-            .populate('createdBy', 'name avt')
-            .populate('approvedBy', 'name avt')
-            .populate('closedBy', 'name avt')
-            .populate('payments.receivedBy', 'name avt')
-            .populate('commissions.user', 'name avt')
-            .populate('costs.createdBy', 'name avt')
-            .sort({ createdAt: -1 }) // Sort theo createdAt DESC (mới nhất → cũ nhất)
+            .populate(PENDING_DETAIL_POPULATE)
+            .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean();
-        
-        // Transform data để tương thích với format hiện tại
-        const transformed = pendingDetails.map(detail => {
-            const customer = detail.customerId || {};
-            return {
-                customerId: customer._id || detail.customerId,
-                name: customer.name || '',
-                phone: customer.phone || '',
-                assignees: customer.assignees || [],
-                tags: customer.tags || [],
-                care: [], // Không lấy care logs ở đây để tối ưu
-                detail: {
-                    _id: detail._id,
-                    approvalStatus: detail.approvalStatus,
-                    status: detail.status,
-                    notes: detail.notes,
-                    selectedService: detail.serviceId,
-                    pricing: detail.pricing,
-                    revenue: detail.revenue,
-                    payments: detail.payments || [],
-                    commissions: detail.commissions || [],
-                    costs: detail.costs || [],
-                    amountReceivedTotal: detail.amountReceivedTotal,
-                    outstandingAmount: detail.outstandingAmount,
-                    closedAt: detail.closedAt,
-                    closedBy: detail.closedBy,
-                    approvedAt: detail.approvedAt,
-                    approvedBy: detail.approvedBy,
-                    createdAt: detail.createdAt,
-                    createdBy: detail.createdBy,
-                    invoiceDriveIds: detail.invoiceDriveIds || [],
-                    customerPhotosDriveIds: detail.customerPhotosDriveIds || [],
-                    selectedCourse: detail.selectedCourse,
-                    interestedServices: detail.interestedServices || [],
-                    sourceId: detail.sourceId,
-                    sourceDetails: detail.sourceDetails,
-                }
-            };
-        });
-        
+
+        const transformed = pendingDetails.map(transformPendingDetailToRow);
+
         return {
             data: JSON.parse(JSON.stringify(transformed)),
-            total
+            total,
         };
     } catch (error) {
         console.error('Error in getPendingApprovals:', error);
-        // Fallback: trả về mảng rỗng nếu có lỗi
+        return { data: [], total: 0 };
+    }
+}
+
+/**
+ * Danh sách chờ duyệt nhóm theo khách hàng (mỗi dòng = 1 khách).
+ */
+export async function getPendingApprovalsGroupedByCustomer(params = {}) {
+    try {
+        await connectDB();
+
+        const { limit = 10, skip = 0 } = params;
+        const query = await buildPendingServiceDetailQuery(params);
+
+        const aggResult = await ServiceDetail.aggregate([
+            { $match: query },
+            {
+                $group: {
+                    _id: '$customerId',
+                    latestCreatedAt: { $max: '$createdAt' },
+                    orderCount: { $sum: 1 },
+                    totalListPrice: { $sum: { $ifNull: ['$pricing.listPrice', 0] } },
+                },
+            },
+            { $sort: { latestCreatedAt: -1 } },
+            {
+                $facet: {
+                    data: [{ $skip: skip }, { $limit: limit }],
+                    meta: [{ $count: 'total' }],
+                },
+            },
+        ]);
+
+        const groups = aggResult[0]?.data || [];
+        const total = aggResult[0]?.meta[0]?.total || 0;
+
+        if (groups.length === 0) {
+            return { data: [], total: 0 };
+        }
+
+        const customerIds = groups
+            .map((g) => g._id)
+            .filter((id) => id && mongoose.Types.ObjectId.isValid(String(id)));
+
+        const [customers, allOrders] = await Promise.all([
+            Customer.find({ _id: { $in: customerIds } })
+                .select('name phone assignees tags')
+                .lean(),
+            ServiceDetail.find({ ...query, customerId: { $in: customerIds } })
+                .populate(PENDING_DETAIL_POPULATE)
+                .sort({ createdAt: -1 })
+                .lean(),
+        ]);
+
+        const customerMap = new Map(customers.map((c) => [String(c._id), c]));
+        const ordersByCustomer = new Map();
+
+        for (const detail of allOrders) {
+            const cid = String(detail.customerId?._id || detail.customerId);
+            if (!ordersByCustomer.has(cid)) ordersByCustomer.set(cid, []);
+            ordersByCustomer.get(cid).push(transformPendingDetailToRow(detail));
+        }
+
+        const data = groups.map((g) => {
+            const cid = String(g._id);
+            const customer = customerMap.get(cid) || {};
+            const orders = ordersByCustomer.get(cid) || [];
+            const first = orders[0];
+            return {
+                customerId: cid,
+                name: customer.name || first?.name || '',
+                phone: customer.phone || first?.phone || '',
+                assignees: customer.assignees || first?.assignees || [],
+                tags: customer.tags || first?.tags || [],
+                latestCreatedAt: g.latestCreatedAt,
+                orderCount: g.orderCount,
+                totalListPrice: g.totalListPrice,
+                orders,
+            };
+        });
+
+        return {
+            data: JSON.parse(JSON.stringify(data)),
+            total,
+        };
+    } catch (error) {
+        console.error('Error in getPendingApprovalsGroupedByCustomer:', error);
         return { data: [], total: 0 };
     }
 }
@@ -212,42 +341,8 @@ export async function getApprovedDeals(params = {}) {
             query.serviceId = serviceId;
         }
         
-        // Filter theo thời gian (sử dụng closedAt với $gte và $lt)
-        if (fromDate || toDate) {
-            query.closedAt = {};
-            if (fromDate) {
-                // Set thời gian bắt đầu của ngày (00:00:00.000Z)
-                if (typeof fromDate === 'string' && !fromDate.includes('T')) {
-                    query.closedAt.$gte = new Date(fromDate + 'T00:00:00.000Z');
-                } else if (fromDate instanceof Date) {
-                    const from = new Date(fromDate);
-                    from.setUTCHours(0, 0, 0, 0);
-                    query.closedAt.$gte = from;
-                } else {
-                    const from = new Date(fromDate);
-                    from.setHours(0, 0, 0, 0);
-                    query.closedAt.$gte = from;
-                }
-            }
-            if (toDate) {
-                // Set thời gian kết thúc: dùng $lt với ngày tiếp theo (00:00:00.000Z)
-                if (typeof toDate === 'string' && !toDate.includes('T')) {
-                    const to = new Date(toDate + 'T00:00:00.000Z');
-                    to.setUTCDate(to.getUTCDate() + 1);
-                    query.closedAt.$lt = to;
-                } else if (toDate instanceof Date) {
-                    const to = new Date(toDate);
-                    to.setUTCDate(to.getUTCDate() + 1);
-                    to.setUTCHours(0, 0, 0, 0);
-                    query.closedAt.$lt = to;
-                } else {
-                    const to = new Date(toDate);
-                    to.setDate(to.getDate() + 1);
-                    to.setHours(0, 0, 0, 0);
-                    query.closedAt.$lt = to;
-                }
-            }
-        }
+        // Filter theo thời gian: ưu tiên approvedAt (ngày duyệt) để đơn vừa duyệt hiện đúng khoảng lọc
+        applyApprovedDealsEffectiveDateRange(query, fromDate, toDate);
         
         // Đếm tổng số đơn phù hợp
         const total = await ServiceDetail.countDocuments(query);
@@ -263,7 +358,7 @@ export async function getApprovedDeals(params = {}) {
             .populate('payments.receivedBy', 'name avt')
             .populate('commissions.user', 'name avt')
             .populate('costs.createdBy', 'name avt')
-            .sort({ closedAt: -1 }) // Sort theo closedAt DESC (mới nhất → cũ nhất)
+            .sort({ approvedAt: -1, closedAt: -1, createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean();

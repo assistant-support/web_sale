@@ -225,6 +225,14 @@ const toYMD = (d) => {
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
 };
+
+/** user populate object hoặc ObjectId string */
+const resolveCallUserId = (call) => {
+    const u = call?.user;
+    if (!u) return '';
+    if (typeof u === 'object') return String(u._id || u.id || u.$oid || '');
+    return String(u);
+};
 /* ============== main ============== */
 export default function TelesalesReportClient({ initialData = [], user = [] }) {
     // filters
@@ -251,10 +259,15 @@ export default function TelesalesReportClient({ initialData = [], user = [] }) {
     }, [user]);
 
     // listbox options
-    const userOptions = useMemo(() => ([
-        { value: 'all', label: 'Tất cả nhân viên' },
-        ...(user || []).map(u => ({ value: String(u._id), label: u.name }))
-    ]), [user]);
+    const userOptions = useMemo(() => {
+        const staff = (user || [])
+            .filter((u) => u?._id && u?.name)
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'vi'));
+        return [
+            { value: 'all', label: 'Tất cả nhân viên' },
+            ...staff.map((u) => ({ value: String(u._id), label: u.name })),
+        ];
+    }, [user]);
 
     const groupOptions = useMemo(() => ([
         { value: 'all', label: 'Tất cả nhóm' },
@@ -274,8 +287,8 @@ export default function TelesalesReportClient({ initialData = [], user = [] }) {
             if (start && ct < start) return false;
             if (end && ct > end) return false;
 
-            // filter by user
-            const uid = String(c.user?._id || '');
+            // filter by nhân viên thực hiện cuộc gọi
+            const uid = resolveCallUserId(c);
             if (userFilter !== 'all' && uid !== userFilter) return false;
 
             // filter by group (lookup from users list)
@@ -426,7 +439,7 @@ export default function TelesalesReportClient({ initialData = [], user = [] }) {
                 />
                 <StatCard
                     title="Không liên lạc được"
-                    value={`${stats.noContactCount} (${Number(stats.noContactCount / stats.totalCalls * 100).toFixed(2)}%)`}
+                    value={`${stats.noContactCount} (${stats.totalCalls ? ((stats.noContactCount / stats.totalCalls) * 100).toFixed(2) : '0.00'}%)`}
                     icon={PhoneMissed}
                     description="Cuộc gọi thất bại / không bắt máy"
                     color="#ef4444"

@@ -4,6 +4,7 @@ import connectDB from "@/config/connectDB";
 import Customer from "@/models/customer.model";
 import mongoose from 'mongoose';
 import checkAuthToken from '@/utils/checktoken';
+import { isCareReadOnlyRole } from '@/utils/saleScope';
 import User from '@/models/users';
 import '@/models/zalo.model' // Giữ lại nếu Zalo Account vẫn liên quan đến Customer
 import ScheduledJob from "@/models/schedule";
@@ -656,6 +657,12 @@ export async function updateCustomerInfo(previousState, formData) {
         return { success: false, error: 'Không nhận được dữ liệu từ form.' };
     }
 
+    const session = await checkAuthToken();
+    if (!session?.id) return { success: false, error: 'Yêu cầu đăng nhập.' };
+    if (isCareReadOnlyRole(session.role)) {
+        return { success: false, error: 'Thu ngân chỉ được xem trang Chăm sóc, không thể thao tác.' };
+    }
+
     const id = formData.get('_id');
     if (!id) return { success: false, error: 'Thiếu ID khách hàng.' };
 
@@ -960,6 +967,9 @@ export async function updateCustomerInfo(previousState, formData) {
 export async function addCareNoteAction(previousState, formData) {
     const user = await checkAuthToken();
     if (!user || !user.id) return { success: false, message: 'Bạn cần đăng nhập để thực hiện hành động này.' };
+    if (isCareReadOnlyRole(user.role)) {
+        return { success: false, message: 'Thu ngân chỉ được xem trang Chăm sóc, không thể thao tác.' };
+    }
     if (!user.role.includes('Admin') && !user.role.includes('Sale') && !user.role.includes('Manager')) {
         return { success: false, message: 'Bạn không có quyền thực hiện chức năng này' };
     }

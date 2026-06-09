@@ -26,6 +26,7 @@ export default async function CalendarPage({ searchParams }) {
     const canViewAllAppointments =
         userInfo.role.includes('Admin') ||
         userInfo.role.includes('Admin Sale') ||
+        userInfo.role.includes('Cashier') ||
         userInfo.role.includes('Manager');
     const isAdmin = canViewAllAppointments;
 

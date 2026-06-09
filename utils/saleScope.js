@@ -8,10 +8,35 @@ export function normalizeRoles(roles) {
     return s ? [s] : [];
 }
 
-/** Admin Sale (không Admin/Manager) — Thống kê chỉ Doanh thu, xem toàn bộ doanh thu. */
-export function isAdminSaleRestrictedRole(roles) {
+/** Admin Sale / Cashier (không Admin/Manager) — Thống kê chỉ tab Doanh thu, xem toàn bộ doanh thu. */
+export function isRevenueOnlyStatsRole(roles) {
     const r = normalizeRoles(roles);
-    return r.includes('Admin Sale') && !r.includes('Admin') && !r.includes('Manager');
+    if (r.includes('Admin') || r.includes('Manager')) return false;
+    return r.includes('Admin Sale') || r.includes('Cashier');
+}
+
+/** @deprecated alias — dùng isRevenueOnlyStatsRole */
+export function isAdminSaleRestrictedRole(roles) {
+    return isRevenueOnlyStatsRole(roles);
+}
+
+/** Admin / Manager / Cashier được duyệt hoặc từ chối đơn doanh thu. */
+export function canApproveRevenueDealsRole(roles) {
+    const r = normalizeRoles(roles);
+    return r.includes('Admin') || r.includes('Manager') || r.includes('Cashier');
+}
+
+/** Thu ngân — trang Chăm sóc chỉ xem, không thao tác. */
+export function isCareReadOnlyRole(roles) {
+    const r = normalizeRoles(roles);
+    if (r.includes('Admin') || r.includes('Manager')) return false;
+    return r.includes('Cashier');
+}
+
+/** Duyệt nhanh đơn chờ trên pipeline Chăm sóc — không gồm Thu ngân. */
+export function canApproveCarePipelineRole(roles) {
+    const r = normalizeRoles(roles);
+    return r.includes('Admin') || r.includes('Manager');
 }
 
 /** Sale thuần — Thống kê đủ tab nhưng chỉ dữ liệu của chính sale đó. */
@@ -21,7 +46,8 @@ export function isSaleOnlyRole(roles) {
         r.includes('Sale') &&
         !r.includes('Admin') &&
         !r.includes('Manager') &&
-        !r.includes('Admin Sale')
+        !r.includes('Admin Sale') &&
+        !r.includes('Cashier')
     );
 }
 

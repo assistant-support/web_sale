@@ -58,7 +58,7 @@ const useBreakpoint = () => {
 // =============================================================
 // == 2. COMPONENT BẢNG DỮ LIỆU CHÍNH
 // =============================================================
-export default function CustomerTable({ zalo, data = [], service, total = 0, user, allUsers = [], formSources = [], selectedCustomers, setSelectedCustomers, viewMode, discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
+export default function CustomerTable({ zalo, data = [], service, total = 0, user, allUsers = [], formSources = [], selectedCustomers, setSelectedCustomers, viewMode, discountPrograms = [], unitMedicines = [], treatmentDoctors = [], careReadOnly = false }) {
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { replace } = useRouter();
@@ -148,7 +148,9 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
                 <Table className="w-full">
                     <TableHeader className="sticky top-0 bg-card">
                         <TableRow>
-                            <TableHead className="w-[60px]"><Checkbox checked={areAllSelectedOnPage} onCheckedChange={handleSelectPage} /></TableHead>
+                            {!careReadOnly && (
+                                <TableHead className="w-[60px]"><Checkbox checked={areAllSelectedOnPage} onCheckedChange={handleSelectPage} /></TableHead>
+                            )}
                             <TableHead className="w-[80px]"><h6>STT</h6></TableHead>
                             {renderedColumns.map(colKey => (
                                 <TableHead key={colKey}><h6>{ALL_COLUMNS.find(c => c.key === colKey)?.header}</h6></TableHead>
@@ -174,19 +176,23 @@ export default function CustomerTable({ zalo, data = [], service, total = 0, use
                                     allUsers={allUsers}
                                     formSources={formSources}
                                     service={service}
+                                    careReadOnly={careReadOnly}
                                 />
                             ))
                         ) : (
-                            <TableRow><TableCell colSpan={renderedColumns.length + 2} className="h-24 text-center"><h6>Không có dữ liệu.</h6></TableCell></TableRow>
+                            <TableRow><TableCell colSpan={renderedColumns.length + (careReadOnly ? 1 : 2)} className="h-24 text-center"><h6>Không có dữ liệu.</h6></TableCell></TableRow>
                         )}
                     </TableBody>
                 </Table>
             </div>
 
             <div className="flex items-center justify-between p-2 border-t">
-                <div className="flex-1 text-sm text-muted-foreground">
-                    <h6>{selectedCustomers.size} của {total} dòng được chọn.</h6>
-                </div>
+                {!careReadOnly && (
+                    <div className="flex-1 text-sm text-muted-foreground">
+                        <h6>{selectedCustomers.size} của {total} dòng được chọn.</h6>
+                    </div>
+                )}
+                {careReadOnly && <div className="flex-1" />}
                 <div className="flex items-center gap-2 md:gap-4 lg:gap-8">
                     <div className="flex items-center gap-2">
                         <h6 className="text-sm font-medium hidden md:block">Số dòng:</h6>

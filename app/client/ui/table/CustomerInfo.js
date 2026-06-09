@@ -482,7 +482,7 @@ const updateFormSchema = z.object({
     sourceFormId: z.string().optional(),
 });
 
-export default function CustomerInfo({ customer, onClose, service = [], formSources = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [] }) {
+export default function CustomerInfo({ customer, onClose, service = [], formSources = [], discountPrograms = [], unitMedicines = [], treatmentDoctors = [], careReadOnly = false }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [coverImage, setCoverImage] = useState(null);
     const [coverImageRemoved, setCoverImageRemoved] = useState(false);
@@ -1084,6 +1084,11 @@ export default function CustomerInfo({ customer, onClose, service = [], formSour
         return result;
     }, [customer.serviceDetails, customer.tags, customer.service_use, service, treatmentSummary]);
 
+    const customerTreatmentsUsed = useMemo(
+        () => customerTreatments.filter((t) => Array.isArray(t.done) && t.done.length > 0),
+        [customerTreatments]
+    );
+
     // Load danh sách khu vực khách hàng
     const loadAreaCustomersData = async () => {
         if (areaCustomerOptions.length > 0) {
@@ -1588,7 +1593,8 @@ export default function CustomerInfo({ customer, onClose, service = [], formSour
     return (
         <Form {...form}>
             {/* Không cần bất kỳ component thông báo hay lớp phủ nào ở đây */}
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-4 flex-1 scroll">
+            <form onSubmit={careReadOnly ? (e) => e.preventDefault() : form.handleSubmit(onSubmit)} className="space-y-4 p-4 flex-1 scroll">
+                <fieldset disabled={careReadOnly} className="space-y-4 border-0 p-0 m-0 min-w-0">
                 <h4 className='font-semibold' style={{ marginBottom: 16 }}>Thông tin cơ bản</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="name" render={({ field }) => (<FormItem><Label><h6>Tên khách hàng *</h6></Label><FormControl><Input {...field} /></FormControl></FormItem>)} />
@@ -2014,121 +2020,48 @@ export default function CustomerInfo({ customer, onClose, service = [], formSour
                     )}
                 />
 
-                {/* Liệu trình của khách hàng */}
+                </fieldset>
+
+                {/* Liệu trình — ngoài fieldset để Thu ngân vẫn mở/xem được */}
                 <div className="mt-6">
                     <h6 className="font-semibold mb-3">Liệu trình của khách hàng</h6>
-                    {customerTreatments.length === 0 ? (
+                    {customerTreatmentsUsed.length === 0 ? (
                         <div className="text-center text-muted-foreground py-4 border rounded-md">
-                            Chưa có liệu trình nào
+                            Chưa có liệu trình đã sử dụng
                         </div>
                     ) : (
                         <Accordion type="single" collapsible className="w-full">
-                            {customerTreatments.map((treatment, index) => {
-                                const formatDate = (date) => {
-                                    if (!date) return '';
-                                    const d = new Date(date);
-                                    if (isNaN(d.getTime())) return '';
-                                    return d.toLocaleDateString('vi-VN', { 
-                                        day: '2-digit', 
-                                        month: '2-digit', 
-                                        year: 'numeric' 
-                                    });
-                                };
-
-                                return (
-                                    <AccordionItem key={index} value={`treatment-${index}`}>
-                                        <AccordionTrigger className="hover:no-underline">
-                                            <div className="flex items-center justify-between w-full pr-4">
-                                                <span className="font-semibold">{treatment.serviceName}</span>
+                            {customerTreatmentsUsed.map((treatment, index) => (
+                                <AccordionItem key={treatment.serviceId || index} value={`treatment-${index}`}>
+                                    <AccordionTrigger className="hover:no-underline">
+                                        <div className="flex items-center justify-between w-full pr-4">
+                                            <span className="font-semibold">{treatment.serviceName}</span>
+                                        </div>
+                                    </AccordionTrigger>
+                                    <AccordionContent>
+                                        <div className="space-y-4 pt-2">
+                                            <div>
+                                                <h6 className="font-semibold mb-2 text-sm">Liệu trình đã làm:</h6>
+                                                <div className="space-y-2">
+                                                    {treatment.done.map((item, idx) => (
+                                                        <TreatmentDoseAccordion
+                                                            key={item.sourceId || `done-${idx}`}
+                                                            item={item}
+                                                        />
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </AccordionTrigger>
-                                        <AccordionContent>
-                                            <div className="space-y-4 pt-2">
-                                                {/* Liệu trình đã làm */}
-                                                {treatment.done.length > 0 && (
-                                                    <div>
-                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình đã làm:</h6>
-                                                        <div className="space-y-2">
-                                                            {treatment.done.map((item, idx) => (
-                                                                <TreatmentDoseAccordion
-                                                                    key={item.sourceId || `done-${idx}`}
-                                                                    item={item}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {/* Liệu trình còn lại (số buổi) */}
-                                                {/* {treatment.remaining > 0 && (
-                                                    <div>
-                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình còn lại của dịch vụ:</h6>
-                                                        <div className="space-y-2">
-                                                            {Array.from({ length: treatment.remaining }).map((_, idx) => (
-                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-amber-50">
-                                                                    <span className="text-sm">
-                                                                        Buổi {idx + 1} - Thời gian sử dụng liệu trình trước đó: {treatment.lastUsedDate ? formatDate(treatment.lastUsedDate) : '—'}
-                                                                    </span>
-                                                                    <Button 
-                                                                        size="sm" 
-                                                                        variant="outline"
-                                                                        className="text-amber-700 border-amber-300 hover:bg-amber-100"
-                                                                        onClick={() => {
-                                                                            // TODO: Nhắc nhân viên
-                                                                            console.log('Nhắc nhân viên cho:', treatment.serviceName);
-                                                                        }}
-                                                                    >
-                                                                        Nhắc nhân viên
-                                                                    </Button>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )} */}
-
-                                                {/* Liệu trình chưa làm - chỉ hiển thị tên liệu trình */}
-                                                    {treatment.notDone && treatment.notDone.length > 0 && (
-                                                    <div>
-                                                        <h6 className="font-semibold mb-2 text-sm">Liệu trình chưa làm:</h6>
-                                                        <div className="space-y-2">
-                                                            {treatment.notDone.map((course, idx) => (
-                                                                <div key={idx} className="flex items-center justify-between p-2 border rounded-md bg-red-50">
-                                                                    <span className="text-sm">
-                                                                        {`${course.courseName} - Chưa thực hiện`}
-                                                                    </span>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        className="text-red-700 border-red-300 hover:bg-red-100"
-                                                                        onClick={() => {
-                                                                            console.log('Nhắc nhân viên cho liệu trình chưa làm:', course.courseName);
-                                                                        }}
-                                                                    >
-                                                                        Nhắc nhân viên
-                                                                    </Button>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {treatment.done.length === 0 && treatment.remaining === 0 && (!treatment.notDone || treatment.notDone.length === 0) && (
-                                                    <div className="text-center text-muted-foreground py-2">
-                                                        Chưa có liệu trình
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </AccordionContent>
-                                    </AccordionItem>
-                                );
-                            })}
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            ))}
                         </Accordion>
                     )}
                 </div>
 
                 {/* Lịch sử - Sử dụng dịch vụ */}
                 <div className="mt-6">
-                    <h6 className="font-semibold mb-3">Lịch sử - Sử dụng dịch vụ</h6>
+                    <h6 className="font-semibold mb-3">Lịch sử - Sử dụng dịch vụ (Chỉ được tính khi dịch vụ đó có liệu trình được thực hiện)</h6>
                     <div className="border-2 border-black rounded-lg p-4 space-y-6">
                         {/* Hiển thị loading state */}
                         {isLoadingServiceDetails ? (
@@ -2197,8 +2130,8 @@ export default function CustomerInfo({ customer, onClose, service = [], formSour
                                 );
                             })
                         ) : (
-                            // Nếu không có liệu trình, hiển thị form có thể chỉnh sửa
-                            <>
+                            // Nếu không có liệu trình, hiển thị form có thể chỉnh sửa (khóa với Thu ngân)
+                            <fieldset disabled={careReadOnly} className="border-0 p-0 m-0 min-w-0 space-y-4">
                                 <div className="grid gap-2">
                                     <Input 
                                         value="Chưa có liệu trình"
@@ -2241,16 +2174,20 @@ export default function CustomerInfo({ customer, onClose, service = [], formSour
                                         )}
                                     />
                                 </div>
-                            </>
+                            </fieldset>
                         )}
                     </div>
                 </div>
 
                 <DialogFooter className="pt-4">
-                    <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>Hủy</Button>
-                    <Button type="submit" disabled={isSubmitting}>
-                        {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /><h6 style={{ color: 'white' }}>Đang lưu...</h6></> : <h6 style={{ color: 'white' }}>Lưu thay đổi</h6>}
+                    <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
+                        {careReadOnly ? 'Đóng' : 'Hủy'}
                     </Button>
+                    {!careReadOnly && (
+                        <Button type="submit" disabled={isSubmitting}>
+                            {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /><h6 style={{ color: 'white' }}>Đang lưu...</h6></> : <h6 style={{ color: 'white' }}>Lưu thay đổi</h6>}
+                        </Button>
+                    )}
                 </DialogFooter>
             </form>
             <Noti 
